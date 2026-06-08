@@ -4,7 +4,7 @@ plugins {
 
 android {
     compileSdk 34
-    namespace 'com.burdenenterprises.farmdesk'
+    namespace 'com.ltlfarm.farmdesk'
 
     defaultConfig {
         applicationId "com.burdenenterprises.farmdesk"
