@@ -3482,10 +3482,10 @@ async function fetchAnimalUUIDs(silent = false) {
 
     // include=image fetches the image file data alongside each log in one request
     const [actRes, obsRes, medRes, maintRes] = await Promise.all([
-      fetch(apiUrl("/api/log/activity?page[limit]=200&sort=-timestamp&include=image"),    { headers: authHeaders }),
-      fetch(apiUrl("/api/log/observation?page[limit]=200&sort=-timestamp&include=image"), { headers: authHeaders }),
-      fetch(apiUrl("/api/log/medical?page[limit]=200&sort=-timestamp&include=image"),     { headers: authHeaders }),
-      fetch(apiUrl("/api/log/maintenance?page[limit]=200&sort=-timestamp&include=image"), { headers: authHeaders })
+      fetch(apiUrl("/api/log/activity?page[limit]=30&sort=-timestamp&include=image"),    { headers: authHeaders }),
+      fetch(apiUrl("/api/log/observation?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
+      fetch(apiUrl("/api/log/medical?page[limit]=30&sort=-timestamp&include=image"),     { headers: authHeaders }),
+      fetch(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders })
     ]);
 
     const allLogs = [];
@@ -4370,6 +4370,73 @@ async function refreshAssets(silent) {
     });
     buildInjectionMaps();
     localStorage.setItem(SD_LS.assets, JSON.stringify(assets));
+
+    // ===== Fetch recent farmOS inventory log history for audit =====
+    try {
+      if (!silent) setLoading(true, 'Fetching log history...');
+      // Fetch last 100 activity logs that have quantities — filter client-side
+      const assetIds = new Set(assets.map(a => a.uuid));
+      const logRes = await fetch(
+        apiUrl('/api/log/activity?page[limit]=100&sort=-timestamp&include=quantity'),
+        { headers: h }
+      );
+      if (logRes.ok) {
+        const logData = await logRes.json();
+        // Build quantity map from included
+        const qMap = {};
+        (logData.included || []).forEach(inc => {
+          if (inc.type === 'quantity--standard' || inc.type.startsWith('quantity--')) {
+            qMap[inc.id] = inc;
+          }
+        });
+        const fetchedHistory = [];
+        (logData.data || []).forEach(log => {
+          // Get quantities for this log
+          const qRefs = log.relationships?.quantity?.data || [];
+          qRefs.forEach(qRef => {
+            const q = qMap[qRef.id];
+            if (!q) return;
+            const invAssetId = q.relationships?.inventory_asset?.data?.id;
+            if (!invAssetId || !assetIds.has(invAssetId)) return;
+            const adj    = q.attributes?.inventory_adjustment;
+            if (!adj) return;
+            const asset  = assets.find(a => a.uuid === invAssetId);
+            const amount = parseFloat(q.attributes?.value?.numerator || 0) /
+                           parseFloat(q.attributes?.value?.denominator || 1);
+            const ts     = log.attributes?.timestamp;
+            const isoTime = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
+            const notes  = log.attributes?.notes?.value || '';
+            const logId  = 'farmos_' + log.id + '_' + qRef.id;
+            fetchedHistory.push({
+              id:      logId,
+              name:    asset ? asset.name : invAssetId,
+              action:  adj,
+              amount,
+              notes,
+              seller:  '',
+              lot:     '',
+              time:    isoTime,
+              synced:  true,
+              source:  'farmOS'
+            });
+          });
+        });
+        if (fetchedHistory.length > 0) {
+          // Merge: keep local unsynced entries, replace/add farmOS ones
+          const localOnly = adjHistory.filter(h => !h.id.startsWith('farmos_') && !h.synced === false);
+          // Deduplicate by id
+          const merged = [...localOnly];
+          fetchedHistory.forEach(fh => {
+            if (!merged.find(x => x.id === fh.id)) merged.push(fh);
+          });
+          // Sort newest first, cap at 200
+          merged.sort((a, b) => new Date(b.time) - new Date(a.time));
+          adjHistory = merged.slice(0, 200);
+          localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
+        }
+      }
+    } catch(e) { /* log history fetch is optional — don't break on failure */ }
+
     const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     localStorage.setItem(SD_LS.lastSync, now);
     document.getElementById('syncStatus').textContent = 'Synced ' + now;
