@@ -2022,7 +2022,7 @@ function makeLogEl(l, showActions = false) {
     ${detail ? `<div class="log-detail log-preview">${detail}</div>` : ""}
     <div class="log-time">${t}${l.loggedBy ? " \u00B7 " + l.loggedBy : ""}${statusTag}</div>
     <div class="log-drawer" style="display:none;">
-      ${l.data && l.data.photo ? `<img src="${l.data.photo}" data-photo-src="${l.data.photo}" style="width:100%;border-radius:6px;margin-top:6px;max-height:200px;object-fit:cover;cursor:zoom-in;" onclick="openPhotoViewer(this.src||this.dataset.photoSrc)" onerror="loadPhotoWithAuth(this)">` : ""}
+      ${l.data && l.data.photo ? `<img src="${l.data.photo}" data-photo-src="${l.data.photo}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;" onclick="openPhotoViewer(this.src||this.dataset.photoSrc)" onerror="loadPhotoWithAuth(this)">` : ""}
     </div>
   `;
 
@@ -4463,7 +4463,7 @@ function renderDashboard() {
         <button class="adj-btn"           onclick="event.stopPropagation();quickAdj('${a.uuid}', 1)">+</button>
       </div>
       <div class="card-drawer" id="drawer-${a.uuid}">
-        ${a.photo ? `<img src="${a.photo}" style="width:100%;border-radius:6px;max-height:180px;object-fit:cover;cursor:zoom-in;margin-bottom:8px;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : ''}
+        ${a.photo ? `<img src="${a.photo}" style="width:100%;border-radius:6px;object-fit:contain;cursor:zoom-in;margin-bottom:8px;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : ''}
         ${a.notes ? `<div style="color:#aaa;font-size:13px;margin-bottom:8px;">${a.notes.replace(/\n/g,'<br>')}</div>` : ''}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button onclick="event.stopPropagation();openAdjust('${a.uuid}')" style="flex:1;margin:0;padding:12px;font-size:14px;">📝 Adjust</button>
