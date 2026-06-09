@@ -1323,7 +1323,7 @@ function onAndroidPhoto(dataUrl) {
     orientedCanvas(img, full, 800, canvas => {
       currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
       const preview = document.getElementById("photoPreview");
-      if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;">`;
+      if (preview) preview.innerHTML = `<div style="position:relative;"><img id="gdPhotoPreviewImg" src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;"><button type="button" onclick="rotateBase64CW(currentPhoto,d=>{currentPhoto=d;const el=document.getElementById('gdPhotoPreviewImg');if(el)el.src=d;})" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>`;
       const clearBtn = document.getElementById("clearPhotoBtn");
       if (clearBtn) clearBtn.style.display = "inline-block";
     });
@@ -1436,6 +1436,23 @@ function orientedCanvas(img, rawDataUrl, maxW, callback) {
   });
 }
 
+
+// ===== SHARED: rotate a base64 image 90 degrees clockwise =====
+function rotateBase64CW(dataUrl, callback) {
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width  = img.naturalHeight;
+    canvas.height = img.naturalWidth;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    callback(canvas.toDataURL('image/jpeg', 0.85));
+  };
+  img.src = dataUrl;
+}
+
 // ===== PHOTO HANDLING =====
 var currentPhoto = null;
 var currentFileAttach = null; // { name, type, blob } for PDF/file attachments
@@ -1450,7 +1467,7 @@ function handlePhoto(input) {
       orientedCanvas(img, e.target.result, 800, canvas => {
         currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
         const preview = document.getElementById("photoPreview");
-        if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;">`;
+        if (preview) preview.innerHTML = `<div style="position:relative;"><img id="gdPhotoPreviewImg" src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;"><button type="button" onclick="rotateBase64CW(currentPhoto,d=>{currentPhoto=d;const el=document.getElementById('gdPhotoPreviewImg');if(el)el.src=d;})" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>`;
         const clearBtn = document.getElementById("clearPhotoBtn");
         if (clearBtn) clearBtn.style.display = "inline-block";
       });
@@ -4015,7 +4032,7 @@ function openEdit(id) {
       <input id="ed_procmethod" value="${l.data.method||""}">
       <label>Notes</label>
       <textarea id="ed_procnotes" rows="4">${l.data.notes||""}</textarea>
-      ${l.data.photo ? `<label>Photo</label><img src="${l.data.photo}" data-photo-src="${l.data.photo}" style="width:100%;border-radius:6px;margin-top:4px;cursor:zoom-in;" onclick="openPhotoViewer(this.src||this.dataset.photoSrc)" onerror="loadPhotoWithAuth(this)">` : ""}
+      ${l.data.photo ? `<label>Photo</label><div style="position:relative;"><img id="editModalPhotoImg" src="${l.data.photo}" style="width:100%;border-radius:6px;margin-top:4px;" onerror="loadPhotoWithAuth(this)"><button type="button" onclick="rotateBase64CW(logs.find(x=>x.id===editingId).data.photo,d=>{logs.find(x=>x.id===editingId).data.photo=d;localStorage.setItem(LS.logs,JSON.stringify(logs));const el=document.getElementById('editModalPhotoImg');if(el)el.src=d;showToast('Rotated');})" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>` : ""}
       <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(editing does not re-deduct inventory)</span></label>
       <div id="ed_procSuppliesList"></div>
       <button type="button" onclick="procAddSupplyRow(null, true)" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
@@ -4596,7 +4613,7 @@ function onAndroidAssetPhoto(dataUrl) {
     orientedCanvas(img, full, 800, canvas => {
       currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
       const preview = document.getElementById('adjustPhotoPreview');
-      if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;">`;
+      if (preview) preview.innerHTML = `<div style="position:relative;"><img id="adjustPhotoPreviewImg" src="${currentPhoto}" style="width:100%;border-radius:6px;"><button type="button" onclick="rotateBase64CW(currentPhoto,d=>{currentPhoto=d;const el=document.getElementById('adjustPhotoPreviewImg');if(el)el.src=d;})" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>`;
       const clearBtn = document.getElementById('clearAssetPhotoBtn');
       if (clearBtn) clearBtn.style.display = 'inline-block';
     });
@@ -4616,7 +4633,7 @@ function resizeAndSetAssetPhoto(dataUrl) {
     orientedCanvas(img, dataUrl, 800, canvas => {
       currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
       const preview = document.getElementById('adjustPhotoPreview');
-      if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;">`;
+      if (preview) preview.innerHTML = `<div style="position:relative;"><img id="adjustPhotoPreviewImg" src="${currentPhoto}" style="width:100%;border-radius:6px;"><button type="button" onclick="rotateBase64CW(currentPhoto,d=>{currentPhoto=d;const el=document.getElementById('adjustPhotoPreviewImg');if(el)el.src=d;})" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>`;
       const clearBtn = document.getElementById('clearAssetPhotoBtn');
       if (clearBtn) clearBtn.style.display = 'inline-block';
     });
@@ -4664,7 +4681,7 @@ function openEditItem(uuid) {
       container.innerHTML = current.map((src, i) =>
         `<div style="position:relative;display:inline-block;margin:4px;">
           <img src="${src}" style="width:90px;height:90px;object-fit:cover;border-radius:6px;cursor:zoom-in;" onclick="sd_openPhotoViewer('${a.uuid}')">
-          <button onclick="window._editItemPhotos.splice(${i},1);renderEditItemPhotos();" style="position:absolute;top:2px;right:2px;margin:0;padding:2px 6px;font-size:13px;background:#8b0000;border-radius:4px;line-height:1;">✕</button>
+          <button onclick="window._editItemPhotos.splice(${i},1);renderEditItemPhotos();" style="position:absolute;top:2px;right:2px;margin:0;padding:2px 6px;font-size:13px;background:#8b0000;border-radius:4px;line-height:1;">✕</button><button onclick="rotateBase64CW(window._editItemPhotos[${i}],d=>{window._editItemPhotos[${i}]=d;renderEditItemPhotos();});" style="position:absolute;bottom:2px;right:2px;margin:0;padding:2px 6px;font-size:13px;background:rgba(0,0,0,0.7);border-radius:4px;line-height:1;">🔄</button>
         </div>`
       ).join('');
     }
