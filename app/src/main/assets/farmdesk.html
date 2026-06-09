@@ -5145,7 +5145,7 @@ async function sd_syncToFarmOS() {
         const qData  = await qRes.json();
         const qUUID  = qData.data.id;
         const qRevId = qData.data.attributes?.drupal_internal__revision_id;
-        const logBundle = item.action === 'increment' ? 'input' : (item.action === 'decrement' ? 'output' : 'observation');
+        const logBundle = 'activity'; // log--activity works on all farmOS instances; input/output may not be enabled
         const lBody = {
           data: {
             type: 'log--' + logBundle,
@@ -5154,10 +5154,8 @@ async function sd_syncToFarmOS() {
               timestamp: item.timestamp,
               status:    'done',
               ...(item.notes  ? { notes: { value: item.notes, format: 'default' } } : {}),
-              // Input log specific fields — only on restock
-              ...(item.action === 'increment' && item.seller ? { source: item.seller } : {}),
-              ...(item.action === 'increment' && item.lot    ? { lot_number: item.lot } : {}),
-              ...(item.action === 'increment'                ? { purchase_date: item.timestamp } : {})
+              // Note: source/lot_number/purchase_date are log--input specific fields
+              // Using log--activity for universal compatibility; store seller/lot in notes instead
             },
             relationships: {
               asset:    { data: [{ type: 'asset--material', id: item.uuid }] },
