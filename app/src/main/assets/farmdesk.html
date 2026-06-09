@@ -4650,21 +4650,67 @@ function openEditItem(uuid) {
   const fields  = document.getElementById('sd-editFields');
   const saveBtn = document.getElementById('sd-modalSaveBtn');
   document.getElementById('sd-editTitle').textContent = '✏️ Edit Item';
+
+  // Get existing photos — support single photo (legacy) or array
+  const existingPhotos = a.photos ? [...a.photos] : (a.photo ? [a.photo] : []);
+
+  function renderEditItemPhotos() {
+    const container = document.getElementById('editItemPhotoStrip');
+    if (!container) return;
+    const current = window._editItemPhotos || [];
+    if (!current.length) {
+      container.innerHTML = '<p style="color:#888;font-size:13px;margin:4px 0;">No photos</p>';
+    } else {
+      container.innerHTML = current.map((src, i) =>
+        `<div style="position:relative;display:inline-block;margin:4px;">
+          <img src="${src}" style="width:90px;height:90px;object-fit:cover;border-radius:6px;cursor:zoom-in;" onclick="sd_openPhotoViewer('${a.uuid}')">
+          <button onclick="window._editItemPhotos.splice(${i},1);renderEditItemPhotos();" style="position:absolute;top:2px;right:2px;margin:0;padding:2px 6px;font-size:13px;background:#8b0000;border-radius:4px;line-height:1;">✕</button>
+        </div>`
+      ).join('');
+    }
+    // Show/hide add buttons based on limit (3)
+    const atLimit = current.length >= 3;
+    const addBtns = document.getElementById('editItemAddBtns');
+    if (addBtns) addBtns.style.display = atLimit ? 'none' : 'flex';
+  }
+
+  window._editItemPhotos = [...existingPhotos];
+  window._editItemUUID = uuid;
+
   fields.innerHTML = `
     <label style="color:#aaa;font-size:14px;">Name</label>
-    <input type="text" id="editItemName" value="${a.name}" style="width:100%;padding:10px;margin-top:4px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <input type="text" id="editItemName" value="${a.name.replace(/"/g,'&quot;')}" style="width:100%;padding:10px;margin-top:4px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Notes</label>
     <textarea id="editItemNotes" rows="3" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">${a.notes || ''}</textarea>
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Low Stock Warning</label>
+    <input type="number" id="editItemThreshold" min="0" step="any" value="${thresholds[a.uuid] || 0}" placeholder="0 = off" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">📷 Photos (max 3)</label>
+    <div id="editItemPhotoStrip" style="margin-top:4px;"></div>
+    <div id="editItemAddBtns" style="display:flex;gap:6px;margin-top:6px;">
+      <button type="button" onclick="window.AndroidBridge?window.AndroidBridge.takePhoto('onEditItemPhoto'):document.getElementById('editItemCameraInput').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('editItemGalleryInput').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>
+    </div>
+    <input type="file" id="editItemCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handleEditItemPhoto(this)">
+    <input type="file" id="editItemGalleryInput" accept="image/*" style="display:none;" onchange="handleEditItemPhoto(this)">
+    <div style="color:#888;font-size:12px;margin-top:4px;">${a.category || ''} · ${a.units || ''} · ${a.measure || ''}</div>
   `;
+
+  renderEditItemPhotos();
+
   saveBtn.textContent  = '💾 Save';
   saveBtn.style.background = '#3a7';
   saveBtn.onclick = () => {
-    const newName  = document.getElementById('editItemName').value.trim();
-    const newNotes = document.getElementById('editItemNotes').value.trim();
+    const newName      = document.getElementById('editItemName').value.trim();
+    const newNotes     = document.getElementById('editItemNotes').value.trim();
+    const newThreshold = parseFloat(document.getElementById('editItemThreshold').value) || 0;
     if (!newName) { showToast('Name required'); return; }
-    a.name  = newName;
-    a.notes = newNotes;
-    localStorage.setItem(SD_LS.assets, JSON.stringify(assets));
+    a.name   = newName;
+    a.notes  = newNotes;
+    a.photos = window._editItemPhotos || [];
+    a.photo  = a.photos[0] || null; // keep legacy field for compat
+    thresholds[a.uuid] = newThreshold;
+    localStorage.setItem(SD_LS.assets,     JSON.stringify(assets));
+    localStorage.setItem(SD_LS.thresholds, JSON.stringify(thresholds));
     // Queue PATCH if real UUID
     if (!a.uuid.startsWith('local_')) {
       pending = pending.filter(p => !(p.type === 'patch_asset' && p.uuid === a.uuid));
@@ -4672,11 +4718,68 @@ function openEditItem(uuid) {
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
       updateSyncBadge();
     }
+    // Queue photo sync for first photo if changed
+    if (a.photos[0] && !a.uuid.startsWith('local_')) {
+      pending = pending.filter(p => !(p.type === 'photo' && p.uuid === a.uuid));
+      pending.push({ id: 'photo_' + a.uuid, type: 'photo', uuid: a.uuid, name: a.name, photo: a.photos[0], synced: false });
+      localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
+    }
+    window._editItemPhotos = null;
     sd_closeEdit();
     renderDashboard();
-    showToast('✅ Item updated locally');
+    showToast('✅ Item updated');
   };
   modal.style.display = 'block';
+}
+
+window.onEditItemPhoto = function(dataUrl) {
+  if (!dataUrl) return;
+  const full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  const img = new Image();
+  img.onload = () => {
+    orientedCanvas(img, full, 800, canvas => {
+      if (!window._editItemPhotos) window._editItemPhotos = [];
+      if (window._editItemPhotos.length >= 3) { showToast('Max 3 photos'); return; }
+      window._editItemPhotos.push(canvas.toDataURL('image/jpeg', 0.7));
+      const container = document.getElementById('editItemPhotoStrip');
+      if (container) {
+        // re-render — need to call renderEditItemPhotos but it's scoped; just rebuild
+        openEditItem(window._editItemUUID);
+      }
+    });
+  };
+  img.src = full;
+};
+
+function handleEditItemPhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      orientedCanvas(img, e.target.result, 800, canvas => {
+        if (!window._editItemPhotos) window._editItemPhotos = [];
+        if (window._editItemPhotos.length >= 3) { showToast('Max 3 photos'); return; }
+        window._editItemPhotos.push(canvas.toDataURL('image/jpeg', 0.7));
+        // Rebuild the strip by triggering re-render via a local function
+        const strip = document.getElementById('editItemPhotoStrip');
+        const addBtns = document.getElementById('editItemAddBtns');
+        const current = window._editItemPhotos;
+        if (strip) {
+          strip.innerHTML = current.map((src, i) =>
+            `<div style="position:relative;display:inline-block;margin:4px;">
+              <img src="${src}" style="width:90px;height:90px;object-fit:cover;border-radius:6px;">
+              <button onclick="window._editItemPhotos.splice(${i},1);handleEditItemPhoto({files:[]});" style="position:absolute;top:2px;right:2px;margin:0;padding:2px 6px;font-size:13px;background:#8b0000;border-radius:4px;line-height:1;">✕</button>
+            </div>`
+          ).join('');
+        }
+        if (addBtns) addBtns.style.display = current.length >= 3 ? 'none' : 'flex';
+      });
+    };
+    img.src = e.target.result;
+  };
+  if (file.name) reader.readAsDataURL(file);
 }
 
 // ===== CONFIRM ADJUST — saves locally, no network =====
