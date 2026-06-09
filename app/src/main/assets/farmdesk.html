@@ -1318,22 +1318,123 @@ function takeCameraBridge() {
 function onAndroidPhoto(dataUrl) {
   if (!dataUrl) return;
   const full = dataUrl.startsWith("data:") ? dataUrl : "data:image/jpeg;base64," + dataUrl;
-  // Resize same as handlePhoto
   const img = new Image();
   img.onload = () => {
-    const canvas = document.createElement("canvas");
-    const maxW = 800;
-    const ratio = Math.min(1, maxW / img.width);
-    canvas.width  = img.width  * ratio;
-    canvas.height = img.height * ratio;
-    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-    currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
-    const preview = document.getElementById("photoPreview");
-    if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;">`;
-    const clearBtn = document.getElementById("clearPhotoBtn");
-    if (clearBtn) clearBtn.style.display = "inline-block";
+    orientedCanvas(img, full, 800, canvas => {
+      currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
+      const preview = document.getElementById("photoPreview");
+      if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;">`;
+      const clearBtn = document.getElementById("clearPhotoBtn");
+      if (clearBtn) clearBtn.style.display = "inline-block";
+    });
   };
   img.src = full;
+}
+
+
+// ===== SHARED: fix JPEG EXIF orientation before drawing to canvas =====
+function correctOrientation(img, rawDataUrl, callback) {
+  // Only attempt EXIF read for JPEG data URLs from camera
+  if (!rawDataUrl || !rawDataUrl.includes('data:image/jpeg')) {
+    callback(img, 1);
+    return;
+  }
+  try {
+    const base64 = rawDataUrl.split(',')[1];
+    const binary = atob(base64.slice(0, 1024)); // only need first 1kb for EXIF
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    // Find EXIF orientation tag (0x0112) in JPEG APP1 marker
+    let orientation = 1;
+    if (bytes[0] === 0xFF && bytes[1] === 0xD8) {
+      let offset = 2;
+      while (offset < bytes.length - 4) {
+        if (bytes[offset] !== 0xFF) break;
+        const marker = bytes[offset + 1];
+        const segLen = (bytes[offset + 2] << 8) | bytes[offset + 3];
+        if (marker === 0xE1) { // APP1 = EXIF
+          if (bytes[offset+4]===0x45 && bytes[offset+5]===0x78) { // "Ex"
+            const tiff = offset + 10;
+            const le = bytes[tiff] === 0x49;
+            const r = (o, n) => le
+              ? bytes.slice(o,o+n).reduce((a,b,i)=>a+(b<<(8*i)),0)
+              : bytes.slice(o,o+n).reduce((a,b)=>(a<<8)|b,0);
+            const ifdOff = tiff + r(tiff+4, 4);
+            const entries = r(ifdOff, 2);
+            for (let e = 0; e < entries; e++) {
+              const eOff = ifdOff + 2 + e * 12;
+              if (r(eOff, 2) === 0x0112) {
+                orientation = r(eOff + 8, 2);
+                break;
+              }
+            }
+          }
+          break;
+        }
+        offset += 2 + segLen;
+      }
+    }
+    callback(img, orientation);
+  } catch(e) {
+    callback(img, 1);
+  }
+}
+
+function drawWithOrientation(canvas, img, orientation) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.save();
+  // Rotate/flip based on EXIF orientation
+  switch (orientation) {
+    case 2: ctx.transform(-1,0,0,1,w,0); break;
+    case 3: ctx.transform(-1,0,0,-1,w,h); break;
+    case 4: ctx.transform(1,0,0,-1,0,h); break;
+    case 5: ctx.transform(0,1,1,0,0,0); break;
+    case 6: ctx.transform(0,1,-1,0,h,0); break;
+    case 7: ctx.transform(0,-1,-1,0,h,w); break;
+    case 8: ctx.transform(0,-1,1,0,0,w); break;
+    default: break;
+  }
+  // For orientations 5-8, width/height are swapped
+  if (orientation >= 5) {
+    ctx.drawImage(img, 0, 0, h, w);
+  } else {
+    ctx.drawImage(img, 0, 0, w, h);
+  }
+  ctx.restore();
+}
+
+function orientedCanvas(img, rawDataUrl, maxW, callback) {
+  correctOrientation(img, rawDataUrl, (img, orient) => {
+    const swapped = orient >= 5;
+    const srcW = swapped ? img.height : img.width;
+    const srcH = swapped ? img.width  : img.height;
+    const ratio = Math.min(1, maxW / srcW);
+    const canvas = document.createElement('canvas');
+    canvas.width  = srcW * ratio;
+    canvas.height = srcH * ratio;
+    // Scale context before drawing
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    const dw = canvas.width, dh = canvas.height;
+    switch (orient) {
+      case 2: ctx.transform(-1,0,0,1,dw,0); break;
+      case 3: ctx.transform(-1,0,0,-1,dw,dh); break;
+      case 4: ctx.transform(1,0,0,-1,0,dh); break;
+      case 5: ctx.transform(ratio,0,0,ratio,0,0); ctx.transform(0,1,1,0,0,0); break;
+      case 6: ctx.transform(ratio,0,0,ratio,0,0); ctx.transform(0,1,-1,0,dh/ratio,0); break;
+      case 7: ctx.transform(ratio,0,0,ratio,0,0); ctx.transform(0,-1,-1,0,dh/ratio,dw/ratio); break;
+      case 8: ctx.transform(ratio,0,0,ratio,0,0); ctx.transform(0,-1,1,0,0,dw/ratio); break;
+      default: ctx.drawImage(img, 0, 0, dw, dh); ctx.restore(); callback(canvas); return;
+    }
+    if (orient >= 5) {
+      ctx.drawImage(img, 0, 0, img.width, img.height);
+    } else {
+      ctx.drawImage(img, 0, 0, dw, dh);
+    }
+    ctx.restore();
+    callback(canvas);
+  });
 }
 
 // ===== PHOTO HANDLING =====
@@ -1345,22 +1446,15 @@ function handlePhoto(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    // Resize to max 800px wide to keep storage reasonable
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const maxW = 800;
-      const ratio = Math.min(1, maxW / img.width);
-      canvas.width = img.width * ratio;
-      canvas.height = img.height * ratio;
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
-      const preview = document.getElementById("photoPreview");
-      if (preview) {
-        preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;">`;
-      }
-      const clearBtn = document.getElementById("clearPhotoBtn");
-      if (clearBtn) clearBtn.style.display = "inline-block";
+      orientedCanvas(img, e.target.result, 800, canvas => {
+        currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
+        const preview = document.getElementById("photoPreview");
+        if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;margin-top:4px;">`;
+        const clearBtn = document.getElementById("clearPhotoBtn");
+        if (clearBtn) clearBtn.style.display = "inline-block";
+      });
     };
     img.src = e.target.result;
   };
@@ -3715,6 +3809,18 @@ async function syncToFarmOS() {
   }
 
   logEl.scrollTop = logEl.scrollHeight;
+
+  // ===== STEP 4: Also sync StockDesk pending queue =====
+  const sdPending = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
+  const unSyncedSD = sdPending.filter(p => !p.synced);
+  if (unSyncedSD.length > 0) {
+    logEl.textContent += '\nAlso pushing ' + unSyncedSD.length + ' stock item(s)...\n';
+    try {
+      await sd_syncToFarmOS();
+    } catch(e) {
+      logEl.textContent += '⚠️ Stock sync error: ' + e.message + '\n';
+    }
+  }
 }
 
 function toggleSelectAll(checked) {
@@ -4408,6 +4514,15 @@ function setAction(action) {
   document.getElementById('adjustAmount').value =
     action === 'reset' ? (adjustAsset?.value || 0) : 1;
   document.getElementById('priceBox').style.display = action === 'increment' ? '' : 'none';
+  // Injection section only relevant when using (decrement), not restocking
+  const isMedLiquid  = adjustAsset?.category === 'Medical' && adjustAsset?.measure === 'volume';
+  const isInjectable = adjustAsset && INJECTABLE_KEYWORDS.some(k => adjustAsset.name.toLowerCase().includes(k));
+  document.getElementById('injectionBox').style.display =
+    (isMedLiquid && isInjectable && action === 'decrement') ? '' : 'none';
+  if (action !== 'decrement') {
+    document.getElementById('isInjection').checked = false;
+    document.getElementById('injectionFields').style.display = 'none';
+  }
   calcCost();
 }
 function stepAmount(d) {
@@ -4415,7 +4530,13 @@ function stepAmount(d) {
   el.value = Math.max(0, (parseFloat(el.value) || 0) + d);
   calcCost();
 }
-function setAmount(v) { document.getElementById('adjustAmount').value = v; }
+function setAmount(v) {
+  const el = document.getElementById('adjustAmount');
+  const cur = parseFloat(el.value) || 0;
+  // If current value is 1 (default), replace it; otherwise add
+  el.value = cur <= 1 ? v : cur + v;
+  calcCost();
+}
 function toggleInjection() {
   document.getElementById('injectionFields').style.display =
     document.getElementById('isInjection').checked ? '' : 'none';
@@ -4471,7 +4592,17 @@ function takeAssetPhoto() {
 function onAndroidAssetPhoto(dataUrl) {
   if (!dataUrl) return;
   const full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
-  resizeAndSetAssetPhoto(full);
+  const img = new Image();
+  img.onload = () => {
+    orientedCanvas(img, full, 800, canvas => {
+      currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      const preview = document.getElementById('adjustPhotoPreview');
+      if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;">`;
+      const clearBtn = document.getElementById('clearAssetPhotoBtn');
+      if (clearBtn) clearBtn.style.display = 'inline-block';
+    });
+  };
+  img.src = full;
 }
 function handleAssetPhoto(input) {
   const file = input.files[0];
@@ -4483,17 +4614,13 @@ function handleAssetPhoto(input) {
 function resizeAndSetAssetPhoto(dataUrl) {
   const img = new Image();
   img.onload = () => {
-    const canvas = document.createElement('canvas');
-    const maxW   = 800;
-    const ratio  = Math.min(1, maxW / img.width);
-    canvas.width  = img.width  * ratio;
-    canvas.height = img.height * ratio;
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
-    const preview = document.getElementById('adjustPhotoPreview');
-    if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;">`;
-    const clearBtn = document.getElementById('clearAssetPhotoBtn');
-    if (clearBtn) clearBtn.style.display = 'inline-block';
+    orientedCanvas(img, dataUrl, 800, canvas => {
+      currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      const preview = document.getElementById('adjustPhotoPreview');
+      if (preview) preview.innerHTML = `<img src="${currentPhoto}" style="width:100%;border-radius:6px;">`;
+      const clearBtn = document.getElementById('clearAssetPhotoBtn');
+      if (clearBtn) clearBtn.style.display = 'inline-block';
+    });
   };
   img.src = dataUrl;
 }
