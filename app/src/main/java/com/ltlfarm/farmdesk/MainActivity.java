@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
                     Log.d(TAG, "imageFile=" + cameraImageFile.getAbsolutePath());
                     cameraImageUri = FileProvider.getUriForFile(
                         MainActivity.this,
-                        "com.burdenenterprises.goatdesk.fileprovider",
+                        "com.ltlfarm.farmdesk.fileprovider",
                         cameraImageFile
                     );
                     Log.d(TAG, "cameraUri=" + cameraImageUri);
@@ -113,7 +113,7 @@ public class MainActivity extends Activity {
     private File createImageFile() throws IOException {
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
         File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
-        return File.createTempFile("GOATDESK_" + timeStamp, ".jpg", storageDir);
+        return File.createTempFile("FARMDESK_" + timeStamp, ".jpg", storageDir);
     }
 
     @Override
