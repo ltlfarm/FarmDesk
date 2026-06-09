@@ -4948,8 +4948,10 @@ async function sd_syncToFarmOS() {
         }
         item.synced = true;
         ok++;
-        logEl.textContent += '✅ Updated: ' + item.name + '\n';
-        // POST quantity then log — same pattern as original doAdjust
+        logEl.textContent += '\u2705 Updated: ' + item.name + '\n';
+
+      } else if (item.type === 'adjust') {
+        // POST quantity then log — farmOS inventory adjustment
         const num = Number.isInteger(item.amount) ? String(item.amount) : String(Math.round(item.amount * 100));
         const den = Number.isInteger(item.amount) ? '1' : '100';
         const qBody = {
