@@ -1440,15 +1440,20 @@ function orientedCanvas(img, rawDataUrl, maxW, callback) {
 // ===== SHARED: rotate a base64 image 90 degrees clockwise =====
 function rotateBase64CW(dataUrl, callback) {
   const img = new Image();
-  img.onload = () => {
+  img.onload = function() {
+    const w = img.naturalWidth  || img.width  || 1;
+    const h = img.naturalHeight || img.height || 1;
     const canvas = document.createElement('canvas');
-    canvas.width  = img.naturalHeight;
-    canvas.height = img.naturalWidth;
+    canvas.width  = h;
+    canvas.height = w;
     const ctx = canvas.getContext('2d');
-    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.translate(h / 2, w / 2);
     ctx.rotate(Math.PI / 2);
-    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    ctx.drawImage(img, -w / 2, -h / 2);
     callback(canvas.toDataURL('image/jpeg', 0.85));
+  };
+  img.onerror = function() {
+    showToast('Rotate failed');
   };
   img.src = dataUrl;
 }
@@ -1483,9 +1488,14 @@ function rotateEditModalPhoto() {
 }
 function rotateEditItemPhoto(idx) {
   if (!window._editItemPhotos || !window._editItemPhotos[idx]) return;
-  rotateBase64CW(window._editItemPhotos[idx], d => {
+  rotateBase64CW(window._editItemPhotos[idx], function(d) {
     window._editItemPhotos[idx] = d;
-    renderEditItemPhotos();
+    // Update the img in the strip directly
+    const strip = document.getElementById('editItemPhotoStrip');
+    if (strip) {
+      const imgs = strip.querySelectorAll('img');
+      if (imgs[idx]) imgs[idx].src = d;
+    }
   });
 }
 
