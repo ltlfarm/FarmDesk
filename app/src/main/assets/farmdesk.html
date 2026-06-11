@@ -580,8 +580,32 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
       <button class="cat-tab active" id="tab-Feed"    onclick="setTab('Feed')">🌾 Feed</button>
       <button class="cat-tab"        id="tab-Medical" onclick="setTab('Medical')">💉 Medical</button>
       <button class="cat-tab"        id="tab-Lab"     onclick="setTab('Lab')">🔬 Lab</button>
+      <button class="cat-tab"        id="tab-Add"     onclick="toggleAddItemPanel()" style="background:#2a2a2a;">➕</button>
     </div>
     <div id="stockList"><p style="color:#888;text-align:center;padding:20px;">Tap Sync to load inventory.</p></div>
+  </div>
+  <!-- Add New Item panel — hidden by default -->
+  <div id="addItemPanel" style="display:none;" class="box">
+    <strong style="color:#3a7;">➕ Add New Inventory Item</strong>
+    <label style="margin-top:8px;">Name</label>
+    <input type="text" id="newItemName" placeholder="e.g. Straw, Baling Twine" enterkeyhint="next" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('newItemNotes').focus();}">
+    <label>Category</label>
+    <select id="newItemCat">
+      <option value="e5e7b94d-d8b3-4c78-8554-097edc968208">Feed</option>
+      <option value="eb01f4d2-7dbf-46af-b2ff-426575eff635">Medical</option>
+      <option value="2f1ac8ab-c6b6-4f91-a504-b48e2c921e57">Lab</option>
+    </select>
+    <label>Unit</label>
+    <select id="newItemUnit">
+      <option value="count|22528b34-ae02-4d42-8e3f-1e3524caa911|count">Count</option>
+      <option value="bales|ca1ad806-6733-450f-a28f-2d8b1032d47e|count">Bales</option>
+      <option value="ml|60c97ab7-0c9a-40cc-a05c-e9ccf6c80f82|volume">ml</option>
+      <option value="lbs|830ff397-6d45-400a-a25a-d129d15229e2|weight">lbs</option>
+    </select>
+    <label>Notes (optional)</label>
+    <input type="text" id="newItemNotes" placeholder="e.g. Dosage, supplier, storage info" enterkeyhint="done" onkeydown="if(event.key==='Enter'){event.preventDefault();queueCreateItem();}">
+    <button onclick="queueCreateItem()" style="width:100%;margin-top:12px;">✅ Create Item</button>
+    <div id="newItemResult" style="font-size:14px;color:#888;margin-top:6px;"></div>
   </div>
 </div>
 
@@ -4492,6 +4516,16 @@ function populateInjectionSelects() {
 }
 
 // ===== CATEGORY TABS =====
+function toggleAddItemPanel() {
+  const panel = document.getElementById('addItemPanel');
+  const btn   = document.getElementById('tab-Add');
+  if (!panel) return;
+  const open = panel.style.display === 'none' || panel.style.display === '';
+  panel.style.display = open ? 'block' : 'none';
+  if (btn) btn.classList.toggle('active', open);
+  if (open) setTimeout(() => document.getElementById('newItemName')?.focus(), 100);
+}
+
 function setTab(tab) {
   currentTab = tab;
   document.querySelectorAll('#module-stockdesk .cat-tab').forEach(t => t.classList.remove('active'));
@@ -5055,6 +5089,13 @@ function queueCreateItem() {
   updateSyncBadge();
   sd_renderThresholdList();
   renderDashboard();
+  // Close panel after short delay
+  setTimeout(() => {
+    const panel = document.getElementById('addItemPanel');
+    if (panel) panel.style.display = 'none';
+    const btn = document.getElementById('tab-Add');
+    if (btn) btn.classList.remove('active');
+  }, 1500);
 }
 
 // ===== SYNC SCREEN =====
