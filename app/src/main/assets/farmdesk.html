@@ -4442,19 +4442,26 @@ async function refreshAssets(silent) {
             });
           });
         });
-        if (fetchedHistory.length > 0) {
-          // Merge: keep local unsynced entries, replace/add farmOS ones
-          const localOnly = adjHistory.filter(h => !h.id.startsWith('farmos_') && !h.synced === false);
-          // Deduplicate by id
-          const merged = [...localOnly];
-          fetchedHistory.forEach(fh => {
-            if (!merged.find(x => x.id === fh.id)) merged.push(fh);
+        // Always replace history with farmOS truth
+        // Keep local unsynced pending entries (not yet pushed) — farmOS wins on any match
+        const localPending = adjHistory.filter(h => {
+          if (h.synced) return false; // already synced — farmOS has it
+          // Check if farmOS already has a log matching this entry (same asset, action, amount, within 60s)
+          const hTime = new Date(h.time).getTime();
+          const alreadyInFarmOS = fetchedHistory.some(fh => {
+            if (fh.name !== h.name || fh.action !== h.action) return false;
+            const fhTime = new Date(fh.time).getTime();
+            return Math.abs(fhTime - hTime) < 60000 && Math.abs(fh.amount - h.amount) < 0.01;
           });
-          // Sort newest first, cap at 200
-          merged.sort((a, b) => new Date(b.time) - new Date(a.time));
-          adjHistory = merged.slice(0, 200);
-          localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
-        }
+          return !alreadyInFarmOS; // keep only if farmOS doesn't have it yet
+        });
+        // Mark local pending entries clearly
+        localPending.forEach(h => { h.source = 'pending'; });
+        // Combine: farmOS history + local unsynced not yet in farmOS
+        const merged = [...fetchedHistory, ...localPending];
+        merged.sort((a, b) => new Date(b.time) - new Date(a.time));
+        adjHistory = merged.slice(0, 200);
+        localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
       }
     } catch(e) { /* log history fetch is optional — don't break on failure */ }
 
@@ -5417,8 +5424,8 @@ function sd_renderHistory() {
     const icon      = h.action === 'increment' ? '📥' : (h.action === 'decrement' ? '📤' : '🔢');
     const sign      = h.action === 'increment' ? '+' : (h.action === 'decrement' ? '−' : '=');
     const amtColor  = h.action === 'decrement' ? '#c66' : '#3a7';
-    const syncMark  = h.synced ? '✓' : '⏳';
-    const syncColor = h.synced ? '#3a7' : '#c90';
+    const syncMark  = h.source === 'farmOS' ? '✓ farmOS' : (h.synced ? '✓' : '⏳ pending push');
+    const syncColor = h.source === 'farmOS' ? '#3a7' : (h.synced ? '#3a7' : '#c90');
     const t         = new Date(h.time).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     return `<div class="box" style="cursor:pointer;" onclick="toggleHistoryDrawer(this)">
       <div style="display:flex;align-items:flex-start;gap:10px;">
