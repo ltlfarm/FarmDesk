@@ -1894,13 +1894,10 @@ function saveStep() {
   _lastSavedEntry = entry;
   logs.push(entry);
 
-  // If this log was opened from a pending task, mark that task done
+  // If this log was opened from a pending task, remove it — new entry replaces it
   if (_activeTaskId) {
-    const task = logs.find(l => l.id === _activeTaskId);
-    if (task) {
-      task.status = "done";
-      task.synced = false;
-    }
+    const taskIdx = logs.findIndex(l => l.id === _activeTaskId);
+    if (taskIdx >= 0) logs.splice(taskIdx, 1);
     _activeTaskId = null;
   }
 
