@@ -780,6 +780,20 @@ let excludedAnimals = JSON.parse(localStorage.getItem(LS.excluded) || "[]");
 let logs  = JSON.parse(localStorage.getItem(LS.logs)  || "[]");
 let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
 
+// ===== ONE-TIME DEDUP: remove duplicate log entries by id =====
+(function dedupLogs() {
+  const seen = new Set();
+  const deduped = logs.filter(l => {
+    if (!l.id || seen.has(l.id)) return false;
+    seen.add(l.id);
+    return true;
+  });
+  if (deduped.length !== logs.length) {
+    logs = deduped;
+    localStorage.setItem(LS.logs, JSON.stringify(logs));
+  }
+})();
+
 let lastMed   = localStorage.getItem(LS.lastMed)   || "";
 let lastRoute = localStorage.getItem(LS.lastRoute) || "Oral";
 
@@ -1916,13 +1930,22 @@ function saveStep() {
   }
 
   _lastSavedEntry = entry;
-  logs.push(entry);
 
-  // If this log was opened from a pending task, remove it — new entry replaces it
   if (_activeTaskId) {
-    const taskIdx = logs.findIndex(l => l.id === _activeTaskId);
-    if (taskIdx >= 0) logs.splice(taskIdx, 1);
+    // Task completion — update existing log in-place (preserves farmOS UUID for PATCH)
+    const taskLog = logs.find(l => l.id === _activeTaskId);
+    if (taskLog) {
+      taskLog.status   = "done";
+      taskLog.time     = entry.time;
+      taskLog.data     = entry.data;
+      taskLog.synced   = false;
+      taskLog.needsPatch = !!taskLog.fromFarmOS;
+      taskLog.loggedBy = entry.loggedBy;
+      _lastSavedEntry  = taskLog;
+    }
     _activeTaskId = null;
+  } else {
+    logs.push(entry);
   }
 
   localStorage.setItem(LS.logs, JSON.stringify(logs));
@@ -2521,10 +2544,11 @@ let _activeTaskId = null;
 function openTaskForm(id) {
   const task = logs.find(l => l.id === id);
   if (!task) return;
-  _activeTaskId = id;
 
-  // Start the matching flow type
+  // Start the matching flow type — sets _activeTaskId = null internally,
+  // so we must set _activeTaskId AFTER startFlow returns
   startFlow(task.type);
+  _activeTaskId = id;
 
   // Pre-fill animal
   const goatSel = document.getElementById("goat");
@@ -3789,8 +3813,10 @@ async function syncToFarmOS() {
   } catch(e) { /* continue even if fetch fails */ }
 
   // ===== STEP 2: Push unsynced logs =====
-  const unsynced = logs.filter(l => !l.synced);
-  if (!unsynced.length) {
+  const toPost  = logs.filter(l => !l.synced && !l.needsPatch);
+  const toPatch = logs.filter(l => !l.synced &&  l.needsPatch);
+
+  if (!toPost.length && !toPatch.length) {
     logEl.textContent += "Nothing to push.\n";
   } else {
     const headers = {
@@ -3801,7 +3827,8 @@ async function syncToFarmOS() {
 
     let ok = 0, fail = 0;
 
-    for (const l of unsynced) {
+    // ── POST new logs ──
+    for (const l of toPost) {
       const farmosType = FARMOS_TYPE_MAP[l.type] || "activity";
       const payload = buildFarmOSPayload(l);
       const url = apiUrl("/api/log/" + farmosType);
@@ -3812,14 +3839,8 @@ async function syncToFarmOS() {
           const logUUID = resData?.data?.id;
 
           // ===== PHOTO UPLOAD =====
-          // farmOS 2.x requires a separate POST of binary data to upload a photo.
-          // Endpoint: POST /api/log/{type}/{uuid}/image
-          // Content-Type: application/octet-stream
-          // Content-Disposition: attachment; filename="photo.jpg"
-          // Body: raw binary (converted from base64)
           if (l.data?.photo && logUUID) {
             try {
-              // Convert base64 data URL to binary blob
               const photoRes = await fetch(l.data.photo);
               const blob = await photoRes.blob();
               const photoUrl = apiUrl(`/api/log/${farmosType}/${logUUID}/image`);
@@ -3827,22 +3848,19 @@ async function syncToFarmOS() {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
-                  "Content-Disposition": 'attachment; filename="goatdesk-photo.jpg"',
+                  "Content-Disposition": 'attachment; filename="farmdesk-photo.jpg"',
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
                 body: blob
               });
-              if (!photoUpload.ok) {
-                logEl.textContent += `  ⚠️ Photo upload failed: ${photoUpload.status}\n`;
-              }
+              if (!photoUpload.ok) logEl.textContent += `  ⚠️ Photo upload failed: ${photoUpload.status}\n`;
             } catch(pe) {
               logEl.textContent += `  ⚠️ Photo upload error: ${pe.message}\n`;
             }
           }
 
           // ===== FILE ATTACHMENT UPLOAD =====
-          // Upload PDF/doc files to the log's file field
           if (l.data?.fileAttach && logUUID && l.data.fileAttach._blob) {
             try {
               const fileUrl = apiUrl(`/api/log/${farmosType}/${logUUID}/file`);
@@ -3873,6 +3891,30 @@ async function syncToFarmOS() {
       } catch(e) {
         fail++;
         logEl.textContent += `❌ ${l.goat} ${l.type} — ${e.message}\n`;
+      }
+    }
+
+    // ── PATCH farmOS edits / task completions ──
+    for (const l of toPatch) {
+      const farmosType = FARMOS_TYPE_MAP[l.type] || "activity";
+      const payload = buildFarmOSPayload(l);
+      payload.data.id = l.id; // JSON:API PATCH requires id in data object
+      const url = apiUrl("/api/log/" + farmosType + "/" + l.id);
+      try {
+        const res = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(payload) });
+        if (res.ok) {
+          l.synced     = true;
+          l.needsPatch = false;
+          ok++;
+          logEl.textContent += `✅ PATCH ${l.goat} | ${farmosLogName(l)}\n`;
+        } else {
+          const txt = await res.text();
+          fail++;
+          logEl.textContent += `❌ PATCH ${l.goat} ${l.type} — ${res.status}: ${txt.slice(0,80)}\n`;
+        }
+      } catch(e) {
+        fail++;
+        logEl.textContent += `❌ PATCH ${l.goat} ${l.type} — ${e.message}\n`;
       }
     }
 
@@ -4122,6 +4164,9 @@ function saveEdit() {
   l.goat = document.getElementById("ed_goat").value;
   const edTime = document.getElementById("ed_time").value;
   l.time = edTime ? new Date(edTime).toISOString() : l.time;
+  if (l.fromFarmOS) {
+    l.needsPatch = true; // tell sync to PATCH this UUID, not POST a new log
+  }
   l.synced = false; // mark for re-sync since data changed
 
   if (l.type === "weight") {
