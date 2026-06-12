@@ -811,7 +811,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.12-0947"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.12-1005"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1587,10 +1587,13 @@ function rotateEditModalPhoto() {
   if (!l || !l.data.photo) return;
   rotateBase64CW(l.data.photo, d => {
     l.data.photo = d;
+    // Re-push so farmOS gets the rotated version too
+    l.synced = false;
+    if (l.fromFarmOS) l.needsPatch = true;
     localStorage.setItem(LS.logs, JSON.stringify(logs));
     const el = document.getElementById('editModalPhotoImg');
     if (el) el.src = d;
-    showToast('Rotated');
+    showToast('Rotated — will re-push on next sync');
   });
 }
 function rotateEditItemPhoto(idx) {
@@ -4020,6 +4023,26 @@ async function syncToFarmOS() {
       try {
         const res = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(payload) });
         if (res.ok) {
+          // Push the photo too (e.g. after a rotate) — same endpoint as new logs
+          if (l.data?.photo && l.data.photo.startsWith("data:")) {
+            try {
+              const photoRes = await fetch(l.data.photo);
+              const blob = await photoRes.blob();
+              const photoUpload = await fetch(apiUrl(`/api/log/${farmosType}/${l.id}/image`), {
+                method: "POST",
+                headers: {
+                  "Content-Type":        "application/octet-stream",
+                  "Content-Disposition": 'attachment; filename="farmdesk-photo.jpg"',
+                  "Accept":              "application/vnd.api+json",
+                  "Authorization":       "Bearer " + token
+                },
+                body: blob
+              });
+              if (!photoUpload.ok) logEl.textContent += `  ⚠️ Photo upload failed: ${photoUpload.status}\n`;
+            } catch(pe) {
+              logEl.textContent += `  ⚠️ Photo upload error: ${pe.message}\n`;
+            }
+          }
           l.synced     = true;
           l.needsPatch = false;
           ok++;
@@ -5095,6 +5118,10 @@ function openEditItem(uuid) {
     a.notes  = newNotes;
     a.photos = window._editItemPhotos || [];
     a.photo  = a.photos[0] || null; // keep legacy field for compat
+    // Keep the photos map in step — refreshAssets rebuilds dashboard photos
+    // from this map, so a stale entry here resurrects the old (unrotated) image
+    photos[a.uuid] = a.photo;
+    localStorage.setItem(SD_LS.photos,     JSON.stringify(photos));
     thresholds[a.uuid] = newThreshold;
     localStorage.setItem(SD_LS.assets,     JSON.stringify(assets));
     localStorage.setItem(SD_LS.thresholds, JSON.stringify(thresholds));
