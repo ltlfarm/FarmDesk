@@ -300,7 +300,10 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
     <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
-    <div class="module-switcher" id="moduleSwitcher"></div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <div class="module-switcher" id="moduleSwitcher"></div>
+      <button class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
+    </div>
     <small id="syncStatus">Offline</small>
   </div>
 </header>
@@ -424,39 +427,22 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 <!-- ===== SETTINGS ===== -->
 <div id="screen-settings" class="screen">
   <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
+    <button class="secondary" onclick="settingsHome()">← Home</button>
     <h3 style="margin:10px 0 6px;">⚙️ Settings</h3>
   </div>
 
+  <!-- ════ GENERIC — applies to the whole app ════ -->
   <div class="box">
-    <strong>Med Formulas</strong>
-    <p style="color:#888;font-size:13px;">ml per lb of body weight. Round↓ sets per-med dose rounding. Save when done.</p>
-    <table class="formula-table">
-      <thead><tr><th>Medication</th><th>Dose</th><th>Unit</th><th>Route</th><th>Round↓</th><th>Fixed</th><th></th></tr></thead>
-      <tbody id="formulaRows"></tbody>
-    </table>
-    <datalist id="unitOptions">
-      <option value="ml">
-      <option value="cc">
-      <option value="oz">
-      <option value="tablet">
-      <option value="capsule">
-      <option value="scoop">
-      <option value="tsp">
-      <option value="tbsp">
-      <option value="g">
-    </datalist>
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <input id="newMedName" placeholder="Med name" style="flex:1">
-      <input id="newMedDose" placeholder="ml/lb" type="number" step="0.01" style="width:90px">
-      <button onclick="addFormula()" style="margin:0;padding:10px;">Add</button>
-    </div>
-    <button onclick="saveFormulas()" style="margin-top:10px;width:100%;">💾 Save Formulas</button>
+    <strong>🔗 FarmOS Connection</strong>
+    <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
+    <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
+    <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
   </div>
 
   <div class="box">
-    <strong>Animal List</strong>
-    <button onclick="show('animals')" class="wide secondary" style="margin-top:6px;">🐐 Manage Animals</button>
+    <strong>🧩 Modules</strong>
+    <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Each module works on its own — at least one must stay on.</p>
+    <div id="moduleToggles"></div>
   </div>
 
   <div class="box">
@@ -471,6 +457,50 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   </div>
 
   <div class="box">
+    <strong>Account</strong>
+    <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
+    <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
+    <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
+  </div>
+
+  <!-- ════ GOAT DESK — hidden when the Goats module is off ════ -->
+  <div class="box gd-only" style="border-top:2px solid #c90;margin-top:4px;">
+    <strong style="color:#c90;">🐐 Goat Desk Settings</strong>
+  </div>
+
+  <div class="box gd-only">
+    <strong>Med Formulas</strong>
+    <p style="color:#888;font-size:13px;">Dose per lb of body weight, in each med's own unit (ml, mg, g, oz, tablets...). Round↓ sets per-med dose rounding. Save when done.</p>
+    <table class="formula-table">
+      <thead><tr><th>Medication</th><th>Dose</th><th>Unit</th><th>Route</th><th>Round↓</th><th>Fixed</th><th></th></tr></thead>
+      <tbody id="formulaRows"></tbody>
+    </table>
+    <datalist id="unitOptions">
+      <option value="ml">
+      <option value="cc">
+      <option value="mg">
+      <option value="g">
+      <option value="oz">
+      <option value="tablet">
+      <option value="capsule">
+      <option value="scoop">
+      <option value="tsp">
+      <option value="tbsp">
+    </datalist>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <input id="newMedName" placeholder="Med name" style="flex:1">
+      <input id="newMedDose" placeholder="dose/lb" type="number" step="0.01" style="width:90px">
+      <button onclick="addFormula()" style="margin:0;padding:10px;">Add</button>
+    </div>
+    <button onclick="saveFormulas()" style="margin-top:10px;width:100%;">💾 Save Formulas</button>
+  </div>
+
+  <div class="box gd-only">
+    <strong>Animal List</strong>
+    <button onclick="show('animals')" class="wide secondary" style="margin-top:6px;">🐐 Manage Animals</button>
+  </div>
+
+  <div class="box gd-only">
     <strong>Data</strong>
     <button class="wide secondary" onclick="exportLogs()">📤 Export Logs (JSON)</button>
     <button class="wide secondary" onclick="document.getElementById('importFile').click()" style="margin-top:8px;">📥 Import Logs (JSON)</button>
@@ -478,25 +508,12 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <div id="importResult" style="font-size:13px;color:#888;margin-top:6px;"></div>
   </div>
 
-  <div class="box">
+  <div class="box gd-only">
     <button class="wide danger" onclick="clearLogs()">🗑️ Clear All Logs</button>
   </div>
 
-  <div class="box">
-    <strong>🧩 Modules</strong>
-    <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Goats hosts these shared settings, so it stays on.</p>
-    <div id="moduleToggles"></div>
-  </div>
-
-  <!-- StockDesk settings (thresholds, clear history) render here when Stock module is enabled -->
+  <!-- ════ STOCK DESK — renders its own heading when the Stock module is on ════ -->
   <div id="sd-settings-inject"></div>
-
-  <div class="box">
-    <strong>Account</strong>
-    <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
-    <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
-    <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
-  </div>
 
 </div>
 
@@ -570,7 +587,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 <div id="screen-sync" class="screen">
   <div class="box">
     <div style="display:flex;align-items:center;justify-content:space-between;">
-      <button class="secondary" onclick="show('home')" style="margin:0;">← Home</button>
+      <button class="secondary" onclick="settingsHome()" style="margin:0;">← Home</button>
     </div>
     <h3 style="margin:10px 0 6px;">🔄 FarmOS Sync</h3>
   </div>
@@ -786,7 +803,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.12-0630"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.12-0726"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -853,7 +870,7 @@ let formulas = JSON.parse(localStorage.getItem(LS.formulas) || "null") || {
 };
 
 // ===== SESSION =====
-let sessionDoseRate = null; // ml/lb — persists through med flow, null = use formula default
+let sessionDoseRate = null; // dose-unit per lb — persists through med flow, null = use formula default
 let _lastSavedEntry = null; // set by saveStep, read by saveAndHome/nextAction for med deduct prompt
 // Back button handled by the module-aware popstate listener at the bottom
 // of this script. Push an initial state so it fires.
@@ -1055,7 +1072,7 @@ function renderStep() {
       : (w && effectiveRate) ? (w * effectiveRate).toFixed(2) : "";
 
     const sessionRateDisplay = (!isFixed && sessionDoseRate !== null)
-      ? `<span style="color:#c90;font-size:13px;">⚡ Session rate: ${sessionDoseRate} ml/lb</span>`
+      ? `<span style="color:#c90;font-size:13px;">⚡ Session rate: ${sessionDoseRate} ${unit}/lb</span>`
       : "";
 
     box.innerHTML = `
@@ -1067,12 +1084,17 @@ function renderStep() {
         <input id="f_medweight" type="number" step="0.1" value="${w || lw}" placeholder="lbs">
       </div>
 
-      <div class="dose-display" id="doseDisplay">${firstDose ? firstDose + " " + unit : "enter weight"}</div>
+      <label>Dose — auto-calculated, type over it for a custom dose</label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input id="f_dose" type="number" step="0.01" inputmode="decimal" value="${firstDose}"
+          placeholder="enter weight" class="dose-display" style="flex:1;text-align:center;margin-top:0;">
+        <span id="doseUnit" style="font-size:20px;color:#aaa;flex-shrink:0;">${unit}</span>
+      </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
         ${sessionRateDisplay}
         <button id="customRateBtn" type="button" onclick="toggleRateDrawer()"
           style="margin:0;padding:6px 12px;font-size:13px;background:#555;border-radius:6px;${isFixed?"display:none;":""}">
-          ${sessionDoseRate !== null ? "⚡ Rate" : "⚙️ Custom $/lb"}
+          ${sessionDoseRate !== null ? "⚡ Rate" : `⚙️ Custom ${unit}/lb`}
         </button>
         <button id="resetRateBtn" type="button" onclick="clearSessionRate()"
           style="display:${sessionDoseRate !== null ? "inline-block" : "none"};margin:0;padding:6px 10px;font-size:13px;background:#444;border-radius:6px;">
@@ -1083,18 +1105,16 @@ function renderStep() {
       <!-- Custom rate drawer — hidden by default -->
       <div id="rateDrawer" style="display:none;background:#1a2a1a;border:1px solid #3a7;border-radius:8px;padding:12px;margin-top:8px;">
         <div style="font-size:14px;color:#aaa;margin-bottom:8px;">
-          Standard: <strong style="color:#eee;">${activeFormula.dose || "—"} ml/lb</strong>
+          Standard: <strong style="color:#eee;">${activeFormula.dose || "—"} ${unit}/lb</strong>
         </div>
-        <label style="margin-top:0;">Session rate (ml/lb)</label>
+        <label style="margin-top:0;">Session rate (${unit}/lb)</label>
         <div style="display:flex;gap:6px;margin-top:4px;">
           <input id="f_rateinput" type="number" step="0.001" value="${sessionDoseRate !== null ? sessionDoseRate : ""}"
-            placeholder="${activeFormula.dose || "ml/lb"}" style="flex:1;margin-top:0;">
+            placeholder="${activeFormula.dose || unit + '/lb'}" style="flex:1;margin-top:0;">
           <button type="button" onclick="applySessionRate()" style="margin:0;padding:10px 14px;font-size:14px;">Apply</button>
         </div>
         <div style="color:#666;font-size:12px;margin-top:6px;">Changes dose for all animals this session only</div>
       </div>
-
-      <input id="f_dose" type="hidden" value="${firstDose}">
 
       <label>Route</label>
       <select id="f_route">
@@ -1664,15 +1684,15 @@ function calcDose() {
 
   const unit = f.unit || "ml";
   const doseEl = document.getElementById("f_dose");
-  const doseDisplay = document.getElementById("doseDisplay");
   const weightRow = document.getElementById("weightRow");
 
   const rate = (!f.fixed && sessionDoseRate !== null) ? sessionDoseRate : f.dose;
 
+  const doseUnit = document.getElementById("doseUnit");
+  if (doseUnit) doseUnit.textContent = unit;
   if (f.fixed) {
     if (weightRow) weightRow.style.display = "none";
     if (doseEl) doseEl.value = f.dose;
-    if (doseDisplay) doseDisplay.textContent = f.dose + " " + unit;
   } else {
     if (weightRow) weightRow.style.display = "";
     if (w && rate) {
@@ -1684,9 +1704,8 @@ function calcDose() {
       }
       const display = d.toFixed(2);
       if (doseEl) doseEl.value = display;
-      if (doseDisplay) doseDisplay.textContent = display + " " + unit;
     } else {
-      if (doseDisplay) doseDisplay.textContent = "enter weight";
+      if (doseEl) doseEl.value = "";
     }
   }
 }
@@ -1844,9 +1863,9 @@ function saveStep() {
       doseNote = `Dose: ${dose} ${unit} (fixed)`;
     } else if (w && f.dose) {
       if (sessionDoseRate !== null && sessionDoseRate !== f.dose) {
-        doseNote = `Dose: ${dose} ${unit} (custom rate: ${sessionDoseRate} ml/lb × ${w} lbs, standard: ${f.dose} ml/lb)`;
+        doseNote = `Dose: ${dose} ${unit} (custom rate: ${sessionDoseRate} ${unit}/lb × ${w} lbs, standard: ${f.dose} ${unit}/lb)`;
       } else {
-        doseNote = `Dose: ${dose} ${unit} (${f.dose} ml/lb × ${w} lbs)`;
+        doseNote = `Dose: ${dose} ${unit} (${f.dose} ${unit}/lb × ${w} lbs)`;
       }
     } else {
       doseNote = `Dose: ${dose} ${unit}`;
@@ -2248,6 +2267,8 @@ function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
   if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
+  const connLine = document.getElementById("connStatusLine");
+  if (connLine) connLine.textContent = cfg.url ? "✅ Connected: " + cfg.url : "❌ Not configured";
   const verLine = document.getElementById("appVersionLine");
   if (verLine) verLine.textContent = "FarmDesk version: " + APP_VERSION;
   // Logo preview
@@ -2347,6 +2368,9 @@ function renderSettings() {
 
   // Animal list and excluded list now rendered in the Animals screen — not in Settings
 
+  // GoatDesk-specific boxes only make sense when the Goats module is on
+  const goatsOn = (typeof moduleEnabled === "function") ? moduleEnabled("goats") : true;
+  document.querySelectorAll("#screen-settings .gd-only").forEach(b => b.style.display = goatsOn ? "" : "none");
   // Module enable/disable toggles (registry lives at the bottom of this script)
   if (typeof renderModuleToggles === "function") renderModuleToggles();
   // Stock module settings section — only when Stock is enabled
@@ -2367,9 +2391,9 @@ function renderModuleToggles() {
   const cfg = JSON.parse(localStorage.getItem("farmdesk_modules_enabled") || "{}");
   box.innerHTML = MODULES.map(m => `
     <label style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:15px;">
-      <input type="checkbox" ${m.host ? "checked disabled" : (cfg[m.id] !== false ? "checked" : "")}
+      <input type="checkbox" ${cfg[m.id] !== false ? "checked" : ""}
         onchange="setModuleEnabled('${m.id}', this.checked)" style="width:20px;height:20px;">
-      ${m.label}${m.host ? ' <span style="color:#666;font-size:12px;">(host — always on)</span>' : ""}
+      ${m.label}
     </label>`).join("");
 }
 
@@ -5449,12 +5473,6 @@ function sd_renderSettings() {
       <strong style="color:#3a7;">📦 Stock Desk Settings</strong>
     </div>
     <div class="box">
-      <strong>FarmOS Connection</strong>
-      <div style="font-size:13px;color:#888;margin-top:4px;">
-        ${cfg.url ? '✅ Connected: ' + cfg.url : '❌ Not configured — configure in FarmOS Sync screen'}
-      </div>
-    </div>
-    <div class="box">
       <strong>Low Stock Thresholds</strong>
       <p style="color:#888;font-size:13px;margin-top:4px;">Amber warning when stock hits or falls below this value. 0 = off.</p>
       <div id="thresholdList"></div>
@@ -5589,11 +5607,12 @@ document.getElementById('syncStatus').textContent = _lastSync ? 'Synced ' + _las
 //   1. Wrap its HTML in <div id="module-yourmod" style="display:none;"> ... </div>
 //   2. Add one entry below. onActivate runs each time the module is shown.
 //   3. Done — the switcher bar, Settings toggles, and back button pick it up.
-// host:true marks the module that owns the shared Settings screen; it can't
-// be disabled (otherwise Settings would become unreachable).
+// Every module can be enabled/disabled independently (minimum one enabled).
+// Shared screens (Settings, FarmOS Sync) physically live in the goatdesk
+// container but stay reachable via the header ⚙️ even when Goats is off.
 const MODULES = [
   { id: 'goats', label: '🐐 Goats', title: '🐐 FarmDesk',
-    containerId: 'module-goatdesk', host: true,
+    containerId: 'module-goatdesk',
     onActivate: function() {
       document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
       const gdHome = document.getElementById('screen-home');
@@ -5618,7 +5637,8 @@ const MODULES_CFG = 'farmdesk_modules_enabled'; // { stock: false, ... } — abs
 
 function enabledModules() {
   const cfg = JSON.parse(localStorage.getItem(MODULES_CFG) || '{}');
-  return MODULES.filter(m => m.host || cfg[m.id] !== false);
+  const on = MODULES.filter(m => cfg[m.id] !== false);
+  return on.length ? on : [MODULES[0]]; // never zero — fall back to first
 }
 
 function moduleEnabled(id) {
@@ -5627,6 +5647,11 @@ function moduleEnabled(id) {
 
 function setModuleEnabled(id, on) {
   const cfg = JSON.parse(localStorage.getItem(MODULES_CFG) || '{}');
+  if (!on && enabledModules().length === 1 && enabledModules()[0].id === id) {
+    showToast('At least one module must stay on');
+    if (typeof renderModuleToggles === 'function') renderModuleToggles(); // reset checkbox
+    return;
+  }
   cfg[id] = !!on;
   localStorage.setItem(MODULES_CFG, JSON.stringify(cfg));
   renderModuleBar();
@@ -5661,6 +5686,24 @@ function switchModule(modId) {
   renderModuleBar();
 }
 
+// ── SHARED SETTINGS ──
+// Settings/Sync physically live in the goatdesk container. These open them
+// from ANY module (even with Goats disabled) and return to the right home.
+function openSharedSettings() {
+  MODULES.forEach(m => {
+    const el = document.getElementById(m.containerId);
+    if (el) el.style.display = m.containerId === 'module-goatdesk' ? '' : 'none';
+  });
+  document.getElementById('headerTitle').textContent = '⚙️ FarmDesk';
+  show('settings');
+}
+
+function settingsHome() {
+  const active = localStorage.getItem(MODULE_KEY) || enabledModules()[0].id;
+  if (active === 'goats' && moduleEnabled('goats')) { show('home'); return; }
+  switchModule(moduleEnabled(active) ? active : enabledModules()[0].id);
+}
+
 // Restore saved module on startup (falls back if that module is now disabled)
 (function() {
   const saved = localStorage.getItem(MODULE_KEY) || 'goats';
@@ -5670,6 +5713,9 @@ function switchModule(modId) {
 // ===== BACK BUTTON — module aware =====
 window.addEventListener('popstate', function(e) {
   const mod = localStorage.getItem(MODULE_KEY) || 'goats';
+  // Back press while in shared Settings opened from a non-goats module
+  const gdEl = document.getElementById('module-goatdesk');
+  if (gdEl && gdEl.style.display !== 'none' && mod !== 'goats') { settingsHome(); return; }
   if (mod === 'goats') {
     const active = document.querySelector('#module-goatdesk .screen.active');
     if (active && active.id !== 'screen-home') show('home');
