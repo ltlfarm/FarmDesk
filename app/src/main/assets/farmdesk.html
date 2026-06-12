@@ -811,7 +811,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.12-1005"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.12-1011"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1543,6 +1543,32 @@ function orientedCanvas(img, rawDataUrl, maxW, callback) {
   });
 }
 
+
+// ===== SHARED: replace-on-push — keep only the newest photo on a record =====
+// farmOS APPENDS uploaded images. After an upload succeeds, this PATCHes the
+// record's image relationship down to just the new file, so old copies detach
+// and Drupal's cleanup removes them. Photos are per-record in farmOS, so this
+// can never affect any other asset or log.
+async function keepOnlyNewestImage(entityType, bundle, uuid, fileId, token) {
+  if (!fileId) return;
+  try {
+    await fetch(apiUrl(`/api/${entityType}/${bundle}/${uuid}`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type":  "application/vnd.api+json",
+        "Accept":        "application/vnd.api+json",
+        "Authorization": "Bearer " + token
+      },
+      body: JSON.stringify({
+        data: {
+          type: entityType + "--" + bundle,
+          id:   uuid,
+          relationships: { image: { data: [{ type: "file--file", id: fileId }] } }
+        }
+      })
+    });
+  } catch(e) { /* non-fatal — worst case the old photo stays attached */ }
+}
 
 // ===== SHARED: rotate a base64 image 90 degrees clockwise =====
 function rotateBase64CW(dataUrl, callback) {
@@ -4038,7 +4064,12 @@ async function syncToFarmOS() {
                 },
                 body: blob
               });
-              if (!photoUpload.ok) logEl.textContent += `  ⚠️ Photo upload failed: ${photoUpload.status}\n`;
+              if (!photoUpload.ok) {
+                logEl.textContent += `  ⚠️ Photo upload failed: ${photoUpload.status}\n`;
+              } else {
+                const fileData = await photoUpload.json().catch(() => null);
+                await keepOnlyNewestImage('log', farmosType, l.id, fileData?.data?.id, token);
+              }
             } catch(pe) {
               logEl.textContent += `  ⚠️ Photo upload error: ${pe.message}\n`;
             }
@@ -5445,6 +5476,8 @@ async function sd_syncToFarmOS() {
             body: blob
           });
           if (!uploadRes.ok) throw new Error('HTTP ' + uploadRes.status);
+          const fileData = await uploadRes.json().catch(() => null);
+          await keepOnlyNewestImage('asset', 'material', item.uuid, fileData?.data?.id, token);
           item.synced = true;
           ok++;
           logEl.textContent += '✅ 📷 Photo: ' + item.name + '\n';
