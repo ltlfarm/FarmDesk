@@ -1,4 +1,39 @@
 <!DOCTYPE html>
+<!--
+  ============================================================================
+  FarmDesk — unified farmOS frontend for Android WebView
+  ============================================================================
+  ONE FILE: all HTML, CSS, and JS live here. No external dependencies.
+
+  ARCHITECTURE
+    - Each module (Goats, Stock, ...) is a <div id="module-NAME"> containing
+      its own screens, plus a JS section marked with banner comments.
+    - The MODULE REGISTRY (bottom of the script) wires modules into the
+      header switcher bar, the Settings enable/disable toggles, and the
+      Android back button. Adding a module = add its div + one registry entry.
+    - Local-first: every save writes to localStorage only. Nothing touches
+      the network until the user explicitly syncs.
+
+  SYNC MODEL (farmOS 2.x JSON:API)
+    - New local logs        -> POST  /api/log/{type}
+    - farmOS-fetched logs   -> PATCH /api/log/{type}/{uuid} when edited or
+      when a scheduled task is completed (needsPatch flag). farmOS tasks are
+      ONE log: created pending, PATCHed to done. Never duplicated.
+    - OAuth password grant, scope=farm_manager required for writes.
+
+  STORAGE KEYS (localStorage)
+    farmdesk_cfg              shared farmOS URL + credentials (all modules)
+    farmdesk_activeModule     which module is showing
+    farmdesk_modules_enabled  per-module on/off map
+    goatdesk_*                Goats module data (logs, animals, formulas...)
+    farmdesk_stock_*          Stock module data (assets, history, pending...)
+
+  CONVENTIONS
+    - Stock module: element ids "sd-", functions "sd_".
+    - "===== SHARED MODULE:" comments mark functions reusable across modules.
+    - Dates: ISO 8601 strings locally; Unix integer strings to farmOS.
+  ============================================================================
+-->
 <html>
 <head>
 <meta charset="UTF-8">
@@ -264,10 +299,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <span id="headerTitle">🐐 FarmDesk</span>
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-    <div class="module-switcher">
-      <button class="module-btn active" id="modBtnGoats" onclick="switchModule('goats')">🐐 Goats</button>
-      <button class="module-btn" id="modBtnStock" onclick="switchModule('stock')">📦 Stock</button>
-    </div>
+    <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
+    <div class="module-switcher" id="moduleSwitcher"></div>
     <small id="syncStatus">Offline</small>
   </div>
 </header>
@@ -450,6 +483,15 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   </div>
 
   <div class="box">
+    <strong>🧩 Modules</strong>
+    <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Goats hosts these shared settings, so it stays on.</p>
+    <div id="moduleToggles"></div>
+  </div>
+
+  <!-- StockDesk settings (thresholds, clear history) render here when Stock module is enabled -->
+  <div id="sd-settings-inject"></div>
+
+  <div class="box">
     <strong>Account</strong>
     <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
     <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
@@ -571,7 +613,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- ===== STOCKDESK MODULE ===== -->
 <div id="module-stockdesk" style="display:none;">
-<div id="loading"><div class="spinner"></div><p id="loadingMsg">Loading...</p></div>
+<!-- spinner: uses the single global #loading overlay above the module containers -->
 
 <!-- ===== DASHBOARD ===== -->
 <div id="sd-screen-dashboard" class="screen active">
@@ -810,14 +852,8 @@ let formulas = JSON.parse(localStorage.getItem(LS.formulas) || "null") || {
 // ===== SESSION =====
 let sessionDoseRate = null; // ml/lb — persists through med flow, null = use formula default
 let _lastSavedEntry = null; // set by saveStep, read by saveAndHome/nextAction for med deduct prompt
-window.addEventListener("popstate", () => {
-  const active = document.querySelector(".screen.active");
-  if (active && active.id !== "screen-home") {
-    show("home");
-  }
-});
-
-// Push a state so popstate fires on back button
+// Back button handled by the module-aware popstate listener at the bottom
+// of this script. Push an initial state so it fires.
 history.pushState({ page: "home" }, "");
 
 function show(id) {
@@ -2052,7 +2088,9 @@ function makeLogEl(l, showActions = false) {
     toggleLogDrawer(this);
   };
   const t = l.time ? (new Date(l.time).toString() !== "Invalid Date" ? new Date(l.time).toLocaleString() : "unknown time") : "unknown time";
-  const statusTag = l.status === "pending" ? " \u23F0 scheduled" : (l.synced ? " \u2713 synced" : "");
+  const statusTag = l.status === "pending"
+    ? (l.synced ? " \u23F0 scheduled" : " \u23F0 scheduled \u00B7 \u23F3 not in farmOS yet")
+    : (l.synced ? " \u2713 synced" : "");
   const detail = formatLog(l);
 
   // Collapsed header — always visible
@@ -2126,18 +2164,6 @@ function renderPending() {
   box.style.display = "block";
   list.innerHTML = "";
   pending.forEach(l => list.appendChild(makeLogEl(l, true)));
-}
-
-function completeTask(id) {
-  const l = logs.find(l => l.id === id);
-  if (!l) return;
-  l.status = "done";
-  l.time = new Date().toISOString();
-  l.synced = false;
-  localStorage.setItem(LS.logs, JSON.stringify(logs));
-  renderPending();
-  renderRecent();
-  renderHistory();
 }
 
 // ===== RECENT =====
@@ -2314,6 +2340,31 @@ function renderSettings() {
   });
 
   // Animal list and excluded list now rendered in the Animals screen — not in Settings
+
+  // Module enable/disable toggles (registry lives at the bottom of this script)
+  if (typeof renderModuleToggles === "function") renderModuleToggles();
+  // Stock module settings section — only when Stock is enabled
+  const sdInject = document.getElementById("sd-settings-inject");
+  if (sdInject) {
+    if (typeof sd_renderSettings === "function" && typeof moduleEnabled === "function" && moduleEnabled("stock")) {
+      sd_renderSettings();
+    } else {
+      sdInject.innerHTML = "";
+    }
+  }
+}
+
+// Renders one checkbox per registered module into Settings
+function renderModuleToggles() {
+  const box = document.getElementById("moduleToggles");
+  if (!box || typeof MODULES === "undefined") return;
+  const cfg = JSON.parse(localStorage.getItem("farmdesk_modules_enabled") || "{}");
+  box.innerHTML = MODULES.map(m => `
+    <label style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:15px;">
+      <input type="checkbox" ${m.host ? "checked disabled" : (cfg[m.id] !== false ? "checked" : "")}
+        onchange="setModuleEnabled('${m.id}', this.checked)" style="width:20px;height:20px;">
+      ${m.label}${m.host ? ' <span style="color:#666;font-size:12px;">(host — always on)</span>' : ""}
+    </label>`).join("");
 }
 
 // ===== PROC SUPPLIES: add/remove rows in entry form =====
@@ -2612,10 +2663,11 @@ function cloneLog(id) {
   clone.id = Date.now() + "c" + Math.random().toString(36).slice(2,7);
   clone.time = new Date().toISOString();
   clone.synced = false;
-  clone.fromFarmOS = false;
   clone.status = "done";
-  // Don't clone photo URLs from farmOS — they'd be stale
+  // Don't clone photo URLs from farmOS — they'd be stale on the new log
   if (clone.data && clone.data.photo && clone.fromFarmOS) clone.data.photo = null;
+  clone.fromFarmOS = false;
+  clone.needsPatch = false; // a clone is always a NEW log — POST, never PATCH
   logs.push(clone);
   localStorage.setItem(LS.logs, JSON.stringify(logs));
   renderRecent();
@@ -2983,7 +3035,7 @@ function exportLogs() {
   const blob = new Blob([data], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "goatdesk_logs_" + new Date().toISOString().slice(0,10) + ".json";
+  a.download = "farmdesk_logs_" + new Date().toISOString().slice(0,10) + ".json";
   a.click();
 }
 
@@ -4333,7 +4385,7 @@ let adjHistory    = JSON.parse(localStorage.getItem(SD_LS.history)    || '[]');
 let thresholds = JSON.parse(localStorage.getItem(SD_LS.thresholds) || '{}');
 let pending    = JSON.parse(localStorage.getItem(SD_LS.pending)    || '[]');
 let photos     = JSON.parse(localStorage.getItem(SD_LS.photos)     || '{}');
-currentPhoto = null; // shared with GoatDesk module — single declaration above // base64 for asset photo being attached
+currentPhoto = null; // declared once in the Goats section; reset here for Stock asset photos
 let currentTab   = 'Feed';
 let adjustAsset  = null;
 let adjustAction = 'increment';
@@ -5373,28 +5425,8 @@ function sd_renderSettings() {
       <div id="thresholdList"></div>
       <button onclick="sd_saveThresholds()" class="wide secondary" style="margin-top:10px;">💾 Save Thresholds</button>
     </div>
-    <div class="box">
-      <strong>Add New Inventory Item</strong>
-      <label>Name</label>
-      <input type="text" id="newItemName" placeholder="e.g. Hay Bermuda" enterkeyhint="next" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('newItemNotes').focus();}">
-      <label>Category</label>
-      <select id="newItemCat">
-        <option value="e5e7b94d-d8b3-4c78-8554-097edc968208">Feed</option>
-        <option value="eb01f4d2-7dbf-46af-b2ff-426575eff635">Medical</option>
-        <option value="2f1ac8ab-c6b6-4f91-a504-b48e2c921e57">Lab</option>
-      </select>
-      <label>Unit</label>
-      <select id="newItemUnit">
-        <option value="count|22528b34-ae02-4d42-8e3f-1e3524caa911|count">Count</option>
-        <option value="bales|ca1ad806-6733-450f-a28f-2d8b1032d47e|count">Bales</option>
-        <option value="ml|60c97ab7-0c9a-40cc-a05c-e9ccf6c80f82|volume">ml</option>
-        <option value="lbs|830ff397-6d45-400a-a25a-d129d15229e2|weight">lbs</option>
-      </select>
-      <label>Notes (optional)</label>
-      <input type="text" id="newItemNotes" placeholder="e.g. Dosage, supplier, storage info" enterkeyhint="done" onkeydown="if(event.key==='Enter'){event.preventDefault();queueCreateItem();}">
-      <button onclick="queueCreateItem()" style="width:calc(100% - 10px);margin-top:12px;">➕ Create Item</button>
-      <div id="newItemResult" style="font-size:14px;color:#888;margin-top:6px;"></div>
-    </div>
+    <!-- Add New Item lives in the dashboard ➕ panel — not duplicated here
+         to avoid duplicate element ids -->
     <div class="box">
       <button onclick="sd_clearHistory()" class="wide danger">🗑️ Clear All Stock History</button>
     </div>
@@ -5403,6 +5435,7 @@ function sd_renderSettings() {
 }
 function sd_renderThresholdList() {
   const list = document.getElementById('thresholdList');
+  if (!list) return; // settings section not on screen — nothing to update
   if (!assets.length) {
     list.innerHTML = '<p style="color:#888;font-size:13px;">Connect and sync to see items.</p>';
     return;
@@ -5550,39 +5583,83 @@ document.getElementById('syncStatus').textContent = _lastSync ? 'Synced ' + _las
 // ============================
 // ===== MODULE SWITCHER ======
 // ============================
-const MODULE_KEY = 'farmdesk_activeModule';
+// MODULE REGISTRY — to add a new module:
+//   1. Wrap its HTML in <div id="module-yourmod" style="display:none;"> ... </div>
+//   2. Add one entry below. onActivate runs each time the module is shown.
+//   3. Done — the switcher bar, Settings toggles, and back button pick it up.
+// host:true marks the module that owns the shared Settings screen; it can't
+// be disabled (otherwise Settings would become unreachable).
+const MODULES = [
+  { id: 'goats', label: '🐐 Goats', title: '🐐 FarmDesk',
+    containerId: 'module-goatdesk', host: true,
+    onActivate: function() {
+      document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
+      const gdHome = document.getElementById('screen-home');
+      if (gdHome) gdHome.classList.add('active');
+    } },
+  { id: 'stock', label: '📦 Stock', title: '📦 FarmDesk',
+    containerId: 'module-stockdesk',
+    onActivate: function() {
+      document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
+      const sdDash = document.getElementById('sd-screen-dashboard');
+      if (sdDash) sdDash.classList.add('active');
+      document.querySelectorAll('.sd-bottom-nav button').forEach(b => b.classList.remove('active'));
+      const sdNavBtn = document.getElementById('sd-nav-dashboard');
+      if (sdNavBtn) sdNavBtn.classList.add('active');
+      renderDashboard();
+      if (typeof updateSyncBadge === 'function') updateSyncBadge();
+    } }
+];
 
-function switchModule(mod) {
-  localStorage.setItem(MODULE_KEY, mod);
-  const isGoats = mod === 'goats';
-  // Hide/show module containers
-  document.getElementById('module-goatdesk').style.display = isGoats ? '' : 'none';
-  document.getElementById('module-stockdesk').style.display = isGoats ? 'none' : '';
-  // Update header buttons
-  document.getElementById('headerTitle').textContent = isGoats ? '🐐 FarmDesk' : '📦 FarmDesk';
-  document.getElementById('modBtnGoats').className = 'module-btn' + (isGoats ? ' active' : '');
-  document.getElementById('modBtnStock').className = 'module-btn' + (!isGoats ? ' active' : '');
-  // Activate correct home screen for the module
-  if (isGoats) {
-    // Ensure GD home screen is active
-    document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
-    const gdHome = document.getElementById('screen-home');
-    if (gdHome) gdHome.classList.add('active');
-  } else {
-    // Ensure SD dashboard screen is active and rendered
-    document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
-    const sdDash = document.getElementById('sd-screen-dashboard');
-    if (sdDash) sdDash.classList.add('active');
-    // Activate dashboard nav button
-    document.querySelectorAll('.sd-bottom-nav button').forEach(b => b.classList.remove('active'));
-    const sdNavBtn = document.getElementById('sd-nav-dashboard');
-    if (sdNavBtn) sdNavBtn.classList.add('active');
-    renderDashboard();
-    if (typeof updateSyncBadge === 'function') updateSyncBadge();
-  }
+const MODULE_KEY  = 'farmdesk_activeModule';
+const MODULES_CFG = 'farmdesk_modules_enabled'; // { stock: false, ... } — absent means enabled
+
+function enabledModules() {
+  const cfg = JSON.parse(localStorage.getItem(MODULES_CFG) || '{}');
+  return MODULES.filter(m => m.host || cfg[m.id] !== false);
 }
 
-// Restore saved module on startup
+function moduleEnabled(id) {
+  return enabledModules().some(m => m.id === id);
+}
+
+function setModuleEnabled(id, on) {
+  const cfg = JSON.parse(localStorage.getItem(MODULES_CFG) || '{}');
+  cfg[id] = !!on;
+  localStorage.setItem(MODULES_CFG, JSON.stringify(cfg));
+  renderModuleBar();
+  // If the active module was just turned off, fall back to the first enabled one
+  const active = localStorage.getItem(MODULE_KEY) || 'goats';
+  if (!moduleEnabled(active)) switchModule(enabledModules()[0].id);
+}
+
+function renderModuleBar() {
+  const bar = document.getElementById('moduleSwitcher');
+  if (!bar) return;
+  const enabled = enabledModules();
+  const active  = localStorage.getItem(MODULE_KEY) || 'goats';
+  bar.style.display = enabled.length > 1 ? '' : 'none'; // hide bar if only one module
+  bar.innerHTML = enabled.map(m =>
+    `<button class="module-btn${m.id === active ? ' active' : ''}" onclick="switchModule('${m.id}')">${m.label}</button>`
+  ).join('');
+}
+
+function switchModule(modId) {
+  if (!moduleEnabled(modId)) modId = enabledModules()[0].id;
+  localStorage.setItem(MODULE_KEY, modId);
+  MODULES.forEach(m => {
+    const el = document.getElementById(m.containerId);
+    if (el) el.style.display = m.id === modId ? '' : 'none';
+  });
+  const mod = MODULES.find(m => m.id === modId);
+  if (mod) {
+    document.getElementById('headerTitle').textContent = mod.title;
+    if (mod.onActivate) mod.onActivate();
+  }
+  renderModuleBar();
+}
+
+// Restore saved module on startup (falls back if that module is now disabled)
 (function() {
   const saved = localStorage.getItem(MODULE_KEY) || 'goats';
   switchModule(saved);
