@@ -32,6 +32,9 @@
     - Nothing farm-specific is hardcoded. Point Settings -> FarmOS Sync at
       your farmOS instance; animals, logs, and inventory come from there.
     - Animal list: Settings -> Animal List, or auto-imported on first fetch.
+      Each module imports only its own kinds via the farmOS animal_type term
+      (Goats module: "Goat"). Untyped animals import everywhere — set types
+      in farmOS to keep mixed farms clean.
     - Med formulas: starter goat doses included — edit in Settings.
     - Stock categories/units auto-detect from YOUR farmOS taxonomy on first
       inventory fetch (built-in fallbacks until then).
@@ -811,7 +814,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.12-1011"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.12-1801"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3607,18 +3610,35 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) { el.style.color = "#888"; el.textContent = "Fetching config..."; }
     await pullConfig(token);
 
-    // ===== STEP 2: Fetch all animals =====
+    // ===== STEP 2: Fetch this module's animals =====
+    // Each module only pulls its own kinds, matched against the farmOS
+    // animal_type term: goats here; a bird module would list bird types.
+    // Animals with NO type set are still included (never silently hide
+    // someone's herd) — set types in farmOS to filter mixed farms cleanly.
+    const MODULE_ANIMAL_TYPES = ["goat"]; // lowercase term names this module owns
     if (!silent && el) el.textContent = "Fetching animals...";
-    const animalRes = await fetch(apiUrl("/api/asset/animal?page[limit]=100"), { headers: authHeaders });
-    if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
-    const animalData = await animalRes.json();
+    let animalRows = [], typeNames = {};
+    let aUrl = apiUrl("/api/asset/animal?include=animal_type&page[limit]=100");
+    while (aUrl) {
+      const animalRes = await fetch(aUrl, { headers: authHeaders });
+      if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
+      const animalData = await animalRes.json();
+      animalRows = animalRows.concat(animalData.data || []);
+      (animalData.included || []).forEach(t => {
+        if (t.type === "taxonomy_term--animal_type") typeNames[t.id] = (t.attributes.name || "").toLowerCase();
+      });
+      aUrl = animalData.links?.next?.href || null;
+    }
 
     animalUUIDs = {};
     const archivedNames = [];
 
-    (animalData.data || []).forEach(a => {
+    animalRows.forEach(a => {
       const name = (a.attributes.name || "").trim();
       if (!name) return;
+      const typeId = a.relationships?.animal_type?.data?.id;
+      const typeName = typeId ? typeNames[typeId] : null;
+      if (typeName && !MODULE_ANIMAL_TYPES.includes(typeName)) return; // other module's animal
       if (a.attributes.status === "archived") {
         archivedNames.push(name);
         return;
