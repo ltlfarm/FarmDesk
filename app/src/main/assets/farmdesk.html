@@ -494,6 +494,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   <div class="box">
     <strong>Account</strong>
     <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
+    <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
     <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
   </div>
 
@@ -784,6 +785,8 @@ const LS = {
   // Per-URL log storage — key is farmdesk_logs_<urlhash>
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
+
+const APP_VERSION = "2026.06.12-0630"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1972,6 +1975,7 @@ function saveStep() {
     const taskLog = logs.find(l => l.id === _activeTaskId);
     if (taskLog) {
       taskLog.status   = "done";
+      taskLog.goat     = entry.goat; // user may switch the animal in the form
       taskLog.time     = entry.time;
       taskLog.data     = entry.data;
       taskLog.synced   = false;
@@ -2244,6 +2248,8 @@ function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
   if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
+  const verLine = document.getElementById("appVersionLine");
+  if (verLine) verLine.textContent = "FarmDesk version: " + APP_VERSION;
   // Logo preview
   const logoPreview = document.getElementById("logoPreview");
   const clearLogoBtn = document.getElementById("clearLogoBtn");
@@ -3174,6 +3180,7 @@ function saveFarmOSCfg() {
 // ===== SHARED MODULE: OAuth2 authentication =====
 // Tries proxy first then direct. Returns a valid token or throws.
 async function getToken(cfg) {
+  let lastErr = null; // most informative error seen across attempts
   const tryAuth = async (url, scope) => {
     const body = new URLSearchParams({
       grant_type: "password",
@@ -3197,8 +3204,17 @@ async function getToken(cfg) {
         const data = await res.json();
         return data.access_token;
       }
+      // Surface farmOS's actual error so the user knows WHY it failed
+      // (flood lockout vs wrong password vs missing role) instead of a
+      // generic message that invites retrying — which extends a lockout.
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody.error_description || errBody.message || errBody.error || ("HTTP " + res.status);
+      lastErr = /flood|blocked|too many/i.test(msg)
+        ? "farmOS locked this account after repeated failed logins. Wait 15-30 minutes, then try ONCE."
+        : msg;
     } catch(e) {
       clearTimeout(timer);
+      if (!lastErr) lastErr = (e.name === "AbortError") ? "Connection timed out" : e.message;
     }
     return null;
   };
@@ -3219,7 +3235,7 @@ async function getToken(cfg) {
       }
     } catch(e) { /* try next */ }
   }
-  throw new Error("Auth failed — check credentials and URL");
+  throw new Error("Auth failed — " + (lastErr || "check credentials and URL"));
 }
 function apiUrl(path) {
   return window._useProxy ? "/proxy" + path : (JSON.parse(localStorage.getItem(LS.cfg) || "{}").url || "") + path;
@@ -3679,6 +3695,7 @@ async function fetchAnimalUUIDs(silent = false) {
                 })(),
         synced: true,
         fromFarmOS: true,
+        farmosBundle: log.type, // e.g. "log--medical" — exact bundle for PATCH URL
         status: attrs.status === "pending" ? "pending" : "done",
         loggedBy: (() => {
           const uidRel = log.relationships?.uid?.data;
@@ -3704,11 +3721,20 @@ async function fetchAnimalUUIDs(silent = false) {
       }
     });
 
-    // Merge — never overwrite unsynced local logs
-    const existingFarmOSIds = new Set(logs.filter(l => l.fromFarmOS).map(l => l.id));
-    let added = 0;
+    // Merge — farmOS is the source of truth for its own logs. Existing local
+    // copies are UPDATED in place so other workers' completions/edits show up.
+    // Exception: a local copy with unsynced changes (needsPatch / !synced)
+    // wins until it has been pushed.
+    const localByFarmOSId = {};
+    logs.forEach((l, i) => { if (l.fromFarmOS) localByFarmOSId[l.id] = i; });
+    let added = 0, updated = 0;
     farmosLogs.forEach(l => {
-      if (!existingFarmOSIds.has(l.id)) { logs.push(l); added++; }
+      const idx = localByFarmOSId[l.id];
+      if (idx === undefined) { logs.push(l); added++; }
+      else if (logs[idx].synced && !logs[idx].needsPatch) {
+        logs[idx] = l; // clean local copy — take current farmOS state
+        updated++;
+      }
     });
 
     localStorage.setItem(LS.logs, JSON.stringify(logs));
@@ -3721,7 +3747,7 @@ async function fetchAnimalUUIDs(silent = false) {
     if (statusEl) statusEl.textContent = "Synced " + now;
 
     if (!silent && el) {
-      el.textContent = `✅ Config synced, ${added} logs imported, animals updated`;
+      el.textContent = `✅ Config synced, ${added} new + ${updated} updated logs, animals updated`;
       el.style.color = "#3a7";
     }
 
@@ -3948,8 +3974,13 @@ async function syncToFarmOS() {
 
     // ── PATCH farmOS edits / task completions ──
     for (const l of toPatch) {
-      const farmosType = FARMOS_TYPE_MAP[l.type] || "activity";
+      // Use the exact bundle the log came from — the local-type map is not
+      // 1:1 (e.g. unknown bundles fall back to "obs"), so trust farmosBundle
+      const farmosType = (l.farmosBundle && l.farmosBundle.startsWith("log--"))
+        ? l.farmosBundle.slice(5)
+        : (FARMOS_TYPE_MAP[l.type] || "activity");
       const payload = buildFarmOSPayload(l);
+      payload.data.type = "log--" + farmosType;
       payload.data.id = l.id; // JSON:API PATCH requires id in data object
       const url = apiUrl("/api/log/" + farmosType + "/" + l.id);
       try {
@@ -4486,6 +4517,10 @@ async function refreshAssets(silent) {
         photo:     existingPhoto
       };
     });
+    // Keep items created locally via ➕ that haven't been pushed yet —
+    // farmOS doesn't know them, so a fetch must not drop them
+    const prevLocalOnly = JSON.parse(localStorage.getItem(SD_LS.assets) || '[]').filter(a => a.localOnly);
+    prevLocalOnly.forEach(a => { if (!assets.some(x => x.uuid === a.uuid)) assets.push(a); });
     buildInjectionMaps();
     localStorage.setItem(SD_LS.assets, JSON.stringify(assets));
 
@@ -5456,40 +5491,7 @@ function sd_saveThresholds() {
   showToast('✅ Thresholds saved');
   renderDashboard();
 }
-async function sd_saveAndTest() {
-  const url  = document.getElementById('cfgUrl').value.trim().replace(/\/$/, '');
-  const user = document.getElementById('cfgUser').value.trim();
-  const pass = document.getElementById('cfgPass').value;
-  const cfg  = { url, user, pass };
-  localStorage.setItem(SD_LS.cfg, JSON.stringify(cfg));
-  const el = document.getElementById('cfgResult');
-  el.textContent = 'Connecting...'; el.style.color = '#888';
-  try {
-    const token = await getToken(cfg);
-    const res = await fetch(apiUrl('/api'), { headers: { 'Authorization': 'Bearer ' + token } });
-    if (res.ok) {
-      let name = url;
-      try { const d = await res.json(); name = d?.meta?.farm?.name || url; } catch(e) {}
-      el.textContent = '✅ Connected: ' + name; el.style.color = '#3a7';
-    } else {
-      el.textContent = '❌ API error ' + res.status; el.style.color = '#c00';
-    }
-  } catch(e) {
-    el.textContent = '❌ ' + e.message; el.style.color = '#c00';
-  }
-}
-function sd_doLogout() {
-  if (!confirm('Log out? Cached inventory will be cleared. Unsynced items will be lost.')) return;
-  localStorage.removeItem(SD_LS.cfg);
-  localStorage.removeItem(SD_LS.assets);
-  localStorage.removeItem(SD_LS.lastSync);
-  // Keep pending so user can reconnect and push — only clear if they confirm
-  assets = [];
-  document.getElementById('syncStatus').textContent = 'Offline';
-  renderDashboard();
-  sd_show('settings');
-  showToast('Logged out');
-}
+// (standalone StockDesk cfg form + logout removed — auth is shared via the FarmOS Sync screen)
 
 // ===== HISTORY =====
 function sd_renderHistory() {
