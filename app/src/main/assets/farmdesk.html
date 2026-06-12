@@ -28,6 +28,14 @@
     goatdesk_*                Goats module data (logs, animals, formulas...)
     farmdesk_stock_*          Stock module data (assets, history, pending...)
 
+  MAKING IT YOURS (other farms / homesteads)
+    - Nothing farm-specific is hardcoded. Point Settings -> FarmOS Sync at
+      your farmOS instance; animals, logs, and inventory come from there.
+    - Animal list: Settings -> Animal List, or auto-imported on first fetch.
+    - Med formulas: starter goat doses included — edit in Settings.
+    - Stock categories/units auto-detect from YOUR farmOS taxonomy on first
+      inventory fetch (built-in fallbacks until then).
+
   CONVENTIONS
     - Stock module: element ids "sd-", functions "sd_".
     - "===== SHARED MODULE:" comments mark functions reusable across modules.
@@ -803,7 +811,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.12-0726"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.12-0947"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -829,13 +837,9 @@ const APP_VERSION = "2026.06.12-0726"; // STAMPED BY DEPLOY COMMAND — do not e
 })();
 
 // ===== ANIMALS =====
-const DEFAULT_ANIMALS = [
-  "Athena","Blues","Brain","Bucko","BuckWheat",
-  "Caramel Macchiato","Cricket","Galaxy","Hubert","Jazz",
-  "Lace Wing","LadyBug","Lulabye","Oats","Patty",
-  "Pinky","PJs","Rythum","Sooter","Stud Muffin",
-  "Tubbo","Vincent Van Goat"
-];
+// Ships empty so any homestead starts fresh. Animals come from
+// Settings → Animal List, or automatically from farmOS on first fetch.
+const DEFAULT_ANIMALS = [];
 
 let goats = JSON.parse(localStorage.getItem(LS.goats) || "null") || [...DEFAULT_ANIMALS];
 let excludedAnimals = JSON.parse(localStorage.getItem(LS.excluded) || "[]");
@@ -934,6 +938,12 @@ function startFlow(type) {
 function populateGoatSelect() {
   const sel = document.getElementById("goat");
   sel.innerHTML = "";
+  if (!goats.length) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "No animals yet — add in Settings";
+    sel.appendChild(o);
+    return;
+  }
   goats.forEach(g => {
     const o = document.createElement("option");
     o.value = g; o.textContent = g;
@@ -1087,7 +1097,7 @@ function renderStep() {
       <label>Dose — auto-calculated, type over it for a custom dose</label>
       <div style="display:flex;align-items:center;gap:8px;">
         <input id="f_dose" type="number" step="0.01" inputmode="decimal" value="${firstDose}"
-          placeholder="enter weight" class="dose-display" style="flex:1;text-align:center;margin-top:0;">
+          placeholder="custom dose" class="dose-display" style="flex:1;text-align:center;margin-top:0;">
         <span id="doseUnit" style="font-size:20px;color:#aaa;flex-shrink:0;">${unit}</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
@@ -4416,6 +4426,11 @@ const UNIT_MAP = {
   ml:    { uuid: '60c97ab7-0c9a-40cc-a05c-e9ccf6c80f82', measure: 'volume', label: 'ml'    },
   lbs:   { uuid: '830ff397-6d45-400a-a25a-d129d15229e2', measure: 'weight', label: 'lbs'   }
 };
+function sd_catName(uuid) {
+  const tax = JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}');
+  const hit = (tax.cats || []).find(t => t.uuid === uuid);
+  return hit ? hit.name : (MAT_TYPE_NAME[uuid] || 'Other');
+}
 const MAT_TYPE_NAME = {
   'e5e7b94d-d8b3-4c78-8554-097edc968208': 'Feed',
   'eb01f4d2-7dbf-46af-b2ff-426575eff635': 'Medical',
@@ -4501,6 +4516,51 @@ function apiHeaders(token) {
 }
 
 // ===== ASSET FETCH — pulls live inventory from farmOS =====
+// ===== SHARED MODULE: farmOS taxonomy auto-detect =====
+// Category and unit term UUIDs differ on every farmOS instance. This pulls
+// THIS farm's terms once per fetch and caches them, so the Add Item form
+// works on any homestead — the constants above are only a fallback.
+async function sd_loadTaxonomy(h) {
+  try {
+    const guessMeasure = n => {
+      n = n.toLowerCase();
+      if (/^(ml|l|liter|litre|gal|gallon|qt|quart|fl)/.test(n)) return 'volume';
+      if (/^(lb|lbs|kg|g|gram|oz|ounce|ton)/.test(n))           return 'weight';
+      return 'count';
+    };
+    const [catRes, unitRes] = await Promise.all([
+      fetch(apiUrl('/api/taxonomy_term/material_type?page[limit]=50'), { headers: h }),
+      fetch(apiUrl('/api/taxonomy_term/unit?page[limit]=50'),          { headers: h })
+    ]);
+    const tax = { cats: [], units: [] };
+    if (catRes.ok) {
+      const d = await catRes.json();
+      tax.cats = (d.data || []).map(t => ({ uuid: t.id, name: t.attributes.name }));
+    }
+    if (unitRes.ok) {
+      const d = await unitRes.json();
+      tax.units = (d.data || []).map(t => ({ uuid: t.id, name: t.attributes.name, measure: guessMeasure(t.attributes.name) }));
+    }
+    if (tax.cats.length || tax.units.length) {
+      localStorage.setItem('farmdesk_stock_taxonomy', JSON.stringify(tax));
+    }
+  } catch(e) { /* non-fatal — fallback constants keep working */ }
+}
+
+// Rebuild the Add Item selects from this farm's cached taxonomy
+function sd_populateItemSelects() {
+  const tax = JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}');
+  const catSel  = document.getElementById('newItemCat');
+  const unitSel = document.getElementById('newItemUnit');
+  if (catSel && tax.cats && tax.cats.length) {
+    catSel.innerHTML = tax.cats.map(t => `<option value="${t.uuid}">${t.name}</option>`).join('');
+  }
+  if (unitSel && tax.units && tax.units.length) {
+    unitSel.innerHTML = tax.units.map(t =>
+      `<option value="${t.name.toLowerCase()}|${t.uuid}|${t.measure}">${t.name}</option>`).join('');
+  }
+}
+
 async function refreshAssets(silent) {
   const cfg = JSON.parse(localStorage.getItem(SD_LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) {
@@ -4511,6 +4571,7 @@ async function refreshAssets(silent) {
   try {
     const token = await getToken(cfg);
     const h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    sd_loadTaxonomy(h); // refresh this farm's categories/units in the background
     let url = apiUrl('/api/asset/material?page[limit]=50&filter[archived]=0');
     let all = [];
     while (url) {
@@ -4531,7 +4592,7 @@ async function refreshAssets(silent) {
       return {
         uuid:      a.id,
         name,
-        category:  MAT_TYPE_NAME[matId] || 'Other',
+        category:  sd_catName(matId),
         matTypeId: matId,
         measure,
         value:     parseFloat(inv.value) || 0,
@@ -4680,6 +4741,7 @@ function populateInjectionSelects() {
 
 // ===== CATEGORY TABS =====
 function toggleAddItemPanel() {
+  sd_populateItemSelects(); // use this farm's categories/units when known
   const panel = document.getElementById('addItemPanel');
   const btn   = document.getElementById('tab-Add');
   if (!panel) return;
@@ -5218,7 +5280,7 @@ function queueCreateItem() {
   assets.push({
     uuid:      tempId,
     name,
-    category:  MAT_TYPE_NAME[matTypeId] || 'Other',
+    category:  sd_catName(matTypeId),
     matTypeId,
     measure,
     value:     0,
@@ -5942,7 +6004,7 @@ function medDeductConfirm() {
   const sdHistory = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
   const ts = String(Math.floor(Date.now() / 1000));
   const isoTime = new Date().toISOString();
-  const notes = 'Auto-deducted from GoatDesk med log: ' + dose + ' ' + unit;
+  const notes = 'Auto-deducted from med log: ' + dose + ' ' + unit;
 
   function _queueDecrement(a, amt, note) {
     // Update local cache
@@ -5985,9 +6047,9 @@ function medDeductConfirm() {
       return sdAssets.find(a => a.uuid === map[val]) || null;
     }
     const sa = resolveSupplyAsset(sVal, syringeMap);
-    if (sa) _queueDecrement(sa, 1, 'Auto-deducted syringe (GoatDesk med log)');
+    if (sa) _queueDecrement(sa, 1, 'Auto-deducted syringe (med log)');
     const na = resolveSupplyAsset(nVal, needleMap);
-    if (na) _queueDecrement(na, 1, 'Auto-deducted needle (GoatDesk med log)');
+    if (na) _queueDecrement(na, 1, 'Auto-deducted needle (med log)');
   }
 
   localStorage.setItem('farmdesk_stock_assets',  JSON.stringify(sdAssets));
