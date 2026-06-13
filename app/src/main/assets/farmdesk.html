@@ -815,7 +815,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.13-0352"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.13-0439"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -850,6 +850,23 @@ let excludedAnimals = JSON.parse(localStorage.getItem(LS.excluded) || "[]");
 let logs  = JSON.parse(localStorage.getItem(LS.logs)  || "[]");
 let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
 let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // keyed by animal name
+
+// ===== ONE-TIME: drop oversized cached profile photos that blew the quota =====
+// Full-res photos were cached in an earlier build; strip photos but keep the
+// text profiles, freeing localStorage so future thumbnail writes succeed.
+(function reclaimProfileSpace() {
+  try {
+    var raw = localStorage.getItem("farmdesk_animal_profiles");
+    if (raw && raw.length > 600000) { // ~0.6 MB of profiles == photos present
+      var p = JSON.parse(raw);
+      Object.keys(p).forEach(function(k){ if (p[k]) p[k].photo = null; });
+      localStorage.setItem("farmdesk_animal_profiles", JSON.stringify(p));
+    }
+  } catch(e) {
+    // unparseable/corrupt — remove entirely; next fetch rebuilds it
+    try { localStorage.removeItem("farmdesk_animal_profiles"); } catch(e2) {}
+  }
+})();
 
 // ===== ONE-TIME DEDUP: remove duplicate log entries by id =====
 (function dedupLogs() {
@@ -2605,22 +2622,120 @@ function removeAnimal(name) {
     excludedAnimals.push(name);
     localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
   }
+  // Delete the animal's stored photo file and profile entry
+  var _p = animalProfiles[name];
+  if (_p && _p.photoId) Photos.remove(_p.photoId);
+  if (_p) { delete animalProfiles[name]; saveProfilesSafely(); }
   localStorage.setItem(LS.goats, JSON.stringify(goats));
   populateGoatSelect();
   renderAnimalsScreen();
 }
 
 // ===== SHARED MODULE: animals screen =====
+// ===== SHARED MODULE: photo storage (native APK file store, browser fallback)
+// APK: photos saved as files via AndroidBridge; only the id lives in
+// localStorage. Browser/old APK: stores a thumbnail data URL under the id.
+// Same async API both ways: save(dataUrl)->id, load(id)->dataUrl, remove(id).
+var Photos = (function(){
+  var hasNative = false;
+  try { hasNative = !!(window.AndroidBridge && window.AndroidBridge.hasPhotoStore && window.AndroidBridge.hasPhotoStore()); } catch(e) {}
+  var seq = 0;
+  function newId(){ return "p" + Date.now() + "_" + (seq++); }
+  return {
+    native: hasNative,
+    save: async function(dataUrl){
+      if (!dataUrl) return null;
+      var id = newId();
+      if (hasNative) {
+        return new Promise(function(resolve){
+          var cb = "__photoCb_" + id;
+          window[cb] = function(rid){ try{delete window[cb];}catch(e){} resolve(rid || null); };
+          try { window.AndroidBridge.savePhoto(id, dataUrl, cb); }
+          catch(e){ resolve(null); }
+        });
+      }
+      try {
+        var thumb = await makeThumb(dataUrl, 280, 0.6);
+        localStorage.setItem("farmdesk_photo_" + id, thumb || dataUrl);
+        return id;
+      } catch(e){ return null; }
+    },
+    load: async function(id){
+      if (!id) return null;
+      if (hasNative) {
+        return new Promise(function(resolve){
+          var cb = "__photoLoad_" + id + "_" + (seq++);
+          window[cb] = function(data){ try{delete window[cb];}catch(e){} resolve(data || null); };
+          try { window.AndroidBridge.loadPhoto(id, cb); }
+          catch(e){ resolve(null); }
+        });
+      }
+      return localStorage.getItem("farmdesk_photo_" + id);
+    },
+    remove: function(id){
+      if (!id) return;
+      if (hasNative) { try { window.AndroidBridge.deletePhoto(id); } catch(e){} }
+      else { try { localStorage.removeItem("farmdesk_photo_" + id); } catch(e){} }
+    }
+  };
+})();
+
+// ===== SHARED MODULE: shrink an image to a small thumbnail (base64 JPEG) =====
+// Profile photos only need to be thumbnail-sized; full-res blew the localStorage
+// quota. Caps the longest edge at 320px and re-encodes as JPEG ~0.7 quality.
+function makeThumb(dataUrl, maxEdge, quality) {
+  maxEdge = maxEdge || 320; quality = quality || 0.7;
+  return new Promise(function(resolve){
+    var img = new Image();
+    img.onload = function(){
+      var w = img.width, h = img.height;
+      var scale = Math.min(1, maxEdge / Math.max(w, h));
+      var cw = Math.round(w*scale), ch = Math.round(h*scale);
+      var cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
+      cv.getContext("2d").drawImage(img, 0, 0, cw, ch);
+      try { resolve(cv.toDataURL("image/jpeg", quality)); }
+      catch(e){ resolve(null); }
+    };
+    img.onerror = function(){ resolve(null); };
+    img.src = dataUrl;
+  });
+}
+
+// Save profiles, dropping photos if we still hit the quota (data > photos)
+function saveProfilesSafely() {
+  try {
+    localStorage.setItem(LS.profiles, JSON.stringify(animalProfiles));
+  } catch(e) {
+    // Quota exceeded — strip photos and keep the text profile data
+    Object.keys(animalProfiles).forEach(function(k){ animalProfiles[k].photo = null; });
+    try { localStorage.setItem(LS.profiles, JSON.stringify(animalProfiles)); } catch(e2) {}
+    if (typeof showToast === "function") showToast("Photos too large to cache — profiles kept without photos");
+  }
+}
+
 // ===== SHARED MODULE: asset card (animals, materials, equipment) =====
-function assetCardHTML(img, title, detail, onclick) {
+function assetCardHTML(img, title, detail, onclick, photoId) {
   var ph = img
     ? '<img src="' + img + '" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;">'
-    : '<div style="width:54px;height:54px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">🐾</div>';
+    : (photoId
+        ? '<img data-photoid="' + photoId + '" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;background:#333;">'
+        : '<div style="width:54px;height:54px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">🐾</div>');
   return '<div onclick="' + onclick + '" style="display:flex;align-items:center;gap:12px;padding:10px;background:#2a2a2a;border-radius:8px;margin-bottom:8px;cursor:pointer;">' +
     ph +
     '<div style="flex:1;min-width:0;"><div style="font-weight:bold;font-size:16px;color:#fff;">' + title + '</div>' +
     '<div style="font-size:13px;color:#9c9;">' + detail + '</div></div>' +
     '<span style="color:#666;">&rsaquo;</span></div>';
+}
+
+// Fill any <img data-photoid> within a container from the Photos store
+function lazyLoadPhotos(container) {
+  if (!container) return;
+  var imgs = container.querySelectorAll("img[data-photoid]");
+  imgs.forEach(function(im){
+    var pid = im.getAttribute("data-photoid");
+    im.removeAttribute("data-photoid");
+    Photos.load(pid).then(function(data){ if (data) im.src = data; });
+  });
 }
 
 function animalAge(birthdate) {
@@ -2648,13 +2763,16 @@ function openAnimalProfile(name) {
   if (title) title.textContent = name;
   var img = p.photo
     ? '<img src="' + p.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;">'
-    : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>';
+    : (p.photoId
+        ? '<img data-photoid="' + p.photoId + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;background:#333;">'
+        : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>');
   function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ""; }
   body.innerHTML = img + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
     row("Breed", p.breed || p.type) + row("Group", p.group) + row("Notes", p.notes) +
     '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="margin-top:12px;">Log for ' + name + '</button>';
   var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
   modal.style.display = "block";
+  lazyLoadPhotos(body);
 }
 
 function startFlowForAnimal(name) {
@@ -2670,8 +2788,9 @@ function renderAnimalsScreen() {
     al.innerHTML = "<div style='color:#666;font-size:14px;'>No animals yet — Fetch from farmOS or add below.</div>";
   }
   goats.forEach(function(g){
+    var prof = animalProfiles[g] || {};
     var wrap = document.createElement("div");
-    wrap.innerHTML = assetCardHTML((animalProfiles[g] && animalProfiles[g].photo) || null, g, animalDetailLine(g), "");
+    wrap.innerHTML = assetCardHTML(prof.photo || null, g, animalDetailLine(g), "", prof.photoId || null);
     var card = wrap.firstElementChild;
     card.onclick = function(){ openAnimalProfile(g); };
     var rm = document.createElement("button");
@@ -2681,6 +2800,7 @@ function renderAnimalsScreen() {
     al.appendChild(card);
     al.appendChild(rm);
   });
+  lazyLoadPhotos(al); // fill in <img data-photoid> from the file store
 
   const el = document.getElementById("animalsExcludedList");
   el.innerHTML = "";
@@ -3742,21 +3862,26 @@ async function fetchAnimalUUIDs(silent = false) {
     localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
     localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
 
-    // Download new profile photos to base64 for offline use (parallel)
+    // Download new profile photos and shrink to thumbnails (parallel)
     await Promise.all(Object.keys(animalProfiles).map(async function(nm){
       var p = animalProfiles[nm];
-      if (p.photoUrl && !p.photo) {
+      if (p.photoUrl && !p.photoId) {
         try {
           var u = p.photoUrl.indexOf("http") === 0 ? p.photoUrl : (cfgSaved.url + p.photoUrl);
           var r = await fetch(u, { headers: { "Authorization": "Bearer " + token } });
           if (r.ok) {
             var blob = await r.blob();
-            p.photo = await new Promise(function(res){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.readAsDataURL(blob); });
+            var full = await new Promise(function(res){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.readAsDataURL(blob); });
+            // Store the photo in the file store (APK) or thumbnail fallback (browser);
+            // keep ONLY the id in the profile so localStorage stays tiny.
+            if (p.photoId) Photos.remove(p.photoId); // replace any prior photo
+            p.photoId = await Photos.save(full);
+            p.photo = null; // never persist photo bytes in the profile blob
           }
         } catch(e) { /* offline-safe */ }
       }
     }));
-    localStorage.setItem(LS.profiles, JSON.stringify(animalProfiles));
+    saveProfilesSafely();
     populateGoatSelect();
 
     // ===== STEP 3: Fetch recent logs =====
