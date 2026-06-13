@@ -206,6 +206,6 @@ new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST); }
     }
     @Override
     public void onBackPressed() {
-        webView.evaluateJavascript("(function(){ var v=document.getElementById('photoViewer'); if(v && v.classList.contains('open')){v.classList.remove('open');return true;} if(window.history.length>1){history.back();return true;} return false; })()", val -> { if(!"true".equals(val)) runOnUiThread(()->super.onBackPressed()); });
+        webView.evaluateJavascript("(function(){ if(typeof closeTopOverlay==='function' && closeTopOverlay()){return true;} if(window.history.length>1){history.back();return true;} return false; })()", val -> { if(!"true".equals(val)) runOnUiThread(()->super.onBackPressed()); });
     }
 }
