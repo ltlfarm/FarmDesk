@@ -647,7 +647,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   <div class="box">
     <strong>Export XML</strong>
     <p style="color:#888;font-size:13px;">Exports all goat logs and stock history. Share to email, Google Drive, USB, or any app.</p>
-    <button onclick="exportXML()" class="wide">📤 Export Farm Logs (XML)</button>
+    <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML('download')" class="wide secondary" style="margin-top:8px;">💾 Save to Downloads</button>
   </div>
   <div class="box">
     <strong>Import XML</strong>
@@ -2446,7 +2447,7 @@ function escXMLTag(s) {
   return s.replace(/[^a-zA-Z0-9_]/g,"_");
 }
 
-function exportXML() {
+function exportXML(mode) {
   var logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
   var sdHistory = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
   var now = new Date().toISOString().slice(0,10);
@@ -2470,6 +2471,21 @@ function exportXML() {
   });
   xml += "  </goat_logs>\n";
 
+  // Stock inventory (current quantities)
+  var sdAssets = JSON.parse(localStorage.getItem("farmdesk_stock_assets") || "[]");
+  xml += "  <stock_inventory>\n";
+  sdAssets.forEach(function(asset) {
+    xml += "    <item>\n";
+    xml += "      <id>" + escXML(asset.uuid || "") + "</id>\n";
+    xml += "      <name>" + escXML(asset.name || "") + "</name>\n";
+    xml += "      <category>" + escXML(asset.category || "") + "</category>\n";
+    xml += "      <quantity>" + escXML(String(asset.value != null ? asset.value : "")) + "</quantity>\n";
+    xml += "      <measure>" + escXML(asset.measure || "") + "</measure>\n";
+    xml += "      <notes>" + escXML(asset.notes || "") + "</notes>\n";
+    xml += "    </item>\n";
+  });
+  xml += "  </stock_inventory>\n";
+
   xml += "  <stock_history>\n";
   sdHistory.forEach(function(entry) {
     xml += "    <adjustment>\n";
@@ -2487,7 +2503,7 @@ function exportXML() {
   xml += "</farmdesk_export>\n";
 
   var filename = "farmdesk_export_" + now + ".xml";
-  if (window.AndroidBridge && window.AndroidBridge.shareXML) {
+  if (mode === "share" && window.AndroidBridge && window.AndroidBridge.shareXML) {
     window.AndroidBridge.shareXML(xml, filename);
   } else {
     var blob = new Blob([xml], { type: "text/xml" });
