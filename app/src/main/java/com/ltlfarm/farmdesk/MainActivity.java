@@ -1,5 +1,4 @@
 package com.ltlfarm.farmdesk;
-
 import com.ltlfarm.farmdesk.R;
 import android.app.Activity;
 import android.content.Intent;
@@ -24,13 +23,13 @@ import android.webkit.WebViewClient;
 import androidx.core.content.FileProvider;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
-
 public class MainActivity extends Activity {
-
     private static final String TAG = "GoatDesk";
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
@@ -40,14 +39,11 @@ public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1;
     private static final int CAMERA_BRIDGE_REQUEST = 3;
     private static final int CAMERA_PERMISSION_REQUEST = 10;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
         webView = findViewById(R.id.webview);
-
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -57,13 +53,12 @@ public class MainActivity extends Activity {
         settings.setAllowUniversalAccessFromFileURLs(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-
         webView.setWebViewClient(new WebViewClient());
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
-
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]>
+callback,
                     FileChooserParams params) {
                 if (filePathCallback != null) filePathCallback.onReceiveValue(null);
                 filePathCallback = callback;
@@ -77,11 +72,11 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) { ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST); }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+!= PackageManager.PERMISSION_GRANTED) { ActivityCompat.requestPermissions(this,
+new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST); }
         webView.loadUrl("file:///android_asset/farmdesk.html");
     }
-
     public class AndroidBridge {
         @JavascriptInterface
         public void takePhoto(String jsCallback) {
@@ -98,8 +93,7 @@ public class MainActivity extends Activity {
                         cameraImageFile
                     );
                     Log.d(TAG, "cameraUri=" + cameraImageUri);
-                    Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                    intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri);
+                    Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);                    intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri);
                     startActivityForResult(intent, CAMERA_BRIDGE_REQUEST);
                     Log.d(TAG, "startActivityForResult fired");
                 } catch (Exception e) {
@@ -108,25 +102,78 @@ public class MainActivity extends Activity {
                 }
             });
         }
-    }
 
+        // ===== PHOTO FILE STORE — photos live as files in app-private storage =====
+        // JS keeps only the returned id (filename); the bytes never enter localStorage.
+        @JavascriptInterface
+        public void savePhoto(String id, String dataUrl, String jsCallback) {
+            try {
+                String b64 = dataUrl;
+                int comma = dataUrl.indexOf(',');
+                if (dataUrl.startsWith("data:") && comma >= 0) b64 = dataUrl.substring(comma + 1);
+                byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
+                File dir = new File(getFilesDir(), "photos");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, id + ".jpg");
+                FileOutputStream fos = new FileOutputStream(f);
+                fos.write(bytes);
+                fos.close();
+                respond(jsCallback, "'" + id + "'");
+            } catch (Exception e) {
+                Log.e(TAG, "savePhoto error: " + e.getMessage());
+                respond(jsCallback, "null");
+            }
+        }
+
+        @JavascriptInterface
+        public void loadPhoto(String id, String jsCallback) {
+            try {
+                File f = new File(new File(getFilesDir(), "photos"), id + ".jpg");
+                if (!f.exists()) { respond(jsCallback, "null"); return; }
+                byte[] bytes = new byte[(int) f.length()];
+                FileInputStream fis = new FileInputStream(f);
+                fis.read(bytes);
+                fis.close();
+                String b64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                respond(jsCallback, "\"data:image/jpeg;base64," + b64 + "\"");
+            } catch (Exception e) {
+                Log.e(TAG, "loadPhoto error: " + e.getMessage());
+                respond(jsCallback, "null");
+            }
+        }
+
+        @JavascriptInterface
+        public void deletePhoto(String id) {
+            try {
+                File f = new File(new File(getFilesDir(), "photos"), id + ".jpg");
+                if (f.exists()) f.delete();
+            } catch (Exception e) { /* ignore */ }
+        }
+
+        // Marker so JS can detect the native store is available
+        @JavascriptInterface
+        public boolean hasPhotoStore() { return true; }
+
+        // Helper: call a JS function on the WebView thread with one argument
+        private void respond(String jsCallback, String arg) {
+            if (jsCallback == null || jsCallback.isEmpty()) return;
+            final String call = jsCallback + "(" + arg + ")";
+            webView.post(() -> webView.evaluateJavascript(call, null));
+        }
+    }
     private File createImageFile() throws IOException {
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
         File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
-        return File.createTempFile("FARMDESK_" + timeStamp, ".jpg", storageDir);
-    }
-
+        return File.createTempFile("FARMDESK_" + timeStamp, ".jpg", storageDir);    }
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         Log.d(TAG, "onActivityResult requestCode=" + requestCode + " resultCode=" + resultCode);
-
         if (requestCode == CAMERA_BRIDGE_REQUEST) {
             boolean fileReady = (cameraImageFile != null
                                  && cameraImageFile.exists()
                                  && cameraImageFile.length() > 0);
             Log.d(TAG, "fileReady=" + fileReady
                 + (cameraImageFile != null ? " size=" + cameraImageFile.length() : " file=null"));
-
             if (fileReady) {
                 try {
                     Bitmap bmp = BitmapFactory.decodeFile(cameraImageFile.getAbsolutePath());
@@ -150,7 +197,6 @@ public class MainActivity extends Activity {
             cameraJsCallback = null;
             return;
         }
-
         if (requestCode == FILE_CHOOSER_REQUEST) {
             if (filePathCallback == null) return;
             Uri[] results = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
@@ -158,7 +204,6 @@ public class MainActivity extends Activity {
             filePathCallback = null;
         }
     }
-
     @Override
     public void onBackPressed() {
         webView.evaluateJavascript("(function(){ var v=document.getElementById('photoViewer'); if(v && v.classList.contains('open')){v.classList.remove('open');return true;} if(window.history.length>1){history.back();return true;} return false; })()", val -> { if(!"true".equals(val)) runOnUiThread(()->super.onBackPressed()); });
