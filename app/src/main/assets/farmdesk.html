@@ -837,7 +837,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.13-0510"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.13-0516"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3165,32 +3165,61 @@ function showToast(msg) {
   toast._timer = setTimeout(() => { toast.style.opacity = "0"; }, 2500);
 }
 
-// ===== SHARED MODULE: fullscreen photo viewer with pinch-zoom =====
+// ===== SHARED MODULE: fullscreen photo viewer with pinch-zoom + pan =====
 let _viewerScale = 1;
 let _viewerLastDist = 0;
-let _viewerOriginX = 0;
-let _viewerOriginY = 0;
+let _viewerTX = 0, _viewerTY = 0;          // current pan translation
+let _panStartX = 0, _panStartY = 0;        // finger position at drag start
+let _panBaseX = 0, _panBaseY = 0;          // translation at drag start
+let _isPanning = false;
+let _lastTap = 0;
+
+function _applyViewerTransform(img) {
+  img.style.transformOrigin = "center center";
+  img.style.transform = `translate(${_viewerTX}px, ${_viewerTY}px) scale(${_viewerScale})`;
+}
 
 function openPhotoViewer(src) {
   const viewer = document.getElementById("photoViewer");
   const img    = document.getElementById("photoViewerImg");
   if (!viewer || !img || !src) return;
-  _viewerScale = 1;
-  img.style.transform = "scale(1)";
+  _viewerScale = 1; _viewerTX = 0; _viewerTY = 0; _viewerLastDist = 0; _isPanning = false;
+  _applyViewerTransform(img);
   img.src = src;
   viewer.classList.add("open");
-  // Pinch-zoom touch handlers
+
   viewer.ontouchstart = e => {
     if (e.touches.length === 2) {
+      // pinch start
+      _isPanning = false;
       _viewerLastDist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       );
-      _viewerOriginX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      _viewerOriginY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       e.preventDefault();
+    } else if (e.touches.length === 1) {
+      // double-tap to reset zoom
+      const now = Date.now();
+      if (now - _lastTap < 300) {
+        _viewerScale = 1; _viewerTX = 0; _viewerTY = 0;
+        _applyViewerTransform(img);
+        _lastTap = 0;
+        e.preventDefault();
+        return;
+      }
+      _lastTap = now;
+      // begin pan only when zoomed in
+      if (_viewerScale > 1) {
+        _isPanning = true;
+        _panStartX = e.touches[0].clientX;
+        _panStartY = e.touches[0].clientY;
+        _panBaseX = _viewerTX;
+        _panBaseY = _viewerTY;
+        e.preventDefault();
+      }
     }
   };
+
   viewer.ontouchmove = e => {
     if (e.touches.length === 2) {
       const dist = Math.hypot(
@@ -3200,15 +3229,27 @@ function openPhotoViewer(src) {
       if (_viewerLastDist > 0) {
         _viewerScale *= dist / _viewerLastDist;
         _viewerScale = Math.min(Math.max(_viewerScale, 1), 6);
-        img.style.transformOrigin = `${_viewerOriginX}px ${_viewerOriginY}px`;
-        img.style.transform = `scale(${_viewerScale})`;
+        if (_viewerScale === 1) { _viewerTX = 0; _viewerTY = 0; } // snap back centered
+        _applyViewerTransform(img);
       }
       _viewerLastDist = dist;
       e.preventDefault();
+    } else if (e.touches.length === 1 && _isPanning && _viewerScale > 1) {
+      // single-finger pan, clamped so the image can't be dragged fully off-screen
+      _viewerTX = _panBaseX + (e.touches[0].clientX - _panStartX);
+      _viewerTY = _panBaseY + (e.touches[0].clientY - _panStartY);
+      const maxX = (img.clientWidth  * (_viewerScale - 1)) / 2;
+      const maxY = (img.clientHeight * (_viewerScale - 1)) / 2;
+      _viewerTX = Math.min(Math.max(_viewerTX, -maxX), maxX);
+      _viewerTY = Math.min(Math.max(_viewerTY, -maxY), maxY);
+      _applyViewerTransform(img);
+      e.preventDefault();
     }
   };
+
   viewer.ontouchend = e => {
     if (e.touches.length < 2) _viewerLastDist = 0;
+    if (e.touches.length === 0) _isPanning = false;
   };
 }
 
@@ -5339,8 +5380,7 @@ function clearAssetPhoto() {
 function sd_openPhotoViewer(uuid) {
   const a = assets.find(x => x.uuid === uuid);
   if (!a || !a.photo) return;
-  document.getElementById('photoViewerImg').src = a.photo;
-  document.getElementById('photoViewer').classList.add('show');
+  openPhotoViewer(a.photo); // shared viewer — pan, zoom, and correct close handling
 }
 // closePhotoViewer — uses GoatDesk shared version
 
