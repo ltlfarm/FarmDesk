@@ -483,12 +483,12 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
       <div class="set-sub">
         <strong>Standalone Mode (No farmOS)</strong>
-        <p style="color:#888;font-size:13px;">Use FarmDesk without a farmOS server. Logs are saved locally and can be exported as XML for Excel or LibreOffice.</p>
+        <p style="color:#888;font-size:13px;">Use FarmDesk without a farmOS server. Logs are saved locally and exported as XML for Excel or LibreOffice.</p>
         <label style="display:flex;align-items:center;gap:10px;font-size:16px;margin-top:6px;">
           <input type="checkbox" id="standaloneToggle" onchange="setStandaloneMode(this.checked)" style="width:22px;height:22px;">
           Enable Standalone Mode
         </label>
-        <div id="standaloneNote" style="font-size:13px;color:#c90;margin-top:6px;display:none;">⚠️ farmOS sync is disabled in standalone mode. Export XML from the Data screen.</div>
+        <div id="standaloneNote" style="font-size:13px;color:#c90;margin-top:6px;display:none;">⚠️ farmOS sync disabled. Use Data screen to export XML.</div>
       </div>
 
       <div class="set-sub">
@@ -642,11 +642,11 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   <div class="box">
     <button class="secondary" onclick="show('home')">← Home</button>
     <h3 style="margin:10px 0 6px;">📦 Standalone Data</h3>
-    <p style="color:#888;font-size:13px;">Export all logs as XML — open in Excel or LibreOffice. Import a previously exported file to merge or replace logs.</p>
+    <p style="color:#888;font-size:13px;">Export all logs as XML for Excel or LibreOffice. Import a previously exported file to merge or replace logs.</p>
   </div>
   <div class="box">
     <strong>Export XML</strong>
-    <p style="color:#888;font-size:13px;">Exports all goat logs and stock history to an XML file. Share to email, Google Drive, USB, or any app.</p>
+    <p style="color:#888;font-size:13px;">Exports all goat logs and stock history. Share to email, Google Drive, USB, or any app.</p>
     <button onclick="exportXML()" class="wide">📤 Export Farm Logs (XML)</button>
   </div>
   <div class="box">
@@ -882,7 +882,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.13-0516"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2427,10 +2427,10 @@ function addUser() {
 
 function removeSelectedUser() {
   const sel = document.getElementById("activeUserSelect");
-  const name = sel.value;
+  const name = sel ? sel.value : "";
   if (!name) return;
   const users = JSON.parse(localStorage.getItem(LS.users) || "[]");
-  const filtered = users.filter(u => u !== name);
+  const filtered = users.filter(function(u) { return u !== name; });
   localStorage.setItem(LS.users, JSON.stringify(filtered));
   if (localStorage.getItem(LS.activeUser) === name) {
     localStorage.setItem(LS.activeUser, filtered[0] || "");
@@ -2438,167 +2438,133 @@ function removeSelectedUser() {
   renderSettings();
 }
 
-function exportXML() {
-  const logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
-  const sdHistory = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
-  const now = new Date().toISOString().slice(0,10);
-  let xml = '<?xml version="1.0" encoding="UTF-8"?>
-<farmdesk_export date="' + now + '">
-';
+function escXML(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
 
-  xml += '  <goat_logs>
-';
-  logs.forEach(log => {
-    xml += '    <log>
-';
-    xml += '      <id>' + escXML(log.id || "") + '</id>
-';
-    xml += '      <date>' + escXML(log.time || "") + '</date>
-';
-    xml += '      <animal>' + escXML(log.goat || "") + '</animal>
-';
-    xml += '      <type>' + escXML(log.type || "") + '</type>
-';
-    xml += '      <logged_by>' + escXML(log.loggedBy || "") + '</logged_by>
-';
+function escXMLTag(s) {
+  return s.replace(/[^a-zA-Z0-9_]/g,"_");
+}
+
+function exportXML() {
+  var logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+  var sdHistory = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
+  var now = new Date().toISOString().slice(0,10);
+  var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<farmdesk_export date=\"" + now + "\">\n";
+
+  xml += "  <goat_logs>\n";
+  logs.forEach(function(log) {
+    xml += "    <log>\n";
+    xml += "      <id>" + escXML(log.id || "") + "</id>\n";
+    xml += "      <date>" + escXML(log.time || "") + "</date>\n";
+    xml += "      <animal>" + escXML(log.goat || "") + "</animal>\n";
+    xml += "      <type>" + escXML(log.type || "") + "</type>\n";
+    xml += "      <logged_by>" + escXML(log.loggedBy || "") + "</logged_by>\n";
     if (log.data) {
-      Object.entries(log.data).forEach(([k, v]) => {
-        xml += '      <' + escXMLTag(k) + '>' + escXML(String(v ?? "")) + '</' + escXMLTag(k) + '>
-';
+      Object.entries(log.data).forEach(function(kv) {
+        var k = kv[0], v = kv[1];
+        xml += "      <" + escXMLTag(k) + ">" + escXML(String(v != null ? v : "")) + "</" + escXMLTag(k) + ">\n";
       });
     }
-    xml += '    </log>
-';
+    xml += "    </log>\n";
   });
-  xml += '  </goat_logs>
-';
+  xml += "  </goat_logs>\n";
 
-  xml += '  <stock_history>
-';
-  sdHistory.forEach(entry => {
-    xml += '    <adjustment>
-';
-    xml += '      <id>' + escXML(entry.id || "") + '</id>
-';
-    xml += '      <date>' + escXML(entry.time || "") + '</date>
-';
-    xml += '      <item>' + escXML(entry.name || "") + '</item>
-';
-    xml += '      <action>' + escXML(entry.action || "") + '</action>
-';
-    xml += '      <amount>' + escXML(String(entry.amount ?? "")) + '</amount>
-';
-    xml += '      <notes>' + escXML(entry.notes || "") + '</notes>
-';
-    xml += '      <seller>' + escXML(entry.seller || "") + '</seller>
-';
-    xml += '      <lot>' + escXML(entry.lot || "") + '</lot>
-';
-    xml += '    </adjustment>
-';
+  xml += "  <stock_history>\n";
+  sdHistory.forEach(function(entry) {
+    xml += "    <adjustment>\n";
+    xml += "      <id>" + escXML(entry.id || "") + "</id>\n";
+    xml += "      <date>" + escXML(entry.time || "") + "</date>\n";
+    xml += "      <item>" + escXML(entry.name || "") + "</item>\n";
+    xml += "      <action>" + escXML(entry.action || "") + "</action>\n";
+    xml += "      <amount>" + escXML(String(entry.amount != null ? entry.amount : "")) + "</amount>\n";
+    xml += "      <notes>" + escXML(entry.notes || "") + "</notes>\n";
+    xml += "      <seller>" + escXML(entry.seller || "") + "</seller>\n";
+    xml += "      <lot>" + escXML(entry.lot || "") + "</lot>\n";
+    xml += "    </adjustment>\n";
   });
-  xml += '  </stock_history>
-';
-  xml += '</farmdesk_export>
-';
+  xml += "  </stock_history>\n";
+  xml += "</farmdesk_export>\n";
 
-  const filename = "farmdesk_export_" + now + ".xml";
+  var filename = "farmdesk_export_" + now + ".xml";
   if (window.AndroidBridge && window.AndroidBridge.shareXML) {
     window.AndroidBridge.shareXML(xml, filename);
   } else {
-    // Browser fallback — download link
-    const blob = new Blob([xml], { type: "text/xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+    var blob = new Blob([xml], { type: "text/xml" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
     a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
   }
 }
 
-function escXML(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-function escXMLTag(s) {
-  return s.replace(/[^a-zA-Z0-9_]/g,"_");
-}
-
 function importXML(input) {
-  const file = input.files[0];
+  var file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
+  var reader = new FileReader();
   reader.onload = function(e) {
-    const xml = e.target.result;
-    const result = document.getElementById("xmlImportResult");
+    var xml = e.target.result;
+    var result = document.getElementById("xmlImportResult");
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(xml, "text/xml");
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(xml, "text/xml");
       if (doc.querySelector("parsererror")) { result.textContent = "❌ Invalid XML file."; return; }
 
-      // Ask merge or replace
-      const choice = confirm("Tap OK to MERGE (keep existing + add new).
-Tap Cancel to REPLACE ALL logs with imported data.");
+      var choice = confirm("Tap OK to MERGE (keep existing + add new).\nTap Cancel to REPLACE ALL logs with imported data.");
 
-      // Parse goat logs
-      const importedLogs = [];
-      doc.querySelectorAll("goat_logs > log").forEach(node => {
-        const obj = {};
-        node.childNodes.forEach(child => {
-          if (child.nodeType === 1) {
-            const tag = child.tagName;
-            const val = child.textContent;
-            if (tag === "id") obj.id = val;
-            else if (tag === "date") obj.time = val;
-            else if (tag === "animal") obj.goat = val;
-            else if (tag === "type") obj.type = val;
-            else if (tag === "logged_by") obj.loggedBy = val;
-            else {
-              if (!obj.data) obj.data = {};
-              obj.data[tag] = val;
-            }
-          }
+      var importedLogs = [];
+      doc.querySelectorAll("goat_logs > log").forEach(function(node) {
+        var obj = {};
+        node.childNodes.forEach(function(child) {
+          if (child.nodeType !== 1) return;
+          var tag = child.tagName, val = child.textContent;
+          if (tag === "id") obj.id = val;
+          else if (tag === "date") obj.time = val;
+          else if (tag === "animal") obj.goat = val;
+          else if (tag === "type") obj.type = val;
+          else if (tag === "logged_by") obj.loggedBy = val;
+          else { if (!obj.data) obj.data = {}; obj.data[tag] = val; }
         });
         if (obj.id) importedLogs.push(obj);
       });
 
-      // Parse stock history
-      const importedStock = [];
-      doc.querySelectorAll("stock_history > adjustment").forEach(node => {
-        const obj = {};
-        node.childNodes.forEach(child => {
-          if (child.nodeType === 1) {
-            const tag = child.tagName;
-            obj[tag === "date" ? "time" : tag === "item" ? "name" : tag] = child.textContent;
-          }
+      var importedStock = [];
+      doc.querySelectorAll("stock_history > adjustment").forEach(function(node) {
+        var obj = {};
+        node.childNodes.forEach(function(child) {
+          if (child.nodeType !== 1) return;
+          var tag = child.tagName;
+          obj[tag === "date" ? "time" : tag === "item" ? "name" : tag] = child.textContent;
         });
         if (obj.id) importedStock.push(obj);
       });
 
       if (choice) {
-        // Merge
-        const existing = JSON.parse(localStorage.getItem(LS.logs) || "[]");
-        const existingIds = new Set(existing.map(l => l.id));
-        const added = importedLogs.filter(l => !existingIds.has(l.id));
-        localStorage.setItem(LS.logs, JSON.stringify([...existing, ...added]));
+        var existing = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+        var existingIds = new Set(existing.map(function(l) { return l.id; }));
+        var added = importedLogs.filter(function(l) { return !existingIds.has(l.id); });
+        localStorage.setItem(LS.logs, JSON.stringify(existing.concat(added)));
 
-        const existingStock = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
-        const existingStockIds = new Set(existingStock.map(l => l.id));
-        const addedStock = importedStock.filter(l => !existingStockIds.has(l.id));
-        localStorage.setItem("farmdesk_stock_history", JSON.stringify([...existingStock, ...addedStock]));
+        var existingStock = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
+        var existingStockIds = new Set(existingStock.map(function(l) { return l.id; }));
+        var addedStock = importedStock.filter(function(l) { return !existingStockIds.has(l.id); });
+        localStorage.setItem("farmdesk_stock_history", JSON.stringify(existingStock.concat(addedStock)));
 
         result.textContent = "✅ Merged: " + added.length + " goat logs, " + addedStock.length + " stock entries added.";
       } else {
-        // Replace
         localStorage.setItem(LS.logs, JSON.stringify(importedLogs));
         localStorage.setItem("farmdesk_stock_history", JSON.stringify(importedStock));
         result.textContent = "✅ Replaced: " + importedLogs.length + " goat logs, " + importedStock.length + " stock entries loaded.";
       }
       input.value = "";
     } catch(err) {
-      document.getElementById("xmlImportResult").textContent = "❌ Error: " + err.message;
+      result.textContent = "❌ Error: " + err.message;
     }
   };
   reader.readAsText(file);
 }
+
+// ===== END STANDALONE MODE =====
 
 function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
@@ -2706,20 +2672,20 @@ function renderSettings() {
   // Animal list and excluded list now rendered in the Animals screen — not in Settings
 
   // Standalone mode toggle
-  const standaloneToggle = document.getElementById("standaloneToggle");
-  const standaloneNote = document.getElementById("standaloneNote");
-  const isStandalone = localStorage.getItem(LS.standalone) === "1";
+  var standaloneToggle = document.getElementById("standaloneToggle");
+  var standaloneNote = document.getElementById("standaloneNote");
+  var isStandalone = localStorage.getItem(LS.standalone) === "1";
   if (standaloneToggle) standaloneToggle.checked = isStandalone;
   if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
 
   // Active user selector
-  const userSel = document.getElementById("activeUserSelect");
-  const activeUser = localStorage.getItem(LS.activeUser) || "";
-  const users = JSON.parse(localStorage.getItem(LS.users) || "[]");
+  var userSel = document.getElementById("activeUserSelect");
+  var activeUser = localStorage.getItem(LS.activeUser) || "";
+  var users = JSON.parse(localStorage.getItem(LS.users) || "[]");
   if (userSel) {
     userSel.innerHTML = users.length
-      ? users.map(u => `<option value="${u}" ${u === activeUser ? "selected" : ""}>${u}</option>`).join("")
-      : '<option value="">-- No users yet --</option>';
+      ? users.map(function(u) { return "<option value=\"" + u + "\"" + (u === activeUser ? " selected" : "") + ">" + u + "</option>"; }).join("")
+      : "<option value=\"\">-- No users yet --</option>";
   }
 
   // GoatDesk-specific boxes only make sense when the Goats module is on
