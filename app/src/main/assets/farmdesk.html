@@ -815,7 +815,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.13-0342"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.13-0348"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3673,15 +3673,14 @@ async function fetchAnimalUUIDs(silent = false) {
     const MODULE_ANIMAL_TYPES = ["goat"]; // lowercase term names this module owns
     if (!silent && el) el.textContent = "Fetching animals...";
     let animalRows = [], typeNames = {};
-    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image,breed&page[limit]=100");
+    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image&page[limit]=100");
     while (aUrl) {
       const animalRes = await fetch(aUrl, { headers: authHeaders });
       if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
       const animalData = await animalRes.json();
       animalRows = animalRows.concat(animalData.data || []);
       (animalData.included || []).forEach(t => {
-        if (t.type === "taxonomy_term--animal_type")  typeNames[t.id] = (t.attributes.name || "").toLowerCase();
-        if (t.type === "taxonomy_term--animal_breed") typeNames[t.id] = (t.attributes.name || "");
+        if (t.type === "taxonomy_term--animal_type") typeNames[t.id] = (t.attributes.name || "").toLowerCase();
         if (t.type === "file--file") typeNames[t.id] = (t.attributes.uri && (t.attributes.uri.url || t.attributes.uri.value)) || null;
       });
       aUrl = animalData.links?.next?.href || null;
@@ -3702,14 +3701,13 @@ async function fetchAnimalUUIDs(silent = false) {
       }
       animalUUIDs[name] = a.id;
       // ===== SHARED MODULE: animal profile capture =====
-      var breedId = a.relationships && a.relationships.breed && a.relationships.breed.data && a.relationships.breed.data.id;
       var imgRel  = a.relationships && a.relationships.image && a.relationships.image.data;
       var imgId   = Array.isArray(imgRel) ? (imgRel.length ? imgRel[imgRel.length-1].id : null) : (imgRel && imgRel.id);
       var prevPhoto = (animalProfiles[name] && animalProfiles[name].photo) || null;
       animalProfiles[name] = {
         sex:       a.attributes.sex || "",
         birthdate: a.attributes.birthdate || "",
-        breed:     breedId ? (typeNames[breedId] || "") : "",
+        breed:     "",
         type:      typeName ? (typeName.charAt(0).toUpperCase()+typeName.slice(1)) : "",
         group:     a.attributes.group_name || "",
         notes:     ((a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || "").toString().replace(/<[^>]*>/g,"").trim(),
