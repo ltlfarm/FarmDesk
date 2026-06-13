@@ -482,6 +482,27 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
       </div>
 
       <div class="set-sub">
+        <strong>Standalone Mode (No farmOS)</strong>
+        <p style="color:#888;font-size:13px;">Use FarmDesk without a farmOS server. Logs are saved locally and can be exported as XML for Excel or LibreOffice.</p>
+        <label style="display:flex;align-items:center;gap:10px;font-size:16px;margin-top:6px;">
+          <input type="checkbox" id="standaloneToggle" onchange="setStandaloneMode(this.checked)" style="width:22px;height:22px;">
+          Enable Standalone Mode
+        </label>
+        <div id="standaloneNote" style="font-size:13px;color:#c90;margin-top:6px;display:none;">⚠️ farmOS sync is disabled in standalone mode. Export XML from the Data screen.</div>
+      </div>
+
+      <div class="set-sub">
+        <strong>Active User</strong>
+        <p style="color:#888;font-size:13px;">Name stamped on every log entry. Change when a different person is logging.</p>
+        <select id="activeUserSelect" onchange="setActiveUser(this.value)" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-top:4px;"></select>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <input id="newUserInput" placeholder="New user name" style="flex:1;">
+          <button onclick="addUser()" style="margin:0;padding:10px 14px;">Add</button>
+        </div>
+        <button onclick="removeSelectedUser()" class="wide secondary" style="margin-top:8px;font-size:14px;">🗑️ Remove Selected User</button>
+      </div>
+
+      <div class="set-sub">
         <strong>Account</strong>
         <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
         <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
@@ -613,6 +634,27 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <strong>Excluded Animals</strong>
     <p style="color:#888;font-size:13px;">Archived in farmOS or manually removed. Restore to re-add to selector.</p>
     <div id="animalsExcludedList"></div>
+  </div>
+</div>
+
+<!-- ===== STANDALONE DATA SCREEN ===== -->
+<div id="screen-standalone" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="show('home')">← Home</button>
+    <h3 style="margin:10px 0 6px;">📦 Standalone Data</h3>
+    <p style="color:#888;font-size:13px;">Export all logs as XML — open in Excel or LibreOffice. Import a previously exported file to merge or replace logs.</p>
+  </div>
+  <div class="box">
+    <strong>Export XML</strong>
+    <p style="color:#888;font-size:13px;">Exports all goat logs and stock history to an XML file. Share to email, Google Drive, USB, or any app.</p>
+    <button onclick="exportXML()" class="wide">📤 Export Farm Logs (XML)</button>
+  </div>
+  <div class="box">
+    <strong>Import XML</strong>
+    <p style="color:#888;font-size:13px;">Import a previously exported FarmDesk XML file.</p>
+    <button onclick="document.getElementById('xmlImportFile').click()" class="wide secondary">📥 Import XML</button>
+    <input type="file" id="xmlImportFile" accept=".xml" style="display:none;" onchange="importXML(this)">
+    <div id="xmlImportResult" style="font-size:13px;color:#888;margin-top:8px;"></div>
   </div>
 </div>
 
@@ -833,6 +875,9 @@ const LS = {
   configLogUUID:  "farmdesk_configLogUUID",
   lastSync:       "farmdesk_lastSync",
   recentUrls:     "farmdesk_recentUrls",
+  standalone:     "farmdesk_standalone",
+  activeUser:     "farmdesk_activeUser",
+  users:          "farmdesk_users",
   // Per-URL log storage — key is farmdesk_logs_<urlhash>
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
@@ -934,7 +979,10 @@ function show(id) {
   if (id === "home") { renderRecent(); }
   if (id === "history") { renderHistory(); }
   if (id === "settings") { renderSettings(); }
-  if (id === "sync") { renderSync(); }
+  if (id === "sync") {
+    if (localStorage.getItem(LS.standalone) === "1") { show("standalone"); return; }
+    renderSync();
+  }
   if (id === "animals") { renderAnimalsScreen(); }
   if (id === "scheduler") { renderScheduler(); }
 }
@@ -1909,7 +1957,7 @@ function saveStep() {
   const ts = getTimestamp();
 
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
-  const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, loggedBy: cfg.user || "" };
+  const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, loggedBy: localStorage.getItem(LS.activeUser) || cfg.user || "" };
 
   if (t === "weight") {
     const wEl = document.getElementById("f_weight");
@@ -2353,6 +2401,205 @@ function toggleSetGroup(head) {
   if (arrow) arrow.textContent = g.classList.contains('open') ? '▲' : '▼';
 }
 
+// ===== STANDALONE MODE =====
+function setStandaloneMode(on) {
+  localStorage.setItem(LS.standalone, on ? "1" : "0");
+  renderSettings();
+  showToast(on ? "✅ Standalone mode on" : "✅ farmOS sync mode on");
+}
+
+function setActiveUser(name) {
+  localStorage.setItem(LS.activeUser, name);
+}
+
+function addUser() {
+  const input = document.getElementById("newUserInput");
+  const name = (input.value || "").trim();
+  if (!name) { showToast("Enter a name"); return; }
+  const users = JSON.parse(localStorage.getItem(LS.users) || "[]");
+  if (users.includes(name)) { showToast("Already exists"); return; }
+  users.push(name);
+  localStorage.setItem(LS.users, JSON.stringify(users));
+  if (!localStorage.getItem(LS.activeUser)) localStorage.setItem(LS.activeUser, name);
+  input.value = "";
+  renderSettings();
+}
+
+function removeSelectedUser() {
+  const sel = document.getElementById("activeUserSelect");
+  const name = sel.value;
+  if (!name) return;
+  const users = JSON.parse(localStorage.getItem(LS.users) || "[]");
+  const filtered = users.filter(u => u !== name);
+  localStorage.setItem(LS.users, JSON.stringify(filtered));
+  if (localStorage.getItem(LS.activeUser) === name) {
+    localStorage.setItem(LS.activeUser, filtered[0] || "");
+  }
+  renderSettings();
+}
+
+function exportXML() {
+  const logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+  const sdHistory = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
+  const now = new Date().toISOString().slice(0,10);
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>
+<farmdesk_export date="' + now + '">
+';
+
+  xml += '  <goat_logs>
+';
+  logs.forEach(log => {
+    xml += '    <log>
+';
+    xml += '      <id>' + escXML(log.id || "") + '</id>
+';
+    xml += '      <date>' + escXML(log.time || "") + '</date>
+';
+    xml += '      <animal>' + escXML(log.goat || "") + '</animal>
+';
+    xml += '      <type>' + escXML(log.type || "") + '</type>
+';
+    xml += '      <logged_by>' + escXML(log.loggedBy || "") + '</logged_by>
+';
+    if (log.data) {
+      Object.entries(log.data).forEach(([k, v]) => {
+        xml += '      <' + escXMLTag(k) + '>' + escXML(String(v ?? "")) + '</' + escXMLTag(k) + '>
+';
+      });
+    }
+    xml += '    </log>
+';
+  });
+  xml += '  </goat_logs>
+';
+
+  xml += '  <stock_history>
+';
+  sdHistory.forEach(entry => {
+    xml += '    <adjustment>
+';
+    xml += '      <id>' + escXML(entry.id || "") + '</id>
+';
+    xml += '      <date>' + escXML(entry.time || "") + '</date>
+';
+    xml += '      <item>' + escXML(entry.name || "") + '</item>
+';
+    xml += '      <action>' + escXML(entry.action || "") + '</action>
+';
+    xml += '      <amount>' + escXML(String(entry.amount ?? "")) + '</amount>
+';
+    xml += '      <notes>' + escXML(entry.notes || "") + '</notes>
+';
+    xml += '      <seller>' + escXML(entry.seller || "") + '</seller>
+';
+    xml += '      <lot>' + escXML(entry.lot || "") + '</lot>
+';
+    xml += '    </adjustment>
+';
+  });
+  xml += '  </stock_history>
+';
+  xml += '</farmdesk_export>
+';
+
+  const filename = "farmdesk_export_" + now + ".xml";
+  if (window.AndroidBridge && window.AndroidBridge.shareXML) {
+    window.AndroidBridge.shareXML(xml, filename);
+  } else {
+    // Browser fallback — download link
+    const blob = new Blob([xml], { type: "text/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+}
+
+function escXML(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function escXMLTag(s) {
+  return s.replace(/[^a-zA-Z0-9_]/g,"_");
+}
+
+function importXML(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const xml = e.target.result;
+    const result = document.getElementById("xmlImportResult");
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, "text/xml");
+      if (doc.querySelector("parsererror")) { result.textContent = "❌ Invalid XML file."; return; }
+
+      // Ask merge or replace
+      const choice = confirm("Tap OK to MERGE (keep existing + add new).
+Tap Cancel to REPLACE ALL logs with imported data.");
+
+      // Parse goat logs
+      const importedLogs = [];
+      doc.querySelectorAll("goat_logs > log").forEach(node => {
+        const obj = {};
+        node.childNodes.forEach(child => {
+          if (child.nodeType === 1) {
+            const tag = child.tagName;
+            const val = child.textContent;
+            if (tag === "id") obj.id = val;
+            else if (tag === "date") obj.time = val;
+            else if (tag === "animal") obj.goat = val;
+            else if (tag === "type") obj.type = val;
+            else if (tag === "logged_by") obj.loggedBy = val;
+            else {
+              if (!obj.data) obj.data = {};
+              obj.data[tag] = val;
+            }
+          }
+        });
+        if (obj.id) importedLogs.push(obj);
+      });
+
+      // Parse stock history
+      const importedStock = [];
+      doc.querySelectorAll("stock_history > adjustment").forEach(node => {
+        const obj = {};
+        node.childNodes.forEach(child => {
+          if (child.nodeType === 1) {
+            const tag = child.tagName;
+            obj[tag === "date" ? "time" : tag === "item" ? "name" : tag] = child.textContent;
+          }
+        });
+        if (obj.id) importedStock.push(obj);
+      });
+
+      if (choice) {
+        // Merge
+        const existing = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+        const existingIds = new Set(existing.map(l => l.id));
+        const added = importedLogs.filter(l => !existingIds.has(l.id));
+        localStorage.setItem(LS.logs, JSON.stringify([...existing, ...added]));
+
+        const existingStock = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
+        const existingStockIds = new Set(existingStock.map(l => l.id));
+        const addedStock = importedStock.filter(l => !existingStockIds.has(l.id));
+        localStorage.setItem("farmdesk_stock_history", JSON.stringify([...existingStock, ...addedStock]));
+
+        result.textContent = "✅ Merged: " + added.length + " goat logs, " + addedStock.length + " stock entries added.";
+      } else {
+        // Replace
+        localStorage.setItem(LS.logs, JSON.stringify(importedLogs));
+        localStorage.setItem("farmdesk_stock_history", JSON.stringify(importedStock));
+        result.textContent = "✅ Replaced: " + importedLogs.length + " goat logs, " + importedStock.length + " stock entries loaded.";
+      }
+      input.value = "";
+    } catch(err) {
+      document.getElementById("xmlImportResult").textContent = "❌ Error: " + err.message;
+    }
+  };
+  reader.readAsText(file);
+}
+
 function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
@@ -2457,6 +2704,23 @@ function renderSettings() {
   });
 
   // Animal list and excluded list now rendered in the Animals screen — not in Settings
+
+  // Standalone mode toggle
+  const standaloneToggle = document.getElementById("standaloneToggle");
+  const standaloneNote = document.getElementById("standaloneNote");
+  const isStandalone = localStorage.getItem(LS.standalone) === "1";
+  if (standaloneToggle) standaloneToggle.checked = isStandalone;
+  if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
+
+  // Active user selector
+  const userSel = document.getElementById("activeUserSelect");
+  const activeUser = localStorage.getItem(LS.activeUser) || "";
+  const users = JSON.parse(localStorage.getItem(LS.users) || "[]");
+  if (userSel) {
+    userSel.innerHTML = users.length
+      ? users.map(u => `<option value="${u}" ${u === activeUser ? "selected" : ""}>${u}</option>`).join("")
+      : '<option value="">-- No users yet --</option>';
+  }
 
   // GoatDesk-specific boxes only make sense when the Goats module is on
   const goatsOn = (typeof moduleEnabled === "function") ? moduleEnabled("goats") : true;
