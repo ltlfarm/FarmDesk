@@ -815,7 +815,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.13-0439"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.13-0459"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6065,7 +6065,22 @@ function settingsHome() {
 })();
 
 // ===== BACK BUTTON — module aware =====
+// ===== UNIVERSAL: close the topmost open overlay. Returns true if it closed one.
+// Used by both the in-app back press (popstate) and the Android hardware back
+// button so behaviour is identical everywhere: close popup first, else navigate.
+function closeTopOverlay() {
+  var pv = document.getElementById('photoViewer');
+  if (pv && pv.classList.contains('open')) { pv.classList.remove('open'); return true; }
+  var em = document.getElementById('editModal');
+  if (em && em.style.display === 'block') { closeEdit(); return true; }
+  var sm = document.getElementById('sd-editModal');
+  if (sm && sm.style.display === 'block') { sd_closeEdit(); return true; }
+  return false;
+}
+
 window.addEventListener('popstate', function(e) {
+  // Any open popup/modal closes first — universal across modules
+  if (closeTopOverlay()) { history.pushState({ page: 'overlay' }, ''); return; }
   const mod = localStorage.getItem(MODULE_KEY) || 'goats';
   // Back press while in shared Settings opened from a non-goats module
   const gdEl = document.getElementById('module-goatdesk');
