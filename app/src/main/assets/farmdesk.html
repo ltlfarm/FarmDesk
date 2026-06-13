@@ -75,6 +75,14 @@ header small { color:#888; font-size:14px; }
 .screen.active { display:block; }
 
 .box { background:#2a2a2a; padding:14px; margin-bottom:10px; border-radius:8px; }
+.set-group { background:#2a2a2a; border-radius:8px; margin-bottom:10px; overflow:hidden; }
+.set-group > .set-head { display:flex; align-items:center; justify-content:space-between; padding:14px; cursor:pointer; font-weight:bold; font-size:16px; }
+.set-group > .set-body { display:none; padding:0 14px 14px 14px; }
+.set-group.open > .set-body { display:block; }
+.set-group .set-arrow { color:#888; font-size:14px; }
+.set-sub { border-top:1px solid #383838; padding-top:12px; margin-top:12px; }
+.set-sub:first-child { border-top:none; padding-top:0; margin-top:0; }
+.set-sub > strong { display:block; margin-bottom:6px; }
 
 button {
   display:inline-block;
@@ -443,87 +451,101 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   </div>
 
   <!-- ════ GENERIC — applies to the whole app ════ -->
-  <div class="box">
-    <strong>🔗 FarmOS Connection</strong>
-    <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
-    <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
-    <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
-  </div>
-
-  <div class="box">
-    <strong>🧩 Modules</strong>
-    <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Each module works on its own — at least one must stay on.</p>
-    <div id="moduleToggles"></div>
-  </div>
-
-  <div class="box">
-    <strong>Farm Logo</strong>
-    <p style="color:#888;font-size:13px;">Logo shows in the header. Syncs to farmOS so farm hands see it after fetching.</p>
-    <div id="logoPreview" style="margin-bottom:8px;"></div>
-    <div style="display:flex;gap:8px;">
-      <button onclick="document.getElementById('logoFile').click()" style="flex:1;margin:0;padding:12px;font-size:15px;">🖼️ Pick Logo</button>
-      <button id="clearLogoBtn" onclick="clearLogo()" style="display:none;margin:0;padding:12px;font-size:15px;background:#8b0000;">✕ Clear</button>
+  <div class="set-group open" id="setgrp-general">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>⚙️ General</span><span class="set-arrow">▲</span>
     </div>
-    <input type="file" id="logoFile" accept="image/*" style="display:none;" onchange="handleLogo(this)">
-  </div>
+    <div class="set-body">
 
-  <div class="box">
-    <strong>Account</strong>
-    <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
-    <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
-    <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
+      <div class="set-sub">
+        <strong>🔗 FarmOS Connection</strong>
+        <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
+        <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
+        <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
+      </div>
+
+      <div class="set-sub">
+        <strong>🧩 Modules</strong>
+        <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Each module works on its own — at least one must stay on.</p>
+        <div id="moduleToggles"></div>
+      </div>
+
+      <div class="set-sub">
+        <strong>Farm Logo</strong>
+        <p style="color:#888;font-size:13px;">Logo shows in the header. Syncs to farmOS so farm hands see it after fetching.</p>
+        <div id="logoPreview" style="margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="document.getElementById('logoFile').click()" style="flex:1;margin:0;padding:12px;font-size:15px;">🖼️ Pick Logo</button>
+          <button id="clearLogoBtn" onclick="clearLogo()" style="display:none;margin:0;padding:12px;font-size:15px;background:#8b0000;">✕ Clear</button>
+        </div>
+        <input type="file" id="logoFile" accept="image/*" style="display:none;" onchange="handleLogo(this)">
+      </div>
+
+      <div class="set-sub">
+        <strong>Account</strong>
+        <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
+        <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
+        <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
+      </div>
+
+    </div>
   </div>
 
   <!-- ════ GOAT DESK — hidden when the Goats module is off ════ -->
-  <div class="box gd-only" style="border-top:2px solid #c90;margin-top:4px;">
-    <strong style="color:#c90;">🐐 Goat Desk Settings</strong>
-  </div>
-
-  <div class="box gd-only">
-    <strong>Med Formulas</strong>
-    <p style="color:#888;font-size:13px;">Dose per lb of body weight, in each med's own unit (ml, mg, g, oz, tablets...). Round↓ sets per-med dose rounding. Save when done.</p>
-    <table class="formula-table">
-      <thead><tr><th>Medication</th><th>Dose</th><th>Unit</th><th>Route</th><th>Round↓</th><th>Fixed</th><th></th></tr></thead>
-      <tbody id="formulaRows"></tbody>
-    </table>
-    <datalist id="unitOptions">
-      <option value="ml">
-      <option value="cc">
-      <option value="mg">
-      <option value="g">
-      <option value="oz">
-      <option value="tablet">
-      <option value="capsule">
-      <option value="scoop">
-      <option value="tsp">
-      <option value="tbsp">
-    </datalist>
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <input id="newMedName" placeholder="Med name" style="flex:1">
-      <input id="newMedDose" placeholder="dose/lb" type="number" step="0.01" style="width:90px">
-      <button onclick="addFormula()" style="margin:0;padding:10px;">Add</button>
+  <div class="set-group gd-only" id="setgrp-goats">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span style="color:#c90;">🐐 Goat Desk</span><span class="set-arrow">▼</span>
     </div>
-    <button onclick="saveFormulas()" style="margin-top:10px;width:100%;">💾 Save Formulas</button>
+    <div class="set-body">
+
+      <div class="set-sub">
+        <strong>Med Formulas</strong>
+        <p style="color:#888;font-size:13px;">Dose per lb of body weight, in each med's own unit (ml, mg, g, oz, tablets...). Round↓ sets per-med dose rounding. Save when done.</p>
+        <table class="formula-table">
+          <thead><tr><th>Medication</th><th>Dose</th><th>Unit</th><th>Route</th><th>Round↓</th><th>Fixed</th><th></th></tr></thead>
+          <tbody id="formulaRows"></tbody>
+        </table>
+        <datalist id="unitOptions">
+          <option value="ml">
+          <option value="cc">
+          <option value="mg">
+          <option value="g">
+          <option value="oz">
+          <option value="tablet">
+          <option value="capsule">
+          <option value="scoop">
+          <option value="tsp">
+          <option value="tbsp">
+        </datalist>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <input id="newMedName" placeholder="Med name" style="flex:1">
+          <input id="newMedDose" placeholder="dose/lb" type="number" step="0.01" style="width:90px">
+          <button onclick="addFormula()" style="margin:0;padding:10px;">Add</button>
+        </div>
+        <button onclick="saveFormulas()" style="margin-top:10px;width:100%;">💾 Save Formulas</button>
+      </div>
+
+      <div class="set-sub">
+        <strong>Animal List</strong>
+        <button onclick="show('animals')" class="wide secondary" style="margin-top:6px;">🐐 Manage Animals</button>
+      </div>
+
+      <div class="set-sub">
+        <strong>Data</strong>
+        <button class="wide secondary" onclick="exportLogs()">📤 Export Logs (JSON)</button>
+        <button class="wide secondary" onclick="document.getElementById('importFile').click()" style="margin-top:8px;">📥 Import Logs (JSON)</button>
+        <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importLogs(this)">
+        <div id="importResult" style="font-size:13px;color:#888;margin-top:6px;"></div>
+      </div>
+
+      <div class="set-sub">
+        <button class="wide danger" onclick="clearLogs()">🗑️ Clear All Logs</button>
+      </div>
+
+    </div>
   </div>
 
-  <div class="box gd-only">
-    <strong>Animal List</strong>
-    <button onclick="show('animals')" class="wide secondary" style="margin-top:6px;">🐐 Manage Animals</button>
-  </div>
-
-  <div class="box gd-only">
-    <strong>Data</strong>
-    <button class="wide secondary" onclick="exportLogs()">📤 Export Logs (JSON)</button>
-    <button class="wide secondary" onclick="document.getElementById('importFile').click()" style="margin-top:8px;">📥 Import Logs (JSON)</button>
-    <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importLogs(this)">
-    <div id="importResult" style="font-size:13px;color:#888;margin-top:6px;"></div>
-  </div>
-
-  <div class="box gd-only">
-    <button class="wide danger" onclick="clearLogs()">🗑️ Clear All Logs</button>
-  </div>
-
-  <!-- ════ STOCK DESK — renders its own heading when the Stock module is on ════ -->
+  <!-- ════ STOCK DESK — renders its own drawer when the Stock module is on ════ -->
   <div id="sd-settings-inject"></div>
 
 </div>
@@ -815,7 +837,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.13-0459"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.13-0510"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2324,6 +2346,13 @@ document.getElementById("filterType").onchange = renderHistory;
 document.getElementById("sortOrder").onchange = renderHistory;
 
 // ===== SETTINGS =====
+function toggleSetGroup(head) {
+  var g = head.parentElement;
+  g.classList.toggle('open');
+  var arrow = head.querySelector('.set-arrow');
+  if (arrow) arrow.textContent = g.classList.contains('open') ? '▲' : '▼';
+}
+
 function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
@@ -5821,21 +5850,23 @@ async function sd_syncToFarmOS() {
 function sd_renderSettings() {
   const container = document.getElementById('sd-settings-inject');
   if (!container) return;
-  const cfg = JSON.parse(localStorage.getItem(SD_LS.cfg) || '{}');
   container.innerHTML = `
-    <div class="box" style="border-top:2px solid #3a7;margin-top:4px;">
-      <strong style="color:#3a7;">📦 Stock Desk Settings</strong>
-    </div>
-    <div class="box">
-      <strong>Low Stock Thresholds</strong>
-      <p style="color:#888;font-size:13px;margin-top:4px;">Amber warning when stock hits or falls below this value. 0 = off.</p>
-      <div id="thresholdList"></div>
-      <button onclick="sd_saveThresholds()" class="wide secondary" style="margin-top:10px;">💾 Save Thresholds</button>
-    </div>
-    <!-- Add New Item lives in the dashboard ➕ panel — not duplicated here
-         to avoid duplicate element ids -->
-    <div class="box">
-      <button onclick="sd_clearHistory()" class="wide danger">🗑️ Clear All Stock History</button>
+    <div class="set-group" id="setgrp-stock">
+      <div class="set-head" onclick="toggleSetGroup(this)">
+        <span style="color:#3a7;">📦 Stock Desk</span><span class="set-arrow">▼</span>
+      </div>
+      <div class="set-body">
+        <div class="set-sub">
+          <strong>Low Stock Thresholds</strong>
+          <p style="color:#888;font-size:13px;margin-top:4px;">Amber warning when stock hits or falls below this value. 0 = off.</p>
+          <div id="thresholdList"></div>
+          <button onclick="sd_saveThresholds()" class="wide secondary" style="margin-top:10px;">💾 Save Thresholds</button>
+        </div>
+        <!-- Add New Item lives in the dashboard ➕ panel — not duplicated here -->
+        <div class="set-sub">
+          <button onclick="sd_clearHistory()" class="wide danger">🗑️ Clear All Stock History</button>
+        </div>
+      </div>
     </div>
   `;
   sd_renderThresholdList();
