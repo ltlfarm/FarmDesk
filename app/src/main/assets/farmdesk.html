@@ -807,6 +807,7 @@ const LS = {
   formulas:       "farmdesk_formulas",
   cfg:            "farmdesk_cfg",
   animalUUIDs:    "farmdesk_animalUUIDs",
+  profiles:       "farmdesk_animal_profiles",
   configLogUUID:  "farmdesk_configLogUUID",
   lastSync:       "farmdesk_lastSync",
   recentUrls:     "farmdesk_recentUrls",
@@ -814,7 +815,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.12-1801"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.13-0342"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -848,6 +849,7 @@ let goats = JSON.parse(localStorage.getItem(LS.goats) || "null") || [...DEFAULT_
 let excludedAnimals = JSON.parse(localStorage.getItem(LS.excluded) || "[]");
 let logs  = JSON.parse(localStorage.getItem(LS.logs)  || "[]");
 let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
+let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // keyed by animal name
 
 // ===== ONE-TIME DEDUP: remove duplicate log entries by id =====
 (function dedupLogs() {
@@ -2162,7 +2164,7 @@ function makeLogEl(l, showActions = false) {
   d.innerHTML = `
     <div class="log-top">
       ${showActions ? `<input type="checkbox" class="log-select" data-id="${l.id}" style="width:auto;margin:0 8px 0 0;" onclick="event.stopPropagation()">` : ""}
-      <span class="log-animal">${l.goat}</span>
+      <span class="log-animal" onclick="event.stopPropagation();openAnimalProfile(this.dataset.nm)" data-nm="${(l.goat||'').replace(/"/g,'&quot;')}" style="cursor:pointer;text-decoration:underline dotted;">${l.goat}</span>
       <span class="log-type">${l.type}</span>
       <span class="log-arrow" style="margin-left:auto;color:#555;font-size:14px;">\u25BC</span>
     </div>
@@ -2609,22 +2611,75 @@ function removeAnimal(name) {
 }
 
 // ===== SHARED MODULE: animals screen =====
+// ===== SHARED MODULE: asset card (animals, materials, equipment) =====
+function assetCardHTML(img, title, detail, onclick) {
+  var ph = img
+    ? '<img src="' + img + '" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;">'
+    : '<div style="width:54px;height:54px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">🐾</div>';
+  return '<div onclick="' + onclick + '" style="display:flex;align-items:center;gap:12px;padding:10px;background:#2a2a2a;border-radius:8px;margin-bottom:8px;cursor:pointer;">' +
+    ph +
+    '<div style="flex:1;min-width:0;"><div style="font-weight:bold;font-size:16px;color:#fff;">' + title + '</div>' +
+    '<div style="font-size:13px;color:#9c9;">' + detail + '</div></div>' +
+    '<span style="color:#666;">&rsaquo;</span></div>';
+}
+
+function animalAge(birthdate) {
+  if (!birthdate) return "";
+  var b = new Date(birthdate); if (isNaN(b)) return "";
+  var months = (Date.now() - b.getTime()) / (1000*60*60*24*30.44);
+  if (months < 1)  return "<1 mo";
+  if (months < 24) return Math.round(months) + " mo";
+  return Math.floor(months/12) + " yr";
+}
+
+function animalDetailLine(name) {
+  var p = animalProfiles[name] || {};
+  var sex = p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : "";
+  return [sex, animalAge(p.birthdate), p.breed || p.type].filter(Boolean).join(" \u00B7 ") || "Tap to log";
+}
+
+function openAnimalProfile(name) {
+  var p = animalProfiles[name] || {};
+  var sex = p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : "\u2014";
+  var modal = document.getElementById("editModal");
+  var body  = document.getElementById("editFields");
+  var title = document.getElementById("editTitle");
+  if (!modal || !body) return;
+  if (title) title.textContent = name;
+  var img = p.photo
+    ? '<img src="' + p.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;">'
+    : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>';
+  function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ""; }
+  body.innerHTML = img + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
+    row("Breed", p.breed || p.type) + row("Group", p.group) + row("Notes", p.notes) +
+    '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="margin-top:12px;">Log for ' + name + '</button>';
+  var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
+  modal.style.display = "block";
+}
+
+function startFlowForAnimal(name) {
+  startFlow("med");
+  var sel = document.getElementById("goat");
+  if (sel) { var i = goats.indexOf(name); if (i >= 0) { sel.selectedIndex = i; herdIndex = i; } }
+}
+
 function renderAnimalsScreen() {
   const al = document.getElementById("animalsAnimalList");
   al.innerHTML = "";
-  goats.forEach((g, i) => {
-    const row = document.createElement("div");
-    row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:2px;padding:6px 8px;border-radius:6px;background:${i % 2 === 0 ? "#2a2a2a" : "#333"};`;
-    const name = document.createElement("span");
-    name.style.flex = "1";
-    name.textContent = g;
-    const btn = document.createElement("button");
-    btn.textContent = "✕";
-    btn.style.cssText = "padding:6px 12px;font-size:14px;background:#8b0000;margin:0;";
-    btn.onclick = () => removeAnimal(g);
-    row.appendChild(name);
-    row.appendChild(btn);
-    al.appendChild(row);
+  if (!goats.length) {
+    al.innerHTML = "<div style='color:#666;font-size:14px;'>No animals yet — Fetch from farmOS or add below.</div>";
+  }
+  goats.forEach(function(g){
+    var wrap = document.createElement("div");
+    wrap.innerHTML = assetCardHTML((animalProfiles[g] && animalProfiles[g].photo) || null, g, animalDetailLine(g), "");
+    var card = wrap.firstElementChild;
+    card.onclick = function(){ openAnimalProfile(g); };
+    var rm = document.createElement("button");
+    rm.textContent = "✕ Remove";
+    rm.style.cssText = "padding:4px 10px;font-size:12px;background:#8b0000;margin:0 0 8px 0;width:100%;";
+    rm.onclick = function(e){ e.stopPropagation(); removeAnimal(g); };
+    al.appendChild(card);
+    al.appendChild(rm);
   });
 
   const el = document.getElementById("animalsExcludedList");
@@ -3618,14 +3673,16 @@ async function fetchAnimalUUIDs(silent = false) {
     const MODULE_ANIMAL_TYPES = ["goat"]; // lowercase term names this module owns
     if (!silent && el) el.textContent = "Fetching animals...";
     let animalRows = [], typeNames = {};
-    let aUrl = apiUrl("/api/asset/animal?include=animal_type&page[limit]=100");
+    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image,breed&page[limit]=100");
     while (aUrl) {
       const animalRes = await fetch(aUrl, { headers: authHeaders });
       if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
       const animalData = await animalRes.json();
       animalRows = animalRows.concat(animalData.data || []);
       (animalData.included || []).forEach(t => {
-        if (t.type === "taxonomy_term--animal_type") typeNames[t.id] = (t.attributes.name || "").toLowerCase();
+        if (t.type === "taxonomy_term--animal_type")  typeNames[t.id] = (t.attributes.name || "").toLowerCase();
+        if (t.type === "taxonomy_term--animal_breed") typeNames[t.id] = (t.attributes.name || "");
+        if (t.type === "file--file") typeNames[t.id] = (t.attributes.uri && (t.attributes.uri.url || t.attributes.uri.value)) || null;
       });
       aUrl = animalData.links?.next?.href || null;
     }
@@ -3644,6 +3701,21 @@ async function fetchAnimalUUIDs(silent = false) {
         return;
       }
       animalUUIDs[name] = a.id;
+      // ===== SHARED MODULE: animal profile capture =====
+      var breedId = a.relationships && a.relationships.breed && a.relationships.breed.data && a.relationships.breed.data.id;
+      var imgRel  = a.relationships && a.relationships.image && a.relationships.image.data;
+      var imgId   = Array.isArray(imgRel) ? (imgRel.length ? imgRel[imgRel.length-1].id : null) : (imgRel && imgRel.id);
+      var prevPhoto = (animalProfiles[name] && animalProfiles[name].photo) || null;
+      animalProfiles[name] = {
+        sex:       a.attributes.sex || "",
+        birthdate: a.attributes.birthdate || "",
+        breed:     breedId ? (typeNames[breedId] || "") : "",
+        type:      typeName ? (typeName.charAt(0).toUpperCase()+typeName.slice(1)) : "",
+        group:     a.attributes.group_name || "",
+        notes:     ((a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || "").toString().replace(/<[^>]*>/g,"").trim(),
+        photoUrl:  imgId ? (typeNames[imgId] || null) : null,
+        photo:     prevPhoto
+      };
       // Add to goat list only if not already present (case-insensitive check) and not excluded
       const alreadyInList = goats.some(g => g.toLowerCase() === name.toLowerCase());
       const isExcluded = excludedAnimals.some(e => e.toLowerCase() === name.toLowerCase());
@@ -3671,6 +3743,22 @@ async function fetchAnimalUUIDs(silent = false) {
     localStorage.setItem(LS.goats, JSON.stringify(goats));
     localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
     localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
+
+    // Download new profile photos to base64 for offline use (parallel)
+    await Promise.all(Object.keys(animalProfiles).map(async function(nm){
+      var p = animalProfiles[nm];
+      if (p.photoUrl && !p.photo) {
+        try {
+          var u = p.photoUrl.indexOf("http") === 0 ? p.photoUrl : (cfgSaved.url + p.photoUrl);
+          var r = await fetch(u, { headers: { "Authorization": "Bearer " + token } });
+          if (r.ok) {
+            var blob = await r.blob();
+            p.photo = await new Promise(function(res){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.readAsDataURL(blob); });
+          }
+        } catch(e) { /* offline-safe */ }
+      }
+    }));
+    localStorage.setItem(LS.profiles, JSON.stringify(animalProfiles));
     populateGoatSelect();
 
     // ===== STEP 3: Fetch recent logs =====
@@ -4436,6 +4524,7 @@ function closeEdit() {
   const saveBtn = document.getElementById("modalSaveBtn");
   saveBtn.textContent = "💾 Save";
   saveBtn.style.background = "";
+  saveBtn.style.display = "";   // profile popup hides it; restore here
   saveBtn.onclick = saveEdit;
   editingId = null;
 }
