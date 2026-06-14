@@ -654,7 +654,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <strong>Import XML</strong>
     <p style="color:#888;font-size:13px;">Import a previously exported FarmDesk XML file.</p>
     <button onclick="document.getElementById('xmlImportFile').click()" class="wide secondary">📥 Import XML</button>
-    <input type="file" id="xmlImportFile" accept=".xml" style="display:none;" onchange="importXML(this)">
+    <input type="file" id="xmlImportFile" accept=".xml,text/xml,*/*" style="display:none;" onchange="importXML(this)">
     <div id="xmlImportResult" style="font-size:13px;color:#888;margin-top:8px;"></div>
   </div>
 </div>
