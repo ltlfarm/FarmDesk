@@ -100,6 +100,39 @@ public class MainActivity extends Activity {
 
     public class AndroidBridge {
 
+        // ===== SAVE XML — write to public Downloads folder =====
+        @JavascriptInterface
+        public void saveXML(String content, String filename) {
+            runOnUiThread(() -> {
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        android.content.ContentValues values = new android.content.ContentValues();
+                        values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename);
+                        values.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/xml");
+                        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 1);
+                        android.net.Uri collection = android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                        android.net.Uri item = getContentResolver().insert(collection, values);
+                        try (java.io.OutputStream os = getContentResolver().openOutputStream(item)) {
+                            os.write(content.getBytes("UTF-8"));
+                        }
+                        values.clear();
+                        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0);
+                        getContentResolver().update(item, values, null, null);
+                    } else {
+                        File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                        downloads.mkdirs();
+                        File outFile = new File(downloads, filename);
+                        FileWriter fw = new FileWriter(outFile);
+                        fw.write(content);
+                        fw.close();
+                    }
+                    Toast.makeText(MainActivity.this, "Saved to Downloads: " + filename, Toast.LENGTH_LONG).show();
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Save error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+
         // ===== SHARE XML — Standalone mode export =====
         @JavascriptInterface
         public void shareXML(String content, String filename) {

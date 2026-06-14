@@ -836,12 +836,21 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 <!-- ===== SYNC ===== -->
 <!-- ===== SHARED MODULE: farmOS sync screen =====  -->
 <div id="sd-screen-sync" class="screen">
-  <div class="box">
+  <!-- farmOS sync — hidden in standalone mode -->
+  <div class="box" id="sd-syncFarmOSBox">
     <strong>🔄 FarmOS Sync</strong>
     <p style="color:#888;font-size:13px;margin:4px 0 0;">Unsynced items: <span id="sd-unsyncedCount">0</span></p>
     <button onclick="sd_syncToFarmOS()" style="width:calc(100% - 10px);margin-top:10px;">⬆️ Push to FarmOS</button>
     <button onclick="refreshAssets()" class="secondary" style="width:calc(100% - 10px);">⬇️ Fetch Inventory</button>
     <div id="sd-syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
+  </div>
+  <!-- Standalone export — shown in standalone mode -->
+  <div class="box" id="sd-syncStandaloneBox" style="display:none;">
+    <strong>📦 Standalone Data</strong>
+    <p style="color:#888;font-size:13px;margin:4px 0 8px;">Export or import all farm logs as XML.</p>
+    <button onclick="exportXML('share')" style="width:calc(100% - 10px);">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML('download')" class="secondary" style="width:calc(100% - 10px);margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="document.getElementById('xmlImportFile').click()" class="secondary" style="width:calc(100% - 10px);margin-top:8px;">📥 Import XML</button>
   </div>
 </div>
 
@@ -2505,6 +2514,8 @@ function exportXML(mode) {
   var filename = "farmdesk_export_" + now + ".xml";
   if (mode === "share" && window.AndroidBridge && window.AndroidBridge.shareXML) {
     window.AndroidBridge.shareXML(xml, filename);
+  } else if (mode === "download" && window.AndroidBridge && window.AndroidBridge.saveXML) {
+    window.AndroidBridge.saveXML(xml, filename);
   } else {
     var blob = new Blob([xml], { type: "text/xml" });
     var url = URL.createObjectURL(blob);
@@ -5930,6 +5941,11 @@ function queueCreateItem() {
 
 // ===== SYNC SCREEN =====
 function sd_renderSyncScreen() {
+  const isStandalone = localStorage.getItem(LS.standalone) === "1";
+  const farmBox = document.getElementById('sd-syncFarmOSBox');
+  const standaloneBox = document.getElementById('sd-syncStandaloneBox');
+  if (farmBox) farmBox.style.display = isStandalone ? 'none' : '';
+  if (standaloneBox) standaloneBox.style.display = isStandalone ? '' : 'none';
   const count = pending.filter(p => !p.synced).length;
   document.getElementById('sd-unsyncedCount').textContent = count;
   document.getElementById('sd-syncLog').textContent = '';
