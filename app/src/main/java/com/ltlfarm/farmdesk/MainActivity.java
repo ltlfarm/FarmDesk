@@ -66,11 +66,12 @@ public class MainActivity extends Activity {
                     FileChooserParams params) {
                 if (filePathCallback != null) filePathCallback.onReceiveValue(null);
                 filePathCallback = callback;
-                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
                 intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"text/xml", "application/xml", "text/plain", "*/*"});
                 try {
-                    startActivityForResult(Intent.createChooser(intent, "Select File"), FILE_CHOOSER_REQUEST);
+                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
                 } catch (Exception e) {
                     filePathCallback = null;
                     return false;
