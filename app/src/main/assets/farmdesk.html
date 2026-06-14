@@ -624,9 +624,27 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <strong>Active Animals</strong>
     <p style="color:#888;font-size:13px;">Removed animals won't return on Fetch unless restored.</p>
     <div id="animalsAnimalList"></div>
-    <div id="animalsAddRow" style="display:flex;gap:8px;margin-top:10px;">
-      <input id="animalsNewName" placeholder="Animal name" style="flex:1">
-      <button onclick="addAnimalFromScreen()" style="margin:0;padding:10px;">Add</button>
+    <div style="margin-top:12px;">
+      <strong style="font-size:15px;">Add Animal</strong>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <input id="animalsNewName" placeholder="Name *" style="flex:1;">
+        <input id="animalsNewTag" placeholder="Tag/ID" style="flex:1;">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <input id="animalsNewSpecies" placeholder="Species (goat, sheep...)" style="flex:1;">
+        <input id="animalsNewBreed" placeholder="Breed" style="flex:1;">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <select id="animalsNewSex" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+          <option value="">Sex</option>
+          <option value="F">Female</option>
+          <option value="M">Male</option>
+          <option value="W">Wether</option>
+        </select>
+        <input id="animalsNewDob" type="date" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+      <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
+      <button onclick="addAnimalFromScreen()" style="width:100%;margin-top:8px;">+ Add Animal</button>
     </div>
   </div>
 
@@ -2481,6 +2499,25 @@ function exportXML(mode) {
   xml += "  </goat_logs>\n";
 
   // Stock inventory (current quantities)
+  // Animal profiles
+  var allProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}");
+  var allGoats = JSON.parse(localStorage.getItem(LS.goats) || "[]");
+  xml += "  <animals>\n";
+  allGoats.forEach(function(name) {
+    var p = allProfiles[name] || {};
+    xml += "    <animal>\n";
+    xml += "      <name>" + escXML(name) + "</name>\n";
+    xml += "      <tag>" + escXML(p.tag || "") + "</tag>\n";
+    xml += "      <species>" + escXML(p.type || "") + "</species>\n";
+    xml += "      <breed>" + escXML(p.breed || "") + "</breed>\n";
+    xml += "      <sex>" + escXML(p.sex || "") + "</sex>\n";
+    xml += "      <dob>" + escXML(p.birthdate || "") + "</dob>\n";
+    xml += "      <group>" + escXML(p.group || "") + "</group>\n";
+    xml += "      <notes>" + escXML(p.notes || "") + "</notes>\n";
+    xml += "    </animal>\n";
+  });
+  xml += "  </animals>\n";
+
   var sdAssets = JSON.parse(localStorage.getItem("farmdesk_stock_assets") || "[]");
   xml += "  <stock_inventory>\n";
   sdAssets.forEach(function(asset) {
@@ -2584,6 +2621,9 @@ function importXML(input) {
         result.textContent = "✅ Replaced: " + importedLogs.length + " goat logs, " + importedStock.length + " stock entries loaded.";
       }
       input.value = "";
+      // Reload logs into memory and refresh UI
+      logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+      renderHome();
     } catch(err) {
       result.textContent = "❌ Error: " + err.message;
     }
@@ -3053,8 +3093,8 @@ function openAnimalProfile(name) {
         ? '<img data-photoid="' + p.photoId + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;background:#333;">'
         : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>');
   function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ""; }
-  body.innerHTML = img + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
-    row("Breed", p.breed || p.type) + row("Group", p.group) + row("Notes", p.notes) +
+  body.innerHTML = img + row("Tag/ID", p.tag) + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
+    row("Species", p.type) + row("Breed", p.breed) + row("Group", p.group) + row("Notes", p.notes) +
     '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="margin-top:12px;">Log for ' + name + '</button>';
   var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
   modal.style.display = "block";
@@ -3110,14 +3150,41 @@ function renderAnimalsScreen() {
   });
 }
 function addAnimalFromScreen() {
-  const inp = document.getElementById("animalsNewName");
-  const name = inp.value.trim();
-  if (!name || goats.includes(name)) return;
+  var name = (document.getElementById("animalsNewName").value || "").trim();
+  if (!name) { showToast("Name is required"); return; }
+  if (goats.includes(name)) { showToast("Animal already exists"); return; }
+  var tag     = (document.getElementById("animalsNewTag").value || "").trim();
+  var species = (document.getElementById("animalsNewSpecies").value || "").trim();
+  var breed   = (document.getElementById("animalsNewBreed").value || "").trim();
+  var sex     = document.getElementById("animalsNewSex").value || "";
+  var dob     = document.getElementById("animalsNewDob").value || "";
+  var notes   = (document.getElementById("animalsNewNotes").value || "").trim();
+
   goats.push(name);
-  inp.value = "";
   localStorage.setItem(LS.goats, JSON.stringify(goats));
+
+  animalProfiles[name] = {
+    sex:       sex,
+    birthdate: dob,
+    breed:     breed,
+    type:      species,
+    group:     "",
+    notes:     notes,
+    tag:       tag,
+    photo:     null
+  };
+  saveProfilesSafely();
+
+  // Clear form
+  ["animalsNewName","animalsNewTag","animalsNewSpecies","animalsNewBreed","animalsNewNotes"].forEach(function(id){
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("animalsNewSex").value = "";
+  document.getElementById("animalsNewDob").value = "";
+
   populateGoatSelect();
   renderAnimalsScreen();
+  showToast("✅ " + name + " added");
 }
 
 
