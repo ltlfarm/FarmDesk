@@ -308,6 +308,41 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 /* Screen padding for bottom nav */
 .screen { padding-bottom:80px; }
 
+/* ===== BIRDDESK MODULE STYLES ===== */
+.bird-card { background:#2a2a2a; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; border-left:4px solid #3a7; cursor:pointer; }
+.bird-card:active { opacity:0.8; }
+.bird-card .bird-info { flex:1; }
+.bird-card .bird-tag { font-weight:bold; font-size:16px; color:#3a7; }
+.bird-card .bird-name { font-size:14px; color:#ccc; }
+.bird-card .bird-meta { font-size:13px; color:#888; margin-top:2px; }
+.bird-card .bird-icon { font-size:28px; }
+.bird-card .bird-thumb { width:46px; height:46px; border-radius:8px; object-fit:cover; cursor:zoom-in; flex-shrink:0; }
+.species-header { font-size:14px; font-weight:bold; color:#888; text-transform:uppercase; letter-spacing:1px; padding:10px 4px 4px; }
+.nest-card { background:#2a2a2a; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; border-left:4px solid #68b; }
+.nest-card .nest-name { flex:1; font-size:16px; }
+.nest-card input[type=number] { width:90px; padding:10px; font-size:20px; text-align:center; margin:0; }
+.egg-total-row { display:flex; gap:10px; margin-bottom:10px; }
+.egg-total-box { flex:1; background:#1b3a2a; border:1px solid #3a7; border-radius:8px; padding:10px; text-align:center; }
+.egg-total-box .etl { font-size:12px; color:#888; }
+.egg-total-box .etv { font-size:24px; font-weight:bold; color:#3a7; }
+.log-drawer { display:none; margin-top:8px; }
+.log-arrow { margin-left:auto; color:#555; font-size:14px; }
+.log-select { width:auto !important; margin:0 8px 0 0 !important; }
+.filter-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.chip { padding:6px 14px; border-radius:20px; font-size:14px; background:#333; color:#aaa; cursor:pointer; border:none; touch-action:manipulation; }
+.chip.active { background:#3a7; color:#fff; }
+.bd-bottom-nav button { flex:1; margin:0; padding:12px 4px; font-size:13px; border-radius:0; background:transparent; color:#888; border-right:1px solid #222; }
+.bd-bottom-nav button.active { color:#3a7; border-top:2px solid #3a7; }
+.bd-bottom-nav button:last-child { border-right:none; }
+#bd-loading { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:400; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:#fff; font-size:18px; }
+#bd-loading.active { display:flex; }
+.bd-modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:500; overflow-y:auto; padding:20px; }
+.bd-modal-box { background:#2a2a2a; border-radius:10px; padding:18px; max-width:480px; margin:0 auto; }
+.bd-modal-box h3 { margin:0 0 14px; color:#3a7; }
+#bd-photo-viewer { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.95); z-index:600; align-items:center; justify-content:center; }
+#bd-photo-viewer.open { display:flex; }
+
+
 </style>
 </head>
 <body>
@@ -995,6 +1030,257 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </nav>
 </div>
 
+<!-- ===== BIRDDESK MODULE ===== -->
+<div id="module-birddesk" style="display:none;">
+<div id="bd-loading"><div class="spinner"></div><span id="bd-load-msg">Loading...</span></div>
+
+<!-- BIRDS SCREEN -->
+<div id="bd-screen-birds" class="screen active">
+  <div class="box" style="display:flex;gap:8px;align-items:center;">
+    <input id="bd-search" placeholder="Search tag or name..." oninput="bd_renderBirds()" style="flex:1;margin:0;">
+    <button onclick="bd_openAddBird()" style="margin:0;padding:12px 16px;font-size:20px;">+</button>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+    <button class="sm secondary" onclick="bd_setSpeciesFilter('')" id="bd-fAll">All</button>
+    <button class="sm secondary" onclick="bd_setSpeciesFilter('Chicken')" id="bd-fChicken">Chicken</button>
+    <button class="sm secondary" onclick="bd_setSpeciesFilter('Duck')" id="bd-fDuck">Duck</button>
+    <button class="sm secondary" onclick="bd_setSpeciesFilter('Goose')" id="bd-fGoose">Goose</button>
+    <button class="sm secondary" onclick="bd_setSpeciesFilter('Other')" id="bd-fOther">Other</button>
+  </div>
+  <div id="bd-bird-list"></div>
+</div>
+
+<!-- EGGS SCREEN -->
+<div id="bd-screen-eggs" class="screen">
+  <div class="box">
+    <h3 style="margin:0 0 10px;">Egg Collection</h3>
+    <div class="egg-total-row">
+      <div class="egg-total-box"><div class="etl">Today</div><div class="etv" id="bd-egg-today">0</div></div>
+      <div class="egg-total-box"><div class="etl">This Week</div><div class="etv" id="bd-egg-week">0</div></div>
+      <div class="egg-total-box"><div class="etl">This Month</div><div class="etv" id="bd-egg-month">0</div></div>
+    </div>
+    <label>Flock</label>
+    <select id="bd-egg-flock" onchange="bd_renderNestBoxes()"></select>
+    <label>Date / Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="bd-egg-time" style="flex:1;">
+      <button onclick="bd_setEggNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+    <label>Notes</label>
+    <input id="bd-egg-notes" placeholder="Optional notes">
+  </div>
+  <div id="bd-nest-boxes"></div>
+  <div class="box">
+    <button onclick="bd_saveEggs()" class="wide">Save Collection</button>
+  </div>
+</div>
+
+<!-- HISTORY SCREEN -->
+<div id="bd-screen-history" class="screen">
+  <div class="box">
+    <h3 style="margin:0 0 10px;">History</h3>
+    <div class="filter-chips">
+      <button class="chip active" onclick="bd_setHistFilter('all',this)">All</button>
+      <button class="chip" onclick="bd_setHistFilter('egg',this)">Eggs</button>
+      <button class="chip" onclick="bd_setHistFilter('health',this)">Health</button>
+      <button class="chip" onclick="bd_setHistFilter('feed',this)">Feed</button>
+      <button class="chip" onclick="bd_setHistFilter('mortality',this)">Death</button>
+    </div>
+  </div>
+  <div class="box" style="display:flex;gap:8px;align-items:center;">
+    <label style="margin:0;display:flex;align-items:center;gap:6px;flex:1;">
+      <input type="checkbox" id="bd-select-all-logs" onchange="bd_toggleSelectAll(this.checked)" style="width:auto;margin:0;">
+      Select All
+    </label>
+    <button onclick="bd_deleteSelected()" style="margin:0;background:#8b0000;padding:10px 16px;font-size:15px;">Delete Selected</button>
+  </div>
+  <div id="bd-history-list"></div>
+</div>
+
+<!-- SYNC SCREEN -->
+<div id="bd-screen-sync" class="screen">
+  <div class="box">
+    <h3 style="margin:0 0 6px;">farmOS Sync</h3>
+    <p style="color:#888;font-size:14px;margin:0 0 10px;">Pending logs saved locally. Push when connected.</p>
+    <div style="font-size:16px;margin-bottom:10px;">
+      Pending: <strong id="bd-pending-count" style="color:#c90;">0</strong>
+      &nbsp;|&nbsp;
+      Last sync: <span id="bd-last-sync" style="color:#888;">Never</span>
+    </div>
+    <button onclick="bd_syncToFarmOS()" class="wide">Push to farmOS</button>
+  </div>
+  <div class="box">
+    <strong>Connection</strong>
+    <label>FarmOS URL</label>
+    <input id="bd-farmos-url" placeholder="https://yourfarm.farmos.net" type="url">
+    <label>Username</label>
+    <input id="bd-farmos-user" placeholder="farmOS username" autocomplete="username">
+    <label>Password</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input id="bd-farmos-pass" placeholder="farmOS password" type="password" autocomplete="current-password" style="flex:1;margin-top:0;">
+      <button onclick="bd_togglePass()" id="bd-showPassBtn" style="margin:0;padding:10px 14px;font-size:16px;background:#555;">&#x1F441;</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="bd_testConnection()" style="flex:1;margin:0;">Test Connection</button>
+      <button onclick="bd_fetchAssets()" class="secondary" style="flex:1;margin:0;">Fetch Birds</button>
+    </div>
+    <div id="bd-test-result" style="margin-top:8px;font-size:13px;color:#888;"></div>
+  </div>
+  <div class="box">
+    <strong>Flock &amp; Nest Box Config</strong>
+    <button onclick="bd_openFlockManager()" class="wide secondary" style="margin-top:6px;">Manage Flocks &amp; Nest Boxes</button>
+  </div>
+  <div class="box">
+    <strong>Species &amp; Breeds</strong>
+    <button onclick="bd_openSpeciesManager()" class="wide secondary" style="margin-top:6px;">Manage Species &amp; Breeds</button>
+  </div>
+  <div class="box">
+    <strong>Animal Type Filter</strong>
+    <p style="color:#888;font-size:13px;margin:4px 0 8px;">Tap to exclude non-bird types fetched from farmOS.</p>
+    <div id="bd-excluded-types-list"></div>
+    <p style="color:#888;font-size:12px;margin-top:6px;">Excluded types are hidden in the Birds screen.</p>
+  </div>
+  <div class="box">
+    <button onclick="bd_logout()" class="wide secondary">Log Out</button>
+  </div>
+  <div id="bd-sync-log" style="font-size:13px;color:#888;padding:10px;white-space:pre-wrap;"></div>
+</div>
+
+<!-- LOG MODAL -->
+<div id="bd-log-modal" class="bd-modal" onclick="bd_closeLogModal(event)">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-log-modal-title">Log</h3>
+    <label>Log Type</label>
+    <select id="bd-log-type" onchange="bd_renderLogFields()">
+      <option value="weight">Weight</option>
+      <option value="med">Med / Treatment</option>
+      <option value="obs">Observation</option>
+      <option value="proc">Procedure</option>
+      <option value="mortality">Mortality</option>
+      <option value="hatch">Hatch</option>
+      <option value="feed">Feed</option>
+    </select>
+    <label>Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="bd-log-time" style="flex:1;">
+      <button onclick="bd_setLogNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+    <div id="bd-log-fields" style="margin-top:4px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="bd_saveLog()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="bd_closeLogModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT BIRD MODAL -->
+<div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModal(event)">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-bird-modal-title">Add Bird</h3>
+    <label>Tag / ID</label>
+    <input id="bd-bird-tag" placeholder="Tag number or ID">
+    <label>Name (optional)</label>
+    <input id="bd-bird-name" placeholder="Name">
+    <label>Species</label>
+    <select id="bd-bird-species" onchange="bd_updateBreedList()">
+      <option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option>
+    </select>
+    <label>Custom Species (if Other)</label>
+    <input id="bd-bird-species-custom" placeholder="e.g. Turkey, Quail">
+    <label>Breed</label>
+    <select id="bd-bird-breed"></select>
+    <label>Custom Breed</label>
+    <input id="bd-bird-breed-custom" placeholder="Enter breed if not listed">
+    <label>Sex</label>
+    <select id="bd-bird-sex">
+      <option value="">Unknown</option><option value="F">Female</option><option value="M">Male</option>
+    </select>
+    <label>Flock</label>
+    <select id="bd-bird-flock"></select>
+    <label>Notes</label>
+    <input id="bd-bird-notes" placeholder="Optional notes">
+    <label style="margin-top:12px;">Profile Photo (optional)</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <button type="button" onclick="bd_birdTakeCamera()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Camera</button>
+      <button type="button" onclick="bd_birdOpenGallery()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Gallery</button>
+      <button type="button" id="bd-bird-clear-photo" onclick="bd_birdClearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">Clear</button>
+    </div>
+    <input type="file" id="bd-bird-gallery" accept="image/*" style="display:none;" onchange="bd_birdHandlePhoto(this)">
+    <input type="file" id="bd-bird-camera" accept="image/*" capture="environment" style="display:none;" onchange="bd_birdHandlePhoto(this)">
+    <div id="bd-bird-photo-preview" style="margin-top:6px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="bd_saveBird()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="bd_closeBirdModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- FLOCK MANAGER MODAL -->
+<div id="bd-flock-modal" class="bd-modal" onclick="bd_closeFlockModal(event)">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3>Flock &amp; Nest Box Manager</h3>
+    <div id="bd-flock-list"></div>
+    <div class="box" style="margin-top:10px;">
+      <strong>Add Flock</strong>
+      <label>Flock Name</label>
+      <input id="bd-new-flock-name" placeholder="e.g. Layer Hens">
+      <label>Species Mix</label>
+      <input id="bd-new-flock-species" placeholder="e.g. Chicken, Duck">
+      <button onclick="bd_addFlock()" class="wide" style="margin-top:8px;">+ Add Flock</button>
+    </div>
+    <button class="wide secondary" onclick="bd_closeFlockModal()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
+<!-- SPECIES MANAGER MODAL -->
+<div id="bd-species-modal" class="bd-modal" onclick="bd_closeSpeciesModal(event)">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3>Species &amp; Breed Manager</h3>
+    <div id="bd-species-list"></div>
+    <button class="wide secondary" onclick="bd_closeSpeciesModal()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModal(event)">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-confirm-title">Confirm</h3>
+    <div id="bd-confirm-body"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="bd-confirm-ok" style="flex:1;background:#8b0000;">Confirm</button>
+      <button class="secondary" onclick="bd_closeConfirmModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT LOG MODAL -->
+<div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModal(event)">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-edit-title">Edit Log</h3>
+    <div id="bd-edit-fields"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="bd-edit-save" onclick="bd_saveEdit()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="bd_closeEditModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- PHOTO VIEWER -->
+<div id="bd-photo-viewer" onclick="bd_closePhotoViewer()">
+  <span style="position:absolute;top:16px;right:16px;font-size:28px;color:#fff;cursor:pointer;" onclick="bd_closePhotoViewer()">&#x2715;</span>
+  <img id="bd-photo-viewer-img" src="" style="max-width:100%;max-height:100vh;object-fit:contain;">
+</div>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav bd-bottom-nav">
+  <button id="bd-nav-birds"   onclick="bd_show('birds')"   class="active">&#x1F413; Birds</button>
+  <button id="bd-nav-eggs"    onclick="bd_show('eggs')">&#x1F95A; Eggs</button>
+  <button id="bd-nav-history" onclick="bd_show('history')">&#x1F4CB; History</button>
+  <button id="bd-nav-sync"    onclick="bd_show('sync')">&#x1F504; Sync</button>
+</nav>
+</div>
+
+
 <script>
 // ===========================
 // ===== GOATDESK MODULE =====
@@ -1023,7 +1309,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.15-2218"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6775,6 +7061,913 @@ function openEditLog(id) {
 
 // logo — handled by shared GoatDesk logo init
 
+
+// ============================
+// ===== BIRDDESK MODULE ======
+// ============================
+
+const BD_LS = {
+  cfg:      "farmdesk_cfg",
+  assets:   "farmdesk_bird_assets",
+  history:  "farmdesk_bird_history",
+  pending:  "farmdesk_bird_pending",
+  lastSync: "farmdesk_bird_lastsync",
+  excluded: "farmdesk_bird_excluded",
+  flocks:   "farmdesk_bird_flocks",
+  species:  "farmdesk_bird_species"
+};
+
+let bd_birds   = JSON.parse(localStorage.getItem(BD_LS.assets)  || "[]");
+let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
+let bd_pending = JSON.parse(localStorage.getItem(BD_LS.pending) || "[]");
+let bd_flocks  = JSON.parse(localStorage.getItem(BD_LS.flocks)  || "[]");
+let bd_speciesCfg = JSON.parse(localStorage.getItem(BD_LS.species) || JSON.stringify({
+  Chicken: ["Rhode Island Red","Leghorn","Barred Rock","Buff Orpington","Australorp","Silkie"],
+  Duck:    ["Pekin","Khaki Campbell","Rouen","Muscovy","Indian Runner"],
+  Goose:   ["Toulouse","Embden","Chinese","African","Pilgrim"],
+  Other:   []
+}));
+let bd_excluded = JSON.parse(localStorage.getItem(BD_LS.excluded) || "[]");
+let bd_currentBirdId = null;
+let bd_editBirdId = null;
+let bd_histFilter = "all";
+let bd_speciesFilterActive = "";
+var bd_currentPhoto = null;
+var bd_currentBirdPhoto = null;
+var bd_typeListGlobal = [];
+var bd_editingLogId = null;
+var _bd_useProxy = false;
+
+function bd_show(id) {
+  // Settings deferred to shared GD settings
+  if (id === 'settings') { openSharedSettings(); return; }
+  document.querySelectorAll('#module-birddesk .screen').forEach(function(s) { s.classList.remove('active'); });
+  var el = document.getElementById('bd-screen-' + id);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.bd-bottom-nav button').forEach(function(b) { b.classList.remove('active'); });
+  var nav = document.getElementById('bd-nav-' + id);
+  if (nav) nav.classList.add('active');
+  if (id === 'birds')   bd_renderBirds();
+  if (id === 'eggs')    bd_initEggs();
+  if (id === 'history') bd_renderHistory();
+  if (id === 'sync')    bd_renderSync();
+  if (id !== 'birds') window.history.pushState({ bdPage: id }, '');
+}
+
+function bd_setLoading(on, msg) {
+  var el = document.getElementById('bd-loading');
+  if (!el) return;
+  if (on) { document.getElementById('bd-load-msg').textContent = msg || 'Loading...'; el.classList.add('active'); }
+  else el.classList.remove('active');
+}
+
+function bd_toast(msg) { showToast(msg); }
+
+function bd_localISO(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString(); }
+
+function bd_updateSyncBadge() {
+  var count = bd_pending.filter(function(p) { return !p.synced; }).length;
+  var el = document.getElementById('bd-nav-sync');
+  if (el) el.textContent = count > 0 ? '\u{1F504} Sync (' + count + ')' : '\u{1F504} Sync';
+  var pc = document.getElementById('bd-pending-count');
+  if (pc) pc.textContent = count;
+}
+
+// ===== AUTH =====
+function bd_saveCfg() {
+  var url  = document.getElementById('bd-farmos-url')  ? document.getElementById('bd-farmos-url').value.trim().replace(/\/$/, '')  : '';
+  var user = document.getElementById('bd-farmos-user') ? document.getElementById('bd-farmos-user').value.trim() : '';
+  var pass = document.getElementById('bd-farmos-pass') ? document.getElementById('bd-farmos-pass').value : '';
+  var cfg  = { url: url, user: user, pass: pass };
+  localStorage.setItem(BD_LS.cfg, JSON.stringify(cfg));
+  return cfg;
+}
+
+async function bd_getToken(cfg) {
+  var tryAuth = async function(url, scope) {
+    var body = new URLSearchParams({ grant_type: 'password', client_id: 'farm', username: cfg.user, password: cfg.pass, scope: scope });
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, 5000);
+    try {
+      var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body, signal: controller.signal });
+      clearTimeout(timer);
+      if (res.ok) { var data = await res.json(); return data.access_token; }
+    } catch(e) { clearTimeout(timer); }
+    return null;
+  };
+  var attempts = [['/proxy/oauth/token', true], [cfg.url + '/oauth/token', false]];
+  for (var i = 0; i < attempts.length; i++) {
+    try {
+      var token = await tryAuth(attempts[i][0], 'farm_manager');
+      if (token) { _bd_useProxy = attempts[i][1]; return token; }
+    } catch(e) {}
+  }
+  throw new Error('Auth failed — check credentials and URL');
+}
+
+function bd_apiUrl(path) {
+  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
+  return _bd_useProxy ? '/proxy' + path : (cfg.url || '') + path;
+}
+
+function bd_authHeaders(token) { return { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }; }
+function bd_postHeaders(token) { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }; }
+
+// ===== PHOTO =====
+function bd_birdOpenGallery() { var el = document.getElementById('bd-bird-gallery'); if (el) el.click(); }
+function bd_birdTakeCamera() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) { window.AndroidBridge.takePhoto('bd_birdOnAndroidPhoto'); }
+  else { var el = document.getElementById('bd-bird-camera'); if (el) el.click(); }
+}
+function bd_birdOnAndroidPhoto(dataUrl) {
+  if (!dataUrl) return;
+  bd_birdResizePhoto(dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl);
+}
+function bd_birdHandlePhoto(input) {
+  var file = input.files[0]; if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) { bd_birdResizePhoto(e.target.result); };
+  reader.readAsDataURL(file);
+}
+function bd_birdResizePhoto(src) {
+  var img = new Image();
+  img.onload = function() {
+    var canvas = document.createElement('canvas');
+    var ratio = Math.min(1, 800 / img.width);
+    canvas.width = img.width * ratio; canvas.height = img.height * ratio;
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    bd_currentBirdPhoto = canvas.toDataURL('image/jpeg', 0.7);
+    var p = document.getElementById('bd-bird-photo-preview');
+    if (p) p.innerHTML = "<img src='" + bd_currentBirdPhoto + "' style='width:100%;border-radius:6px;margin-top:4px;'>";
+    var cb = document.getElementById('bd-bird-clear-photo'); if (cb) cb.style.display = 'inline-block';
+  };
+  img.src = src;
+}
+function bd_birdClearPhoto() {
+  bd_currentBirdPhoto = null;
+  var p = document.getElementById('bd-bird-photo-preview'); if (p) p.innerHTML = '';
+  var cb = document.getElementById('bd-bird-clear-photo'); if (cb) cb.style.display = 'none';
+  ['bd-bird-gallery','bd-bird-camera'].forEach(function(id){ var el = document.getElementById(id); if (el) el.value = ''; });
+}
+function bd_birdShowPhoto(bird) {
+  var p = document.getElementById('bd-bird-photo-preview');
+  var cb = document.getElementById('bd-bird-clear-photo');
+  if (bird && bird.photo) {
+    bd_currentBirdPhoto = bird.photo;
+    if (p) p.innerHTML = "<img src='" + bird.photo + "' style='width:100%;border-radius:6px;margin-top:4px;'>";
+    if (cb) cb.style.display = 'inline-block';
+  } else {
+    bd_currentBirdPhoto = null;
+    if (p) p.innerHTML = '';
+    if (cb) cb.style.display = 'none';
+  }
+}
+function bd_photoFieldHTML() {
+  return "<label style='margin-top:12px;'>Photo (optional)</label>" +
+    "<div style='display:flex;gap:6px;margin-top:4px;'>" +
+      "<button type='button' onclick='bd_takeCameraPhoto()' style='flex:1;margin:0;padding:10px;font-size:14px;background:#333;'>Camera</button>" +
+      "<button type='button' onclick='bd_openGallery()' style='flex:1;margin:0;padding:10px;font-size:14px;background:#333;'>Gallery</button>" +
+      "<button type='button' id='bd-clear-photo-btn' onclick='bd_clearPhoto()' style='display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;'>Clear</button>" +
+    "</div>" +
+    "<input type='file' id='bd-f-gallery' accept='image/*' style='display:none;' onchange='bd_handlePhoto(this)'>" +
+    "<input type='file' id='bd-f-camera' accept='image/*' capture='environment' style='display:none;' onchange='bd_handlePhoto(this)'>" +
+    "<div id='bd-photo-preview' style='margin-top:6px;'></div>";
+}
+function bd_openGallery() { var el = document.getElementById('bd-f-gallery'); if (el) el.click(); }
+function bd_takeCameraPhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) { window.AndroidBridge.takePhoto('bd_onAndroidPhoto'); }
+  else { var el = document.getElementById('bd-f-camera'); if (el) el.click(); }
+}
+function bd_onAndroidPhoto(dataUrl) {
+  if (!dataUrl) return;
+  bd_resizePhoto(dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl);
+}
+function bd_handlePhoto(input) {
+  var file = input.files[0]; if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) { bd_resizePhoto(e.target.result); };
+  reader.readAsDataURL(file);
+}
+function bd_resizePhoto(src) {
+  var img = new Image();
+  img.onload = function() {
+    var canvas = document.createElement('canvas');
+    var ratio = Math.min(1, 800 / img.width);
+    canvas.width = img.width * ratio; canvas.height = img.height * ratio;
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    bd_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+    var preview = document.getElementById('bd-photo-preview');
+    if (preview) preview.innerHTML = "<img src='" + bd_currentPhoto + "' style='width:100%;border-radius:6px;margin-top:4px;'>";
+    var clearBtn = document.getElementById('bd-clear-photo-btn');
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+  };
+  img.src = src;
+}
+function bd_clearPhoto() {
+  bd_currentPhoto = null;
+  var preview = document.getElementById('bd-photo-preview'); if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('bd-clear-photo-btn'); if (clearBtn) clearBtn.style.display = 'none';
+  ['bd-f-gallery','bd-f-camera'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+}
+function bd_openPhotoViewer(src) {
+  var v = document.getElementById('bd-photo-viewer'); var img = document.getElementById('bd-photo-viewer-img');
+  if (!v || !img || !src) return; img.src = src; v.classList.add('open');
+}
+function bd_closePhotoViewer() { var v = document.getElementById('bd-photo-viewer'); if (v) v.classList.remove('open'); }
+
+// ===== SYNC SCREEN =====
+function bd_renderSync() {
+  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
+  if (cfg.url  && document.getElementById('bd-farmos-url'))  document.getElementById('bd-farmos-url').value  = cfg.url;
+  if (cfg.user && document.getElementById('bd-farmos-user')) document.getElementById('bd-farmos-user').value = cfg.user;
+  if (cfg.pass && document.getElementById('bd-farmos-pass')) document.getElementById('bd-farmos-pass').value = cfg.pass;
+  var ls = localStorage.getItem(BD_LS.lastSync);
+  var el = document.getElementById('bd-last-sync'); if (el) el.textContent = ls || 'Never';
+  bd_updateSyncBadge();
+  bd_renderExcludedTypes();
+}
+
+function bd_renderExcludedTypes() {
+  var el = document.getElementById('bd-excluded-types-list'); if (!el) return;
+  var types = {};
+  bd_birds.forEach(function(b) { if (b.species && b.type !== 'feeder') types[b.species] = true; });
+  bd_typeListGlobal = Object.keys(types).sort();
+  if (!bd_typeListGlobal.length) { el.innerHTML = "<div style='color:#888;font-size:13px;'>No animal types fetched yet.</div>"; return; }
+  el.innerHTML = bd_typeListGlobal.map(function(t, i) {
+    var excluded = bd_excluded.indexOf(t) >= 0;
+    var bg = excluded ? '#8b0000' : '#1b4d1e';
+    var label = excluded ? 'Excluded' : 'Included';
+    return "<div style='display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #333;'>" +
+      "<div style='flex:1;font-size:16px;'>" + t + "</div>" +
+      "<button onclick='bd_toggleExcludeIdx(" + i + ")' style='margin:0;padding:8px 16px;font-size:14px;background:" + bg + ";'>" + label + "</button></div>";
+  }).join('');
+}
+
+function bd_toggleExcludeIdx(i) {
+  var type = bd_typeListGlobal[i]; if (!type) return;
+  var idx = bd_excluded.indexOf(type);
+  if (idx >= 0) bd_excluded.splice(idx, 1); else bd_excluded.push(type);
+  localStorage.setItem(BD_LS.excluded, JSON.stringify(bd_excluded));
+  bd_renderExcludedTypes(); bd_renderBirds();
+}
+
+function bd_togglePass() {
+  var p = document.getElementById('bd-farmos-pass'); var btn = document.getElementById('bd-showPassBtn');
+  p.type = p.type === 'password' ? 'text' : 'password';
+  btn.textContent = p.type === 'password' ? '\uD83D\uDC41' : '\uD83D\uDE48';
+}
+
+async function bd_testConnection() {
+  bd_saveCfg();
+  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
+  var el = document.getElementById('bd-test-result');
+  if (!cfg.url || !cfg.user || !cfg.pass) { if (el) { el.textContent = 'Fill in all fields first'; el.style.color = '#c90'; } return; }
+  if (el) { el.textContent = 'Connecting...'; el.style.color = '#888'; }
+  try {
+    var token = await bd_getToken(cfg);
+    var res = await fetch(bd_apiUrl('/api'), { headers: bd_authHeaders(token) });
+    var farmName = cfg.url;
+    if (res.ok) { try { var d = await res.json(); farmName = (d && d.meta && d.meta.farm && d.meta.farm.name) ? d.meta.farm.name : cfg.url; } catch(e) {} }
+    var via = _bd_useProxy ? 'via proxy' : 'direct';
+    if (el) { el.textContent = 'Connected to: ' + farmName + ' (' + via + ')'; el.style.color = '#3a7'; }
+  } catch(e) { if (el) { el.textContent = e.message; el.style.color = '#c00'; } }
+}
+
+async function bd_fetchAssets() {
+  bd_saveCfg();
+  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { bd_toast('Save connection settings first'); return; }
+  bd_setLoading(true, 'Fetching birds from farmOS...');
+  var el = document.getElementById('bd-test-result');
+  try {
+    var token = await bd_getToken(cfg);
+    var h = bd_authHeaders(token);
+    var res = await fetch(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type'), { headers: h });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    var typeMap = {};
+    (data.included || []).forEach(function(inc) { if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || ''; });
+    var fetched = (data.data || []).filter(function(a) { return !a.attributes.archived; }).map(function(a) {
+      var typeRel = a.relationships && a.relationships.animal_type && a.relationships.animal_type.data;
+      var species = typeRel ? (typeMap[typeRel.id] || '') : '';
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: a.attributes.breed || '', sex: a.attributes.sex || '', status: 'active', notes: (a.attributes.notes && a.attributes.notes.value) ? a.attributes.notes.value : '', flock: '', synced: true };
+    });
+    var resEq = await fetch(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
+    var feeders = [];
+    if (resEq.ok) {
+      var deq = await resEq.json();
+      feeders = (deq.data || []).map(function(a) { return { uuid: a.id, name: a.attributes.name || '', type: 'feeder', status: 'active', synced: true }; });
+    }
+    var prevFlock = {};
+    bd_birds.forEach(function(b) { if (b.uuid && b.flock) prevFlock[b.uuid] = b.flock; });
+    fetched.forEach(function(b) { if (prevFlock[b.uuid]) b.flock = prevFlock[b.uuid]; });
+    var localOnly = bd_birds.filter(function(b) { return !b.uuid && b.status !== 'archived' && b.type !== 'feeder'; });
+    bd_birds = fetched.concat(feeders).concat(localOnly);
+    localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+    if (el) { el.textContent = 'Fetched ' + fetched.length + ' birds, ' + feeders.length + ' feeders'; el.style.color = '#3a7'; }
+    bd_toast('Fetched ' + fetched.length + ' birds');
+    bd_renderBirds();
+  } catch(e) {
+    if (el) { el.textContent = e.message; el.style.color = '#c00'; }
+    bd_toast('Fetch failed: ' + e.message);
+  }
+  bd_setLoading(false);
+}
+
+// ===== SYNC TO FARMOS =====
+async function bd_syncToFarmOS() {
+  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user) { bd_toast('No connection saved'); return; }
+  var unsynced = bd_pending.filter(function(p) { return !p.synced; });
+  if (!unsynced.length) { bd_toast('Nothing to sync'); return; }
+  bd_setLoading(true, 'Syncing to farmOS...');
+  var logEl = document.getElementById('bd-sync-log'); if (logEl) logEl.textContent = '';
+  var synced = 0, failed = 0;
+  try {
+    var token = await bd_getToken(cfg);
+    for (var i = 0; i < unsynced.length; i++) {
+      var item = unsynced[i];
+      try {
+        if      (item.action === 'log')          await bd_pushLog(item.log, token);
+        else if (item.action === 'create_bird')  await bd_pushCreateBird(item.bird, token);
+        else if (item.action === 'update_bird')  await bd_pushUpdateBird(item.bird, token);
+        else if (item.action === 'archive_bird') await bd_pushArchiveBird(item.birdUUID, token);
+        item.synced = true; synced++;
+        if (logEl) logEl.textContent += 'OK: ' + (item.log ? item.log.logName : item.action) + '\n';
+      } catch(e) {
+        failed++;
+        if (logEl) logEl.textContent += 'FAIL: ' + (item.log ? item.log.logName : item.action) + ': ' + e.message + '\n';
+      }
+    }
+    localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+    bd_history.forEach(function(l) { var p = bd_pending.filter(function(p) { return p.id === l.id; })[0]; if (p && p.synced) l.synced = true; });
+    localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+    var now = new Date().toLocaleString();
+    localStorage.setItem(BD_LS.lastSync, now);
+    var lsel = document.getElementById('bd-last-sync'); if (lsel) lsel.textContent = now;
+    bd_updateSyncBadge();
+    bd_toast(synced + ' synced' + (failed ? ', ' + failed + ' failed' : ''));
+  } catch(e) {
+    bd_toast('Sync failed: ' + e.message);
+    if (logEl) logEl.textContent += 'Auth error: ' + e.message + '\n';
+  }
+  bd_setLoading(false);
+}
+
+function bd_buildNotes(log) {
+  var parts = [];
+  if (log.type === 'weight')    parts.push('Weight: ' + log.weight + ' ' + log.weightUnit);
+  if (log.type === 'med')       { parts.push('Med: ' + log.med); parts.push('Dose: ' + (log.dose||'') + ' ' + (log.doseUnit||'')); parts.push('Route: ' + (log.route||'')); }
+  if (log.type === 'obs')       { if (log.title) parts.push(log.title); if (log.notes) parts.push(log.notes); }
+  if (log.type === 'proc')      parts.push('Procedure: ' + (log.proc||''));
+  if (log.type === 'mortality') parts.push('Cause: ' + (log.cause||''));
+  if (log.type === 'hatch')     { parts.push('Species: ' + log.hatchSpecies); parts.push('Count: ' + log.hatchCount); if (log.hatchBreed) parts.push('Breed: ' + log.hatchBreed); if (log.hatchParent) parts.push('Parent: ' + log.hatchParent); }
+  if (log.type === 'egg')       { parts.push('Nest: ' + log.nestBox); parts.push('Count: ' + log.eggCount); }
+  if (log.type === 'feed')      { parts.push('Feeder: ' + (log.feederName||'')); parts.push('Feed: ' + (log.feedType||'')); parts.push('Amount: ' + (log.feedAmount||'') + ' ' + (log.feedUnit||'')); }
+  if (log.notes) parts.push(log.notes);
+  return parts.filter(function(p) { return p; }).join('\n');
+}
+
+function bd_farmosLogType(t) {
+  if (t === 'med')       return 'medical';
+  if (t === 'obs')       return 'observation';
+  if (t === 'weight')    return 'observation';
+  if (t === 'proc')      return 'medical';
+  if (t === 'mortality') return 'observation';
+  if (t === 'hatch')     return 'birth';
+  if (t === 'egg')       return 'harvest';
+  if (t === 'feed')      return 'input';
+  return 'activity';
+}
+
+async function bd_pushLog(log, token) {
+  var ftype = bd_farmosLogType(log.type);
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === log.birdId; })[0];
+  var birdUUID = bird ? bird.uuid : null;
+  var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
+  if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
+  var res = await fetch(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+}
+
+async function bd_pushCreateBird(bird, token) {
+  var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), status: 'active', id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
+  var res = await fetch(bd_apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  var data = await res.json();
+  var lb = bd_birds.filter(function(b) { return b._localId === bird._localId; })[0];
+  if (lb && data.data && data.data.id) { lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); }
+}
+
+async function bd_pushUpdateBird(bird, token) {
+  if (!bird.uuid) return;
+  var payload = { data: { type: 'asset--animal', id: bird.uuid, attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
+  var res = await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+}
+
+async function bd_pushArchiveBird(uuid, token) {
+  if (!uuid) return;
+  var payload = { data: { type: 'asset--animal', id: uuid, attributes: { status: 'archived' } } };
+  var res = await fetch(bd_apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+}
+
+// ===== LOGOUT =====
+function bd_logout() {
+  if (!confirm('Clear BirdDesk local data and log out?')) return;
+  // Only clears BirdDesk keys — farmdesk_cfg is shared with other modules
+  [BD_LS.assets, BD_LS.history, BD_LS.pending, BD_LS.lastSync, BD_LS.excluded, BD_LS.flocks, BD_LS.species].forEach(function(k) { localStorage.removeItem(k); });
+  bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
+  _bd_useProxy = false;
+  bd_updateSyncBadge(); bd_renderBirds(); bd_renderSync();
+  bd_toast('Logged out');
+}
+
+// ===== SPECIES FILTER =====
+function bd_setSpeciesFilter(s) {
+  bd_speciesFilterActive = s;
+  document.querySelectorAll('[id^="bd-f"]').forEach(function(b) { b.classList.remove('active'); });
+  var btn = document.getElementById('bd-f' + (s || 'All'));
+  if (btn) btn.classList.add('active');
+  bd_renderBirds();
+}
+
+function bd_speciesIcon(s) {
+  if (!s) return '';
+  var sl = s.toLowerCase();
+  if (sl === 'chicken') return '&#x1F413;';
+  if (sl === 'duck')    return '&#x1F986;';
+  if (sl === 'goose')   return '&#x1FAA2;';
+  return '&#x1F426;';
+}
+
+// ===== RENDER BIRDS =====
+function bd_renderBirds() {
+  var list = document.getElementById('bd-bird-list'); if (!list) return;
+  var search = (document.getElementById('bd-search') ? document.getElementById('bd-search').value : '').toLowerCase();
+  var birds = bd_birds.filter(function(b) { return b.type !== 'feeder' && b.status !== 'archived' && bd_excluded.indexOf(b.species) < 0; });
+  if (bd_speciesFilterActive) birds = birds.filter(function(b) { return b.species === bd_speciesFilterActive; });
+  if (search) birds = birds.filter(function(b) { return (b.tag||'').toLowerCase().indexOf(search) >= 0 || (b.name||'').toLowerCase().indexOf(search) >= 0; });
+  if (!birds.length) { list.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No birds found. Add one with + or fetch from farmOS.</div>"; return; }
+  var groups = {};
+  birds.forEach(function(b) { var s = b.species || 'Unknown'; if (!groups[s]) groups[s] = []; groups[s].push(b); });
+  var order = ['Chicken','Duck','Goose','Other','Unknown'];
+  var keys = Object.keys(groups);
+  var sorted = order.filter(function(s) { return groups[s]; }).concat(keys.filter(function(s) { return order.indexOf(s) < 0 && groups[s]; }));
+  list.innerHTML = sorted.map(function(s) {
+    return "<div class='species-header'>" + bd_speciesIcon(s) + ' ' + s + "</div>" +
+      groups[s].map(function(b) {
+        var id = b.uuid || b._localId;
+        var meta = [b.breed, b.sex === 'F' ? 'Female' : b.sex === 'M' ? 'Male' : '', b.flock ? b.flock : ''].filter(function(x) { return x; }).join(' - ');
+        var thumb = b.photo
+          ? "<img src='" + b.photo + "' class='bird-thumb' onclick="event.stopPropagation();bd_openPhotoViewer('" + b.photo + "')">"
+          : "<div class='bird-icon'>" + bd_speciesIcon(b.species) + "</div>";
+        return "<div class='bird-card' onclick="bd_openLogSheet('" + id + "')">" +
+          thumb +
+          "<div class='bird-info'><div class='bird-tag'>" + (b.tag||'') + "</div><div class='bird-name'>" + (b.name||'') + "</div><div class='bird-meta'>" + meta + "</div></div>" +
+          "<button onclick="event.stopPropagation();bd_openEditBird('" + id + "')" style='margin:0;padding:10px 14px;font-size:16px;background:#333;'>Edit</button>" +
+          "</div>";
+      }).join('');
+  }).join('');
+}
+
+// ===== LOG MODAL =====
+function bd_openLogSheet(id) {
+  bd_currentBirdId = id;
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
+  document.getElementById('bd-log-modal-title').textContent = 'Log - ' + (bird ? (bird.tag || bird.name || 'Bird') : 'Bird');
+  var now = new Date(); now.setSeconds(0,0);
+  document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16);
+  bd_currentPhoto = null; bd_renderLogFields();
+  document.getElementById('bd-log-modal').style.display = 'block';
+}
+function bd_setLogNow() { var now = new Date(); now.setSeconds(0,0); document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16); }
+function bd_closeLogModal(e) { if (!e || e.target === document.getElementById('bd-log-modal')) document.getElementById('bd-log-modal').style.display = 'none'; }
+
+function bd_renderLogFields() {
+  var t = document.getElementById('bd-log-type').value;
+  var box = document.getElementById('bd-log-fields');
+  if (t === 'weight') {
+    box.innerHTML = "<label>Weight</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-weight' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-weight-unit' style='width:90px;margin:0;'><option>lbs</option><option>g</option><option>kg</option></select></div><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
+  } else if (t === 'med') {
+    box.innerHTML = "<label>Medication</label><input id='bd-f-med' placeholder='Med name'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-dose' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-dose-unit' style='width:90px;margin:0;'><option>ml</option><option>cc</option><option>mg</option><option>tablet</option></select></div><label>Route</label><select id='bd-f-route'><option>Oral</option><option>SQ</option><option>IM</option><option>Topical</option></select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
+  } else if (t === 'obs') {
+    box.innerHTML = "<label>Observation</label><input id='bd-f-obs-title' placeholder='Brief title'><label>Details</label><textarea id='bd-f-notes' rows='3'></textarea>" + bd_photoFieldHTML();
+  } else if (t === 'proc') {
+    box.innerHTML = "<label>Procedure</label><input id='bd-f-proc' placeholder='e.g. Banding'><label>Notes</label><textarea id='bd-f-notes' rows='2'></textarea>" + bd_photoFieldHTML();
+  } else if (t === 'mortality') {
+    box.innerHTML = "<label>Cause</label><select id='bd-f-cause'><option>Unknown</option><option>Predator</option><option>Disease</option><option>Injury</option><option>Natural</option><option>Culled</option><option>Other</option></select><label>Notes</label><textarea id='bd-f-notes' rows='2'></textarea><p style='color:#c90;font-size:13px;margin-top:8px;'>This will archive the bird in farmOS on sync.</p>" + bd_photoFieldHTML();
+  } else if (t === 'hatch') {
+    var flockOpts = "<option value=''>-- No Flock --</option>" + bd_flocks.map(function(f) { return "<option>" + f.name + "</option>"; }).join('');
+    box.innerHTML = "<label>Species</label><select id='bd-f-hatch-species'><option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option></select><label>Breed</label><input id='bd-f-hatch-breed' placeholder='Breed (optional)'><label>Count</label><input id='bd-f-hatch-count' type='number' min='1' step='1' placeholder='e.g. 8'><label>Parent Tag (optional)</label><input id='bd-f-hatch-parent' placeholder='Mother tag'><label>Flock</label><select id='bd-f-hatch-flock'>" + flockOpts + "</select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'><p style='color:#888;font-size:13px;margin-top:8px;'>Creates placeholder birds. Tag each bird later.</p>" + bd_photoFieldHTML();
+  } else if (t === 'feed') {
+    var feeders = bd_birds.filter(function(b) { return b.type === 'feeder'; });
+    var feederOpts = feeders.length ? feeders.map(function(f) { return "<option value='" + (f.uuid || f._localId) + "'>" + f.name + "</option>"; }).join('') : "<option value=''>No feeders - fetch from farmOS</option>";
+    box.innerHTML = "<label>Feeder</label><select id='bd-f-feeder'>" + feederOpts + "</select><label>Feed Type</label><input id='bd-f-feed-type' placeholder='e.g. Layer Pellets'><label>Amount</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-feed-amount' type='number' step='0.1' placeholder='0.0' style='flex:1;'><select id='bd-f-feed-unit' style='width:90px;margin:0;'><option>lbs</option><option>kg</option><option>cups</option></select></div><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
+  }
+}
+
+function bd_saveLog() {
+  var t = document.getElementById('bd-log-type').value;
+  var timeVal = document.getElementById('bd-log-time').value;
+  if (!timeVal) { bd_toast('Set a time'); return; }
+  var ts = String(Math.floor(new Date(timeVal).getTime() / 1000));
+  var notes = document.getElementById('bd-f-notes') ? document.getElementById('bd-f-notes').value : '';
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_currentBirdId; })[0];
+  var logData = { id: Date.now() + '_' + Math.random().toString(36).slice(2), type: t, birdId: bd_currentBirdId, birdTag: bird ? (bird.tag||'') : '', birdName: bird ? (bird.name||'') : '', timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, synced: false };
+  var dateStr = bd_localISO(new Date(timeVal)).slice(0,10);
+  var birdLabel = bird ? (bird.tag || bird.name || 'Bird') : 'Bird';
+  if (t === 'weight') {
+    var w = document.getElementById('bd-f-weight') ? document.getElementById('bd-f-weight').value : '';
+    if (!w) { bd_toast('Enter weight'); return; }
+    logData.weight = w; logData.weightUnit = document.getElementById('bd-f-weight-unit') ? document.getElementById('bd-f-weight-unit').value : 'lbs';
+    logData.logName = 'Weight - ' + birdLabel + ' - ' + dateStr;
+  } else if (t === 'med') {
+    var med = document.getElementById('bd-f-med') ? document.getElementById('bd-f-med').value.trim() : '';
+    if (!med) { bd_toast('Enter medication name'); return; }
+    logData.med = med; logData.dose = document.getElementById('bd-f-dose') ? document.getElementById('bd-f-dose').value : ''; logData.doseUnit = document.getElementById('bd-f-dose-unit') ? document.getElementById('bd-f-dose-unit').value : 'ml'; logData.route = document.getElementById('bd-f-route') ? document.getElementById('bd-f-route').value : '';
+    logData.logName = 'Med - ' + med + ' - ' + birdLabel + ' - ' + dateStr;
+  } else if (t === 'obs') {
+    logData.title = document.getElementById('bd-f-obs-title') ? document.getElementById('bd-f-obs-title').value.trim() : 'Observation';
+    logData.logName = 'Obs - ' + (logData.title || 'Observation') + ' - ' + birdLabel + ' - ' + dateStr;
+  } else if (t === 'proc') {
+    logData.proc = document.getElementById('bd-f-proc') ? document.getElementById('bd-f-proc').value.trim() : 'Procedure';
+    logData.logName = 'Proc - ' + (logData.proc || 'Procedure') + ' - ' + birdLabel + ' - ' + dateStr;
+  } else if (t === 'mortality') {
+    logData.cause = document.getElementById('bd-f-cause') ? document.getElementById('bd-f-cause').value : 'Unknown';
+    logData.logName = 'Death - ' + birdLabel + ' - ' + dateStr;
+    logData.archiveBird = true;
+    if (bird) { bird.status = 'archived'; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); }
+    bd_pending.push({ action: 'archive_bird', birdUUID: bird ? bird.uuid : null, id: 'arch_' + logData.id, synced: false });
+  } else if (t === 'hatch') {
+    var count = parseInt(document.getElementById('bd-f-hatch-count') ? document.getElementById('bd-f-hatch-count').value : '0');
+    if (!count || count < 1) { bd_toast('Enter hatch count'); return; }
+    logData.hatchSpecies = document.getElementById('bd-f-hatch-species') ? document.getElementById('bd-f-hatch-species').value : 'Chicken';
+    logData.hatchBreed   = document.getElementById('bd-f-hatch-breed')   ? document.getElementById('bd-f-hatch-breed').value   : '';
+    logData.hatchCount   = count;
+    logData.hatchParent  = document.getElementById('bd-f-hatch-parent')  ? document.getElementById('bd-f-hatch-parent').value  : '';
+    logData.hatchFlock   = document.getElementById('bd-f-hatch-flock')   ? document.getElementById('bd-f-hatch-flock').value   : '';
+    logData.logName = 'Hatch - ' + logData.hatchSpecies + ' - ' + dateStr;
+    for (var hi = 1; hi <= count; hi++) {
+      var nb = { _localId: 'local_' + Date.now() + '_' + hi, uuid: null, tag: '', name: 'Untagged ' + logData.hatchSpecies + ' ' + String(hi).padStart(3,'0'), species: logData.hatchSpecies, breed: logData.hatchBreed, sex: '', flock: logData.hatchFlock, status: 'active', notes: 'Hatched ' + dateStr, synced: false };
+      bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
+    }
+    localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+  } else if (t === 'feed') {
+    var feederVal = document.getElementById('bd-f-feeder') ? document.getElementById('bd-f-feeder').value : '';
+    if (!feederVal) { bd_toast('No feeder selected'); return; }
+    var feeder = bd_birds.filter(function(b) { return (b.uuid || b._localId) === feederVal; })[0];
+    logData.feederId   = feederVal;
+    logData.feederName = feeder ? feeder.name : '';
+    logData.feedType   = document.getElementById('bd-f-feed-type')   ? document.getElementById('bd-f-feed-type').value   : '';
+    logData.feedAmount = document.getElementById('bd-f-feed-amount') ? document.getElementById('bd-f-feed-amount').value : '';
+    logData.feedUnit   = document.getElementById('bd-f-feed-unit')   ? document.getElementById('bd-f-feed-unit').value   : 'lbs';
+    logData.logName    = 'Feed - ' + logData.feederName + ' - ' + dateStr;
+    bd_stockDeductFeed(logData.feedType, parseFloat(logData.feedAmount), logData.feedUnit, logData.feederName, ts);
+  }
+  if (bd_currentPhoto) { logData.photo = bd_currentPhoto; bd_currentPhoto = null; }
+  bd_history.unshift(logData);
+  bd_pending.push({ action: 'log', log: logData, id: logData.id, synced: false });
+  localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge();
+  document.getElementById('bd-log-modal').style.display = 'none';
+  bd_toast('Log saved'); bd_renderBirds();
+}
+
+// ===== STOCK DEDUCT BRIDGE =====
+function bd_stockDeductFeed(feedName, amount, unit, feederName, ts) {
+  try {
+    var stockAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+    var match = null;
+    for (var i = 0; i < stockAssets.length; i++) { if (stockAssets[i].name && stockAssets[i].name.toLowerCase().indexOf(feedName.toLowerCase()) >= 0) { match = stockAssets[i]; break; } }
+    if (!match) return;
+    var entry = { id: Date.now() + '_' + Math.random().toString(36).slice(2), assetUUID: match.uuid || null, assetName: match.name, action: 'decrement', qty: amount, unit: unit, note: 'Feed log: ' + feederName, timestamp: ts, synced: false };
+    var sh = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
+    var sp = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
+    sh.unshift(entry); sp.push(entry);
+    localStorage.setItem('farmdesk_stock_history', JSON.stringify(sh));
+    localStorage.setItem('farmdesk_stock_pending', JSON.stringify(sp));
+  } catch(e) {}
+}
+
+// ===== ADD / EDIT BIRD =====
+function bd_openAddBird() {
+  bd_editBirdId = null;
+  document.getElementById('bd-bird-modal-title').textContent = 'Add Bird';
+  ['bd-bird-tag','bd-bird-name','bd-bird-species-custom','bd-bird-breed-custom','bd-bird-notes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('bd-bird-species').value = 'Chicken';
+  document.getElementById('bd-bird-sex').value = '';
+  bd_updateBreedList(); bd_populateFlock('bd-bird-flock'); bd_birdShowPhoto(null);
+  document.getElementById('bd-bird-modal').style.display = 'block';
+}
+function bd_openEditBird(id) {
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0]; if (!bird) return;
+  bd_editBirdId = id;
+  document.getElementById('bd-bird-modal-title').textContent = 'Edit Bird';
+  document.getElementById('bd-bird-tag').value  = bird.tag   || '';
+  document.getElementById('bd-bird-name').value = bird.name  || '';
+  var known = ['Chicken','Duck','Goose','Other'];
+  if (known.indexOf(bird.species) >= 0) { document.getElementById('bd-bird-species').value = bird.species; document.getElementById('bd-bird-species-custom').value = ''; }
+  else { document.getElementById('bd-bird-species').value = 'Other'; document.getElementById('bd-bird-species-custom').value = bird.species || ''; }
+  document.getElementById('bd-bird-sex').value   = bird.sex   || '';
+  document.getElementById('bd-bird-notes').value = bird.notes || '';
+  document.getElementById('bd-bird-breed-custom').value = bird.breed || '';
+  bd_updateBreedList(); bd_populateFlock('bd-bird-flock', bird.flock); bd_birdShowPhoto(bird);
+  document.getElementById('bd-bird-modal').style.display = 'block';
+}
+function bd_closeBirdModal(e) { if (!e || e.target === document.getElementById('bd-bird-modal')) document.getElementById('bd-bird-modal').style.display = 'none'; }
+function bd_updateBreedList() {
+  var sp = document.getElementById('bd-bird-species') ? document.getElementById('bd-bird-species').value : 'Chicken';
+  var breeds = bd_speciesCfg[sp] || [];
+  var sel = document.getElementById('bd-bird-breed'); if (!sel) return;
+  sel.innerHTML = "<option value=''>-- select or type below --</option>" + breeds.map(function(b) { return "<option>" + b + "</option>"; }).join('');
+}
+function bd_saveBird() {
+  var tag     = document.getElementById('bd-bird-tag').value.trim();
+  var name    = document.getElementById('bd-bird-name').value.trim();
+  var sp      = document.getElementById('bd-bird-species').value;
+  var spc     = document.getElementById('bd-bird-species-custom').value.trim();
+  var species = (sp === 'Other' && spc) ? spc : sp;
+  var bc      = document.getElementById('bd-bird-breed-custom').value.trim();
+  var bs      = document.getElementById('bd-bird-breed').value;
+  var breed   = bc || bs;
+  var sex     = document.getElementById('bd-bird-sex').value;
+  var flock   = document.getElementById('bd-bird-flock').value;
+  var notes   = document.getElementById('bd-bird-notes').value.trim();
+  if (!tag && !name) { bd_toast('Enter a tag or name'); return; }
+  if (bd_editBirdId) {
+    var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_editBirdId; })[0];
+    if (bird) { bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.photo = bd_currentBirdPhoto || null; bird.synced = false; if (bird.uuid) bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); }
+  } else {
+    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, photo: bd_currentBirdPhoto || null, status: 'active', synced: false };
+    bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
+  }
+  localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge();
+  document.getElementById('bd-bird-modal').style.display = 'none';
+  bd_toast('Bird saved'); bd_renderBirds();
+}
+
+// ===== EGGS =====
+function bd_initEggs() { bd_populateFlock('bd-egg-flock'); bd_setEggNow(); bd_renderNestBoxes(); bd_renderEggTotals(); }
+function bd_setEggNow() { var now = new Date(); now.setSeconds(0,0); document.getElementById('bd-egg-time').value = bd_localISO(now).slice(0,16); }
+function bd_renderNestBoxes() {
+  var flockName = document.getElementById('bd-egg-flock') ? document.getElementById('bd-egg-flock').value : '';
+  var flock = bd_flocks.filter(function(f) { return f.name === flockName; })[0];
+  var boxes = flock ? (flock.nestBoxes || []) : [];
+  var container = document.getElementById('bd-nest-boxes');
+  if (!boxes.length) { container.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No nest boxes configured. Add in Sync &rarr; Flock Manager.</div>"; return; }
+  container.innerHTML = boxes.map(function(box, i) {
+    return "<div class='nest-card'><div class='nest-name'>" + box + "</div><input type='number' id='bd-nest-" + i + "' min='0' step='1' value='0' placeholder='0'></div>";
+  }).join('');
+}
+function bd_renderEggTotals() {
+  var now = new Date(); var todayStr = bd_localISO(now).slice(0,10); var weekAgo = new Date(now - 7*24*60*60*1000).getTime(); var monthAgo = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  var today=0, week=0, month=0;
+  bd_history.filter(function(l) { return l.type === 'egg'; }).forEach(function(l) {
+    var d = new Date(l.timeISO); var eggs = parseInt(l.eggCount || 0);
+    if (bd_localISO(d).slice(0,10) === todayStr) today += eggs;
+    if (d.getTime() >= weekAgo)  week  += eggs;
+    if (d.getTime() >= monthAgo) month += eggs;
+  });
+  var et = document.getElementById('bd-egg-today'); if (et) et.textContent = today;
+  var ew = document.getElementById('bd-egg-week');  if (ew) ew.textContent = week;
+  var em = document.getElementById('bd-egg-month'); if (em) em.textContent = month;
+}
+function bd_saveEggs() {
+  var flockName = document.getElementById('bd-egg-flock') ? document.getElementById('bd-egg-flock').value : '';
+  var timeVal   = document.getElementById('bd-egg-time')  ? document.getElementById('bd-egg-time').value  : '';
+  var notes     = document.getElementById('bd-egg-notes') ? document.getElementById('bd-egg-notes').value : '';
+  if (!timeVal)   { bd_toast('Set a time'); return; }
+  if (!flockName) { bd_toast('Select a flock'); return; }
+  var flock = bd_flocks.filter(function(f) { return f.name === flockName; })[0];
+  var boxes = flock ? (flock.nestBoxes || []) : [];
+  if (!boxes.length) { bd_toast('No nest boxes configured'); return; }
+  var ts = String(Math.floor(new Date(timeVal).getTime() / 1000)); var saved = 0;
+  boxes.forEach(function(box, i) {
+    var input = document.getElementById('bd-nest-' + i);
+    var count = parseInt(input ? (input.value || '0') : '0');
+    if (!count || count <= 0) return;
+    var logData = { id: Date.now() + '_egg_' + i + '_' + Math.random().toString(36).slice(2,6), type: 'egg', flock: flockName, nestBox: box, eggCount: count, timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, synced: false, logName: 'Eggs - ' + flockName + ' - ' + box + ' - ' + bd_localISO(new Date(timeVal)).slice(0,10) };
+    bd_history.unshift(logData); bd_pending.push({ action: 'log', log: logData, id: logData.id, synced: false });
+    if (input) input.value = '0'; saved++;
+  });
+  localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge(); bd_renderEggTotals();
+  bd_toast('Saved ' + saved + ' nest box' + (saved !== 1 ? 'es' : ''));
+}
+
+// ===== HISTORY =====
+function bd_setHistFilter(f, btn) {
+  bd_histFilter = f;
+  document.querySelectorAll('#bd-screen-history .chip').forEach(function(c) { c.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  bd_renderHistory();
+}
+function bd_renderHistory() {
+  var list = document.getElementById('bd-history-list'); if (!list) return;
+  var logs = bd_history.slice();
+  if (bd_histFilter === 'egg')       logs = logs.filter(function(l) { return l.type === 'egg'; });
+  if (bd_histFilter === 'health')    logs = logs.filter(function(l) { return ['weight','med','obs','proc','hatch'].indexOf(l.type) >= 0; });
+  if (bd_histFilter === 'feed')      logs = logs.filter(function(l) { return l.type === 'feed'; });
+  if (bd_histFilter === 'mortality') logs = logs.filter(function(l) { return l.type === 'mortality'; });
+  if (!logs.length) { list.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No logs yet.</div>"; return; }
+  list.innerHTML = ''; logs.slice(0,100).forEach(function(l) { list.appendChild(bd_makeLogEl(l)); });
+}
+function bd_logSummary(l) {
+  if (l.type === 'egg')       return l.nestBox + ': ' + l.eggCount + ' egg' + (l.eggCount !== 1 ? 's' : '');
+  if (l.type === 'weight')    return l.weight + ' ' + l.weightUnit;
+  if (l.type === 'med')       return l.med + ' ' + (l.dose||'') + (l.doseUnit||'') + ' ' + (l.route||'');
+  if (l.type === 'obs')       return l.title || l.notes || '';
+  if (l.type === 'proc')      return l.proc || '';
+  if (l.type === 'mortality') return 'Cause: ' + l.cause;
+  if (l.type === 'hatch')     return l.hatchCount + ' ' + l.hatchSpecies + ' hatched';
+  if (l.type === 'feed')      return (l.feederName||'') + ': ' + (l.feedAmount||'') + ' ' + (l.feedUnit||'') + ' ' + (l.feedType||'');
+  return l.notes || '';
+}
+function bd_makeLogEl(l) {
+  var d = document.createElement('div');
+  d.className = 'log'; d.style.cursor = 'pointer';
+  var birdLabel = l.type === 'egg' ? (l.flock || 'Eggs') : (l.birdTag || l.birdName || '?');
+  var syncTag = !l.synced ? "<span style='color:#c90;font-size:11px;margin-left:4px;'>pending</span>" : '';
+  var timeStr = l.timeISO ? new Date(l.timeISO).toLocaleString() : '';
+  var summary = bd_logSummary(l);
+  d.innerHTML =
+    "<div class='log-top'>" +
+      "<input type='checkbox' class='log-select' data-id='" + l.id + "' style='width:auto;margin:0 8px 0 0;' onclick='event.stopPropagation()'>" +
+      "<span class='log-bird'>" + birdLabel + "</span>" +
+      "<span class='log-type' style='margin-left:6px;'>" + l.type + "</span>" + syncTag +
+      "<span class='log-arrow' style='margin-left:auto;color:#555;font-size:14px;'>&#x25BC;</span>" +
+    "</div>" +
+    "<div class='log-detail' style='margin-top:3px;'>" + summary + "</div>" +
+    "<div class='log-time'>" + timeStr + "</div>" +
+    "<div class='log-drawer'>" +
+      (l.photo ? "<img src='" + l.photo + "' style='width:100%;border-radius:6px;margin-top:6px;max-height:200px;object-fit:cover;cursor:zoom-in;' onclick='bd_openPhotoViewer(this.src)'>" : '') +
+      "<div style='display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;' id='bd-log-actions-" + l.id + "'></div>" +
+    "</div>";
+  d.onclick = function(e) { if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'IMG') return; bd_toggleLogDrawer(d); };
+  var actDiv = d.querySelector('#bd-log-actions-' + l.id);
+  if (actDiv) {
+    var editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;'; editBtn.onclick = function(e) { e.stopPropagation(); bd_editLog(l.id); };
+    var cloneBtn = document.createElement('button'); cloneBtn.textContent = 'Clone'; cloneBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#4a3a7a;'; cloneBtn.onclick = function(e) { e.stopPropagation(); bd_cloneLog(l.id); };
+    var delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#8b0000;'; delBtn.onclick = function(e) { e.stopPropagation(); bd_deleteLog(l.id); };
+    actDiv.appendChild(editBtn); actDiv.appendChild(cloneBtn); actDiv.appendChild(delBtn);
+  }
+  return d;
+}
+function bd_toggleLogDrawer(el) {
+  var drawer = el.querySelector('.log-drawer'); var arrow = el.querySelector('.log-arrow'); if (!drawer) return;
+  var open = drawer.style.display !== 'none' && drawer.style.display !== '';
+  drawer.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.innerHTML = open ? '&#x25BC;' : '&#x25B2;';
+}
+function bd_toggleSelectAll(checked) { document.querySelectorAll('.log-select').forEach(function(cb) { cb.checked = checked; }); }
+function bd_deleteSelected() {
+  var selected = []; document.querySelectorAll('.log-select:checked').forEach(function(cb) { selected.push(cb.getAttribute('data-id')); });
+  if (!selected.length) return;
+  bd_showConfirm('Delete Selected Logs?', "<p style='color:#ccc;'>" + selected.length + " log" + (selected.length > 1 ? 's' : '') + " will be deleted.</p><p style='color:#c66;'>This cannot be undone.</p>", function() {
+    bd_history = bd_history.filter(function(l) { return selected.indexOf(l.id) < 0; });
+    bd_pending = bd_pending.filter(function(p) { return !p.log || selected.indexOf(p.log.id) < 0; });
+    localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+    localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+    bd_updateSyncBadge();
+    var sa = document.getElementById('bd-select-all-logs'); if (sa) sa.checked = false;
+    bd_renderHistory();
+  });
+}
+function bd_deleteLog(id) {
+  var l = bd_history.filter(function(x) { return x.id === id; })[0]; if (!l) return;
+  var birdLabel = l.type === 'egg' ? l.flock : (l.birdTag || l.birdName || '?');
+  bd_showConfirm('Delete this log?', "<p style='color:#ccc;'><strong>" + birdLabel + "</strong> - " + l.type + "</p><p style='color:#c66;'>This cannot be undone.</p>", function() {
+    bd_history = bd_history.filter(function(x) { return x.id !== id; });
+    bd_pending = bd_pending.filter(function(p) { return !p.log || p.log.id !== id; });
+    localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+    localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+    bd_updateSyncBadge(); bd_renderHistory();
+  });
+}
+function bd_cloneLog(id) {
+  var orig = bd_history.filter(function(l) { return l.id === id; })[0]; if (!orig) return;
+  var clone = JSON.parse(JSON.stringify(orig));
+  clone.id = Date.now() + 'c' + Math.random().toString(36).slice(2,7);
+  clone.timeISO = new Date().toISOString(); clone.timestamp = String(Math.floor(Date.now()/1000)); clone.synced = false;
+  bd_history.unshift(clone); bd_pending.push({ action: 'log', log: clone, id: clone.id, synced: false });
+  localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge(); bd_renderHistory(); bd_toast('Cloned - edit if needed, then sync');
+}
+function bd_editLog(id) {
+  var l = bd_history.filter(function(x) { return x.id === id; })[0]; if (!l) return;
+  bd_editingLogId = id;
+  var birdLabel = l.type === 'egg' ? l.flock : (l.birdTag || l.birdName || '?');
+  document.getElementById('bd-edit-title').textContent = 'Edit - ' + birdLabel + ' - ' + l.type;
+  var rawTime = l.timeISO ? new Date(l.timeISO) : new Date();
+  var localTime = bd_localISO(rawTime).slice(0,16);
+  var html = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'>";
+  html += "<label>Notes</label><textarea id='bd-ed-notes' rows='3'>" + (l.notes||'') + "</textarea>";
+  if (l.type === 'weight') html = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'><label>Weight</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-weight' type='number' step='0.01' value='" + (l.weight||'') + "' style='flex:1;'><select id='bd-ed-wunit' style='width:90px;margin:0;'><option" + (l.weightUnit==='lbs'?' selected':'') + ">lbs</option><option" + (l.weightUnit==='g'?' selected':'') + ">g</option><option" + (l.weightUnit==='kg'?' selected':'') + ">kg</option></select></div><label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  if (l.type === 'med') html = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'><label>Medication</label><input id='bd-ed-med' value='" + (l.med||'') + "'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-dose' type='number' step='0.01' value='" + (l.dose||'') + "' style='flex:1;'><select id='bd-ed-dunit' style='width:90px;margin:0;'><option" + (l.doseUnit==='ml'?' selected':'') + ">ml</option><option" + (l.doseUnit==='cc'?' selected':'') + ">cc</option><option" + (l.doseUnit==='mg'?' selected':'') + ">mg</option></select></div><label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  document.getElementById('bd-edit-fields').innerHTML = html;
+  document.getElementById('bd-edit-modal').style.display = 'block';
+}
+function bd_saveEdit() {
+  var l = bd_history.filter(function(x) { return x.id === bd_editingLogId; })[0]; if (!l) return;
+  var timeVal = document.getElementById('bd-ed-time') ? document.getElementById('bd-ed-time').value : null;
+  if (timeVal) { l.timeISO = new Date(timeVal).toISOString(); l.timestamp = String(Math.floor(new Date(timeVal).getTime()/1000)); }
+  var notesEl = document.getElementById('bd-ed-notes'); if (notesEl) l.notes = notesEl.value;
+  if (l.type === 'weight') { var wEl = document.getElementById('bd-ed-weight'); if (wEl) l.weight = wEl.value; var wuEl = document.getElementById('bd-ed-wunit'); if (wuEl) l.weightUnit = wuEl.value; }
+  if (l.type === 'med')    { var mEl = document.getElementById('bd-ed-med'); if (mEl) l.med = mEl.value; var dEl = document.getElementById('bd-ed-dose'); if (dEl) l.dose = dEl.value; var duEl = document.getElementById('bd-ed-dunit'); if (duEl) l.doseUnit = duEl.value; }
+  l.synced = false;
+  var p = bd_pending.filter(function(x) { return x.id === l.id; })[0];
+  if (p) { p.log = l; p.synced = false; } else { bd_pending.push({ action: 'log', log: l, id: l.id, synced: false }); }
+  localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge();
+  document.getElementById('bd-edit-modal').style.display = 'none';
+  bd_renderHistory(); bd_toast('Log updated');
+}
+function bd_closeEditModal(e) { if (!e || e.target === document.getElementById('bd-edit-modal')) document.getElementById('bd-edit-modal').style.display = 'none'; }
+
+// ===== CONFIRM MODAL =====
+function bd_showConfirm(title, body, onOk) {
+  document.getElementById('bd-confirm-title').textContent = title;
+  document.getElementById('bd-confirm-body').innerHTML = body;
+  document.getElementById('bd-confirm-ok').onclick = function() { document.getElementById('bd-confirm-modal').style.display = 'none'; onOk(); };
+  document.getElementById('bd-confirm-modal').style.display = 'block';
+}
+function bd_closeConfirmModal(e) { if (!e || e.target === document.getElementById('bd-confirm-modal')) document.getElementById('bd-confirm-modal').style.display = 'none'; }
+
+// ===== FLOCK MANAGER =====
+function bd_openFlockManager() { bd_renderFlockList(); document.getElementById('bd-flock-modal').style.display = 'block'; }
+function bd_closeFlockModal(e) { if (!e || e.target === document.getElementById('bd-flock-modal')) document.getElementById('bd-flock-modal').style.display = 'none'; }
+function bd_renderFlockList() {
+  var list = document.getElementById('bd-flock-list');
+  if (!bd_flocks.length) { list.innerHTML = "<div style='color:#888;font-size:14px;margin-bottom:10px;'>No flocks yet.</div>"; return; }
+  list.innerHTML = bd_flocks.map(function(f, fi) {
+    return "<div class='box' style='margin-bottom:8px;'>" +
+      "<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px;'><strong style='flex:1;'>" + f.name + "</strong><button class='sm danger' onclick='bd_deleteFlock(" + fi + ")' style='margin:0;padding:8px 12px;'>Delete</button></div>" +
+      "<div style='font-size:13px;color:#888;margin-bottom:8px;'>Species: " + (f.species || 'Mixed') + "</div>" +
+      "<strong style='font-size:14px;'>Nest Boxes</strong>" +
+      (f.nestBoxes || []).map(function(b, bi) {
+        return "<div style='display:flex;gap:6px;margin-top:4px;'><input value='" + b + "' onchange='bd_updateBoxName(" + fi + "," + bi + ",this.value)' style='flex:1;margin:0;padding:8px;font-size:15px;'><button class='sm danger' onclick='bd_deleteBox(" + fi + "," + bi + ")' style='margin:0;padding:8px 10px;'>X</button></div>";
+      }).join('') +
+      "<button class='sm secondary' onclick='bd_addBox(" + fi + ")' style='margin-top:6px;'>+ Add Box</button></div>";
+  }).join('');
+}
+function bd_addFlock() {
+  var name = document.getElementById('bd-new-flock-name').value.trim();
+  var species = document.getElementById('bd-new-flock-species').value.trim();
+  if (!name) { bd_toast('Enter a flock name'); return; }
+  bd_flocks.push({ name: name, species: species, nestBoxes: [] });
+  localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks));
+  document.getElementById('bd-new-flock-name').value = ''; document.getElementById('bd-new-flock-species').value = '';
+  bd_renderFlockList(); bd_toast('Flock added');
+}
+function bd_deleteFlock(i) { bd_flocks.splice(i,1); localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); bd_renderFlockList(); }
+function bd_addBox(fi) { if (!bd_flocks[fi].nestBoxes) bd_flocks[fi].nestBoxes = []; bd_flocks[fi].nestBoxes.push('Box ' + (bd_flocks[fi].nestBoxes.length + 1)); localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); bd_renderFlockList(); }
+function bd_deleteBox(fi, bi) { bd_flocks[fi].nestBoxes.splice(bi,1); localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); bd_renderFlockList(); }
+function bd_updateBoxName(fi, bi, val) { bd_flocks[fi].nestBoxes[bi] = val; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
+
+// ===== SPECIES MANAGER =====
+function bd_openSpeciesManager() { bd_renderSpeciesList(); document.getElementById('bd-species-modal').style.display = 'block'; }
+function bd_closeSpeciesModal(e) { if (!e || e.target === document.getElementById('bd-species-modal')) document.getElementById('bd-species-modal').style.display = 'none'; }
+function bd_renderSpeciesList() {
+  var list = document.getElementById('bd-species-list');
+  list.innerHTML = Object.keys(bd_speciesCfg).map(function(sp) {
+    var breeds = bd_speciesCfg[sp];
+    return "<div class='box' style='margin-bottom:8px;'><strong>" + sp + "</strong><div style='font-size:13px;color:#888;margin:4px 0 6px;'>" + breeds.length + " breeds</div>" +
+      breeds.map(function(b, bi) {
+        return "<div style='display:flex;gap:6px;margin-top:4px;'><span style='flex:1;font-size:15px;padding:6px;'>" + b + "</span><button class='sm danger' onclick=\"bd_deleteBreed('" + sp + "'," + bi + ")\" style='margin:0;padding:8px 10px;'>X</button></div>";
+      }).join('') +
+      "<div style='display:flex;gap:6px;margin-top:8px;'><input id='bd-new-breed-" + sp + "' placeholder='Add breed...' style='flex:1;margin:0;padding:8px;font-size:15px;'><button class='sm' onclick=\"bd_addBreed('" + sp + "')\" style='margin:0;'>+</button></div></div>";
+  }).join('');
+}
+function bd_addBreed(sp) {
+  var inp = document.getElementById('bd-new-breed-' + sp); var val = inp ? inp.value.trim() : ''; if (!val) return;
+  if (!bd_speciesCfg[sp]) bd_speciesCfg[sp] = [];
+  bd_speciesCfg[sp].push(val); localStorage.setItem(BD_LS.species, JSON.stringify(bd_speciesCfg));
+  bd_renderSpeciesList(); bd_toast('Breed added');
+}
+function bd_deleteBreed(sp, i) { bd_speciesCfg[sp].splice(i,1); localStorage.setItem(BD_LS.species, JSON.stringify(bd_speciesCfg)); bd_renderSpeciesList(); }
+
+function bd_populateFlock(elId, selected) {
+  var el = document.getElementById(elId); if (!el) return;
+  el.innerHTML = "<option value=''>-- No Flock --</option>" + bd_flocks.map(function(f) {
+    return "<option" + (f.name === selected ? ' selected' : '') + ">" + f.name + "</option>";
+  }).join('');
+}
+
+// ===== STARTUP =====
+(function bd_init() {
+  bd_updateSyncBadge();
+  bd_setSpeciesFilter('');
+  bd_renderBirds();
+})();
+
 // back button handled by shared module switcher popstate
 const _lastSync = localStorage.getItem(SD_LS.lastSync);
 document.getElementById('syncStatus').textContent = _lastSync ? 'Synced ' + _lastSync : 'Offline';
@@ -6807,6 +8000,18 @@ const MODULES = [
       if (sdNavBtn) sdNavBtn.classList.add('active');
       renderDashboard();
       if (typeof updateSyncBadge === 'function') updateSyncBadge();
+    } },
+  { id: 'birds', label: '🐦 Birds', title: '🐦 FarmDesk',
+    containerId: 'module-birddesk',
+    onActivate: function() {
+      document.querySelectorAll('#module-birddesk .screen').forEach(s => s.classList.remove('active'));
+      var bdHome = document.getElementById('bd-screen-birds');
+      if (bdHome) bdHome.classList.add('active');
+      document.querySelectorAll('.bd-bottom-nav button').forEach(b => b.classList.remove('active'));
+      var bdNav = document.getElementById('bd-nav-birds');
+      if (bdNav) bdNav.classList.add('active');
+      bd_renderBirds();
+      bd_updateSyncBadge();
     } }
 ];
 
@@ -6895,10 +8100,17 @@ function settingsHome() {
 function closeTopOverlay() {
   var pv = document.getElementById('photoViewer');
   if (pv && pv.classList.contains('open')) { pv.classList.remove('open'); return true; }
+  var bdpv = document.getElementById('bd-photo-viewer');
+  if (bdpv && bdpv.classList.contains('open')) { bdpv.classList.remove('open'); return true; }
   var em = document.getElementById('editModal');
   if (em && em.style.display === 'block') { closeEdit(); return true; }
   var sm = document.getElementById('sd-editModal');
   if (sm && sm.style.display === 'block') { sd_closeEdit(); return true; }
+  var bdModals = ['bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
+  for (var i = 0; i < bdModals.length; i++) {
+    var bm = document.getElementById(bdModals[i]);
+    if (bm && bm.style.display === 'block') { bm.style.display = 'none'; return true; }
+  }
   return false;
 }
 
@@ -6923,6 +8135,16 @@ window.addEventListener('popstate', function(e) {
     if (page === 'history')  sd_renderHistory();
     // settings handled by GD module
     if (page === 'sync')     sd_renderSyncScreen();
+  } else if (mod === 'birds') {
+    const bdPage = e.state && e.state.bdPage ? e.state.bdPage : 'birds';
+    document.querySelectorAll('#module-birddesk .screen').forEach(s => s.classList.remove('active'));
+    const bdTarget = document.getElementById('bd-screen-' + bdPage);
+    if (bdTarget) bdTarget.classList.add('active');
+    document.querySelectorAll('.bd-bottom-nav button').forEach(b => b.classList.remove('active'));
+    const bdNavBtn = document.getElementById('bd-nav-' + bdPage);
+    if (bdNavBtn) bdNavBtn.classList.add('active');
+    if (bdPage === 'history') bd_renderHistory();
+    if (bdPage === 'sync')    bd_renderSync();
   }
 });
 
