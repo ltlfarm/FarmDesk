@@ -517,6 +517,12 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
         <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
       </div>
 
+      <div class="set-sub">
+        <strong>Clear All Data</strong>
+        <p style="color:#888;font-size:13px;margin-top:4px;">Wipes all logs and stock inventory. Use before switching to a different farm.</p>
+        <button class="wide danger" onclick="clearLogs()" style="margin-top:6px;">🗑️ Clear All Logs &amp; Inventory</button>
+      </div>
+
     </div>
   </div>
 
@@ -565,10 +571,6 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
         <button class="wide secondary" onclick="document.getElementById('importFile').click()" style="margin-top:8px;">📥 Import Logs (JSON)</button>
         <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importLogs(this)">
         <div id="importResult" style="font-size:13px;color:#888;margin-top:6px;"></div>
-      </div>
-
-      <div class="set-sub">
-        <button class="wide danger" onclick="clearLogs()">🗑️ Clear All Logs</button>
       </div>
 
     </div>
