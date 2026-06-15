@@ -681,6 +681,37 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <input type="file" id="xmlImportFile" accept=".xml,text/xml,*/*" style="display:none;" onchange="importXML(this)">
     <div id="xmlImportResult" style="font-size:13px;color:#888;margin-top:8px;"></div>
   </div>
+  <div class="box">
+    <strong>📄 Print Report</strong>
+    <p style="color:#888;font-size:13px;">Generate a human-readable report for printing or sharing.</p>
+    <label style="color:#ccc;font-size:14px;">Sections</label>
+    <div style="margin:6px 0 10px;">
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptAnimals" checked style="width:18px;height:18px;"> Animals</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptGoatLogs" checked style="width:18px;height:18px;"> Goat Logs</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptStockInventory" checked style="width:18px;height:18px;"> Stock Inventory</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:15px;"><input type="checkbox" id="rptStockHistory" checked style="width:18px;height:18px;"> Stock History</label>
+    </div>
+    <label style="color:#ccc;font-size:14px;">Filter by Animal</label>
+    <select id="rptAnimal" style="width:100%;padding:10px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin:4px 0 10px;"></select>
+    <label style="color:#ccc;font-size:14px;">Filter by Log Type</label>
+    <select id="rptType" style="width:100%;padding:10px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin:4px 0 10px;">
+      <option value="">All Types</option>
+      <option value="weight">Weight</option>
+      <option value="vitals">Vitals</option>
+      <option value="med">Med</option>
+      <option value="proc">Procedure</option>
+      <option value="hoof">Hoof</option>
+      <option value="obs">Observe</option>
+      <option value="birth">Birth</option>
+      <option value="activity">Activity</option>
+    </select>
+    <label style="color:#ccc;font-size:14px;">Date From</label>
+    <input type="date" id="rptDateFrom" style="width:100%;padding:10px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin:4px 0 10px;box-sizing:border-box;">
+    <label style="color:#ccc;font-size:14px;">Date To</label>
+    <input type="date" id="rptDateTo" style="width:100%;padding:10px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin:4px 0 10px;box-sizing:border-box;">
+    <button onclick="generateReport('share')" class="wide">📤 Share Report</button>
+    <button onclick="generateReport('download')" class="wide secondary" style="margin-top:8px;">💾 Save Report</button>
+  </div>
 </div>
 
 <!-- ===== FARMOS SYNC ===== -->
@@ -1018,6 +1049,7 @@ function show(id) {
     if (localStorage.getItem(LS.standalone) === "1") { show("standalone"); return; }
     renderSync();
   }
+  if (id === "standalone") { renderStandaloneScreen(); }
   if (id === "animals") { renderAnimalsScreen(); }
   if (id === "scheduler") { renderScheduler(); }
 }
@@ -2638,6 +2670,149 @@ function importXML(input) {
     }
   };
   reader.readAsText(file);
+}
+
+function renderStandaloneScreen() {
+  var sel = document.getElementById("rptAnimal");
+  if (!sel) return;
+  var allGoats = JSON.parse(localStorage.getItem(LS.goats) || "[]");
+  sel.innerHTML = '<option value="">All Animals</option>' +
+    allGoats.map(function(n) { return '<option value="' + n.replace(/"/g,"&quot;") + '">' + n + '</option>'; }).join("");
+}
+
+function generateReport(mode) {
+  var farmName  = localStorage.getItem(LS.farmName) || "Farm";
+  var today     = new Date().toISOString().slice(0,10);
+  var incAnimals   = document.getElementById("rptAnimals").checked;
+  var incGoatLogs  = document.getElementById("rptGoatLogs").checked;
+  var incStockInv  = document.getElementById("rptStockInventory").checked;
+  var incStockHist = document.getElementById("rptStockHistory").checked;
+  var filterAnimal = document.getElementById("rptAnimal").value;
+  var filterType   = document.getElementById("rptType").value;
+  var dateFrom     = document.getElementById("rptDateFrom").value;
+  var dateTo       = document.getElementById("rptDateTo").value;
+
+  var allGoats    = JSON.parse(localStorage.getItem(LS.goats) || "[]");
+  var allProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}");
+  var allLogs     = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+  var sdAssets    = JSON.parse(localStorage.getItem("farmdesk_stock_assets") || "[]");
+  var sdHistory   = JSON.parse(localStorage.getItem("farmdesk_stock_history") || "[]");
+
+  // Apply filters to goat logs
+  var filteredLogs = allLogs.filter(function(l) {
+    if (filterAnimal && l.goat !== filterAnimal) return false;
+    if (filterType   && l.type !== filterType)   return false;
+    if (dateFrom && l.time && l.time.slice(0,10) < dateFrom) return false;
+    if (dateTo   && l.time && l.time.slice(0,10) > dateTo)   return false;
+    return true;
+  });
+
+  var sexLabel = { F:"Female", M:"Male", W:"Wether" };
+
+  function th(cols) {
+    return "<tr>" + cols.map(function(h){ return "<th>" + h + "</th>"; }).join("") + "</tr>";
+  }
+  function td(cols) {
+    return "<tr>" + cols.map(function(v){ return "<td>" + escXML(String(v != null ? v : "")) + "</td>"; }).join("") + "</tr>";
+  }
+
+  var sections = "";
+
+  // Animals section
+  if (incAnimals && allGoats.length) {
+    sections += "<h2>Animals</h2><table><thead>" +
+      th(["Name","Tag","Species","Breed","Sex","DOB","Group","Notes"]) +
+      "</thead><tbody>";
+    allGoats.forEach(function(name) {
+      var p = allProfiles[name] || {};
+      sections += td([name, p.tag||"", p.type||"", p.breed||"", sexLabel[p.sex]||p.sex||"", p.birthdate||"", p.group||"", p.notes||""]);
+    });
+    sections += "</tbody></table>";
+  }
+
+  // Goat logs section
+  if (incGoatLogs && filteredLogs.length) {
+    sections += "<h2>Goat Logs</h2><table><thead>" +
+      th(["Date","Animal","Type","Logged By","Details"]) +
+      "</thead><tbody>";
+    filteredLogs.forEach(function(l) {
+      var details = "";
+      if (l.data) {
+        details = Object.entries(l.data).map(function(kv){ return kv[0] + ": " + kv[1]; }).join(", ");
+      }
+      var d = l.time ? new Date(l.time).toLocaleString() : "";
+      sections += td([d, l.goat||"", l.type||"", l.loggedBy||"", details]);
+    });
+    sections += "</tbody></table>";
+  } else if (incGoatLogs) {
+    sections += "<h2>Goat Logs</h2><p style='color:#888;'>No logs match the selected filters.</p>";
+  }
+
+  // Stock inventory section
+  if (incStockInv && sdAssets.length) {
+    sections += "<h2>Stock Inventory</h2><table><thead>" +
+      th(["Item","Category","Quantity","Unit","Notes"]) +
+      "</thead><tbody>";
+    sdAssets.forEach(function(a) {
+      sections += td([a.name||"", a.category||"", a.value != null ? a.value : "", a.measure||"", a.notes||""]);
+    });
+    sections += "</tbody></table>";
+  }
+
+  // Stock history section
+  if (incStockHist && sdHistory.length) {
+    var filteredStock = sdHistory.filter(function(e) {
+      if (dateFrom && e.time && e.time.slice(0,10) < dateFrom) return false;
+      if (dateTo   && e.time && e.time.slice(0,10) > dateTo)   return false;
+      return true;
+    });
+    sections += "<h2>Stock History</h2><table><thead>" +
+      th(["Date","Item","Action","Amount","Unit","Seller","Lot","Notes"]) +
+      "</thead><tbody>";
+    filteredStock.forEach(function(e) {
+      var d = e.time ? new Date(e.time).toLocaleString() : "";
+      sections += td([d, e.name||"", e.action||"", e.amount != null ? e.amount : "", e.measure||"", e.seller||"", e.lot||"", e.notes||""]);
+    });
+    sections += "</tbody></table>";
+  }
+
+  if (!sections) { showToast("No data to report"); return; }
+
+  var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>" +
+    "<title>" + escXML(farmName) + " Farm Report</title>" +
+    "<style>" +
+    "body{font-family:Arial,sans-serif;margin:20px;color:#222;}" +
+    "h1{border-bottom:2px solid #333;padding-bottom:6px;}" +
+    "h2{margin-top:28px;color:#2a6;border-bottom:1px solid #ccc;padding-bottom:4px;}" +
+    "table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;}" +
+    "th{background:#2a6;color:#fff;padding:6px 8px;text-align:left;}" +
+    "td{padding:5px 8px;border-bottom:1px solid #ddd;}" +
+    "tr:nth-child(even){background:#f5f5f5;}" +
+    "@media print{h2{page-break-before:always;}h2:first-of-type{page-break-before:avoid;}}" +
+    "</style></head><body>" +
+    "<h1>" + escXML(farmName) + " — Farm Report</h1>" +
+    "<p style='color:#666;font-size:13px;'>Generated: " + today +
+    (filterAnimal ? " | Animal: " + escXML(filterAnimal) : "") +
+    (filterType   ? " | Type: "   + escXML(filterType)   : "") +
+    (dateFrom     ? " | From: "   + dateFrom              : "") +
+    (dateTo       ? " | To: "     + dateTo                : "") +
+    "</p>" + sections + "</body></html>";
+
+  var rawFarm = (localStorage.getItem(LS.farmName) || "farmdesk").trim();
+  var safeFarm = rawFarm.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"") || "farmdesk";
+  var filename = safeFarm + "_farmdesk_report_" + today + ".html";
+
+  if (mode === "share" && window.AndroidBridge && window.AndroidBridge.shareXML) {
+    window.AndroidBridge.shareXML(html, filename);
+  } else if (window.AndroidBridge && window.AndroidBridge.saveXML) {
+    window.AndroidBridge.saveXML(html, filename);
+  } else {
+    var blob = new Blob([html], { type: "text/html" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
 }
 
 // ===== END STANDALONE MODE =====
