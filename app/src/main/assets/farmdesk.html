@@ -482,6 +482,12 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
       </div>
 
       <div class="set-sub">
+        <strong>Farm Name</strong>
+        <p style="color:#888;font-size:13px;">Used in exported XML filename.</p>
+        <input id="farmNameInput" placeholder="e.g. Living the Life Farm" style="width:100%;box-sizing:border-box;" oninput="localStorage.setItem(LS.farmName, this.value.trim())">
+      </div>
+
+      <div class="set-sub">
         <strong>Standalone Mode (No farmOS)</strong>
         <p style="color:#888;font-size:13px;">Use FarmDesk without a farmOS server. Logs are saved locally and exported as XML for Excel or LibreOffice.</p>
         <label style="display:flex;align-items:center;gap:10px;font-size:16px;margin-top:6px;">
@@ -904,6 +910,7 @@ const LS = {
   lastSync:       "farmdesk_lastSync",
   recentUrls:     "farmdesk_recentUrls",
   standalone:     "farmdesk_standalone",
+  farmName:       "farmdesk_farmName",
   activeUser:     "farmdesk_activeUser",
   users:          "farmdesk_users",
   // Per-URL log storage — key is farmdesk_logs_<urlhash>
@@ -2548,7 +2555,9 @@ function exportXML(mode) {
   xml += "  </stock_history>\n";
   xml += "</farmdesk_export>\n";
 
-  var filename = "farmdesk_export_" + now + ".xml";
+  var rawFarm = (localStorage.getItem(LS.farmName) || "farmdesk").trim();
+  var safeFarm = rawFarm.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "farmdesk";
+  var filename = safeFarm + "_farmdesk_export.xml";
   if (mode === "share" && window.AndroidBridge && window.AndroidBridge.shareXML) {
     window.AndroidBridge.shareXML(xml, filename);
   } else if (mode === "download" && window.AndroidBridge && window.AndroidBridge.saveXML) {
@@ -2737,6 +2746,10 @@ function renderSettings() {
   });
 
   // Animal list and excluded list now rendered in the Animals screen — not in Settings
+
+  // Farm name
+  var farmNameEl = document.getElementById("farmNameInput");
+  if (farmNameEl) farmNameEl.value = localStorage.getItem(LS.farmName) || "";
 
   // Standalone mode toggle
   var standaloneToggle = document.getElementById("standaloneToggle");
@@ -3778,14 +3791,18 @@ function clearLogs() {
   saveBtn.textContent = "🗑️ Confirm Clear All";
   saveBtn.style.background = "#8b0000";
   saveBtn.onclick = () => {
-    logs = []; // clears everything including pending tasks
+    logs = [];
     localStorage.setItem(LS.logs, JSON.stringify(logs));
+    localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
+    localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
+    localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
     saveBtn.onclick = saveEdit;
     closeEdit();
     renderSettings();
     renderRecent();
+    showToast("✅ All logs and inventory cleared");
   };
   modal.style.display = "block";
 }
