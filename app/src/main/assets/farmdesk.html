@@ -2543,6 +2543,11 @@ function toggleSetGroup(head) {
   g.classList.toggle('open');
   var arrow = head.querySelector('.set-arrow');
   if (arrow) arrow.textContent = g.classList.contains('open') ? '▲' : '▼';
+  // Re-render Stock settings when section opens so injected lists populate
+  if (g.classList.contains('open') && g.id === 'setgrp-stock') {
+    if (typeof sd_renderThresholdList === 'function') sd_renderThresholdList();
+    if (typeof sd_renderCategoryManager === 'function') sd_renderCategoryManager();
+  }
 }
 
 // ===== STANDALONE MODE =====
