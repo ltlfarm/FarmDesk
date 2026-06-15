@@ -355,7 +355,9 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
       <button onclick="show('settings')" class="secondary">⚙️ Settings</button>
       <button onclick="show('animals')" class="secondary">🐐 Animals</button>
       <button onclick="show('scheduler')" class="secondary">📅 Scheduler</button>
-      <button onclick="show('sync')" class="secondary">🔄 FarmOS Sync</button>
+      <button id="syncBtn" onclick="show('sync')" class="secondary">🔄 FarmOS Sync</button>
+      <button onclick="show('standalone')" class="secondary">📦 Data</button>
+      <button onclick="show('help')" class="secondary">❓ Help</button>
     </div>
   </div>
 
@@ -378,11 +380,11 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
       <button class="secondary" onclick="show('home')" style="padding:8px 12px;font-size:14px;">✕ Home</button>
     </div>
 
-    <label>Animal</label>
+    <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Select the animal you are logging for. Tap Animals on the home screen to add new animals.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="goat"></select>
     <label><input type="checkbox" id="stay"> Stay on same animal</label>
 
-    <label>Time</label>
+    <label style="display:flex;align-items:center;gap:6px;">Time <span onclick="showHint('Tap Now to use the current time. Or change it manually to log something that happened earlier.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <div style="display:flex;gap:6px;margin-top:4px;">
       <input type="datetime-local" id="timestamp" style="flex:1">
       <button onclick="setNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
@@ -404,10 +406,10 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <button class="secondary" onclick="show('home')">← Home</button>
     <h3 style="margin:10px 0 6px;">History</h3>
 
-    <label>Animal</label>
+    <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Filter logs to one animal, or leave as All Animals to see everything.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterGoat"><option value="">All Animals</option></select>
 
-    <label>Type</label>
+    <label style="display:flex;align-items:center;gap:6px;">Type <span onclick="showHint('Filter by log type — Weight, Med, Vitals, etc. Leave blank for all types.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterType">
       <option value="">All Types</option>
       <option value="weight">Weight</option>
@@ -669,7 +671,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <p style="color:#888;font-size:13px;">Export all logs as XML for Excel or LibreOffice. Import a previously exported file to merge or replace logs.</p>
   </div>
   <div class="box">
-    <strong>Export XML</strong>
+    <div style="display:flex;align-items:center;gap:8px;"><strong>Export XML</strong><span onclick="showHint('Full backup of all your logs, animals, and stock inventory. Use the same filename every time to overwrite the old backup. Import this file on another device to transfer your data.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></div>
     <p style="color:#888;font-size:13px;">Exports all goat logs and stock history. Share to email, Google Drive, USB, or any app.</p>
     <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
     <button onclick="exportXML('download')" class="wide secondary" style="margin-top:8px;">💾 Save to Downloads</button>
@@ -711,6 +713,82 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <input type="date" id="rptDateTo" style="width:100%;padding:10px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin:4px 0 10px;box-sizing:border-box;">
     <button onclick="generateReport('share')" class="wide">📤 Share Report</button>
     <button onclick="generateReport('download')" class="wide secondary" style="margin-top:8px;">💾 Save Report</button>
+  </div>
+</div>
+
+<!-- ===== HELP SCREEN ===== -->
+<div id="screen-help" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="show('home')">← Home</button>
+    <h3 style="margin:10px 0 6px;">❓ FarmDesk Help</h3>
+    <p style="color:#888;font-size:13px;">Quick guide to get started and use every feature.</p>
+  </div>
+
+  <div class="box">
+    <strong>🚀 Getting Started</strong>
+    <p style="font-size:14px;color:#ccc;margin:8px 0 4px;">1. Go to <strong>Settings</strong> and enter your farmOS server URL and login — or enable <strong>Standalone Mode</strong> if you have no server.</p>
+    <p style="font-size:14px;color:#ccc;margin:4px 0 4px;">2. Go to <strong>Animals</strong> and add your animals. If connected to farmOS, tap FarmOS Sync → Fetch to pull them automatically.</p>
+    <p style="font-size:14px;color:#ccc;margin:4px 0 4px;">3. Set your <strong>Active User</strong> in Settings so every log is stamped with your name.</p>
+    <p style="font-size:14px;color:#ccc;margin:4px 0;">4. Start logging! Tap any green button on the home screen to record a health event.</p>
+  </div>
+
+  <div class="box">
+    <strong>📋 Log Types</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;"><strong>⚖️ Weight</strong> — Record an animal's weight in lbs or kg.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>🌡️ Vitals</strong> — Temperature, heart rate, respiratory rate.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>💉 Med</strong> — Medication name, dose, route, and lot number.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>✂️ Procedure</strong> — Any procedure performed on an animal.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>🐾 Hoof</strong> — Hoof trimming and condition notes.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>👁️ Observe</strong> — General observation or health note.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>🐐🍼 Birth</strong> — Record a birth event with dam, sire, and offspring.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>📝 Activity</strong> — General farm activity log.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Weight + Vitals</strong> — Record both in one flow.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Weight + Vitals + Med</strong> — Record all three in one flow.</p>
+  </div>
+
+  <div class="box">
+    <strong>📦 Stock Module</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;">Track feed, medical supplies, and lab items.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>+</strong> button — Add a new inventory item.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>+ / −</strong> buttons — Adjust quantity up or down. You'll be prompted for amount and notes.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Tap item name</strong> — View full details and history.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>History tab</strong> — Full log of all stock adjustments.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Red bar</strong> — Item is at zero or below. Restock needed.</p>
+  </div>
+
+  <div class="box">
+    <strong>📅 Scheduler</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;">Schedule future health tasks for animals. Scheduled tasks appear on the home screen and in History.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;">Tap a scheduled task on the home screen to open the log form pre-filled and mark it complete.</p>
+  </div>
+
+  <div class="box">
+    <strong>📤 Data / Export</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;"><strong>Export XML</strong> — Full backup of all logs, animals, and stock. Use the same filename every time to overwrite the previous backup.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Import XML</strong> — Restore from a backup. Choose Merge (add to existing) or Replace (start fresh from file).</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Print Report</strong> — Generate a filtered, human-readable HTML report you can print or share. Filter by animal, log type, and date range.</p>
+  </div>
+
+  <div class="box">
+    <strong>👥 Multiple Users</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;">Go to Settings → Active User. Add each farm hand's name. The active user is stamped on every log so you know who recorded what.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;">Change the active user any time — just tap their name in the dropdown.</p>
+  </div>
+
+  <div class="box">
+    <strong>🔄 farmOS Sync</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;">If you have a farmOS server, enter your URL and credentials in Settings. All logs are saved locally first, then pushed to farmOS when you sync.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Push to farmOS</strong> — Sends all unsynced logs to your server.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Fetch Inventory</strong> — Pulls your animal list and stock items from farmOS.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;">No server? Enable <strong>Standalone Mode</strong> in Settings and use XML export/import instead.</p>
+  </div>
+
+  <div class="box">
+    <strong>⚙️ Settings Tips</strong>
+    <p style="font-size:14px;color:#ccc;margin:6px 0 2px;"><strong>Farm Name</strong> — Used in exported filenames. Set this first.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Modules</strong> — Turn Goats or Stock on/off to simplify the interface for your farm.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Farm Logo</strong> — Pick a photo to show in the header.</p>
+    <p style="font-size:14px;color:#ccc;margin:2px 0;"><strong>Clear All Logs</strong> — Wipes all logs and stock inventory. Use before switching to a different farm.</p>
   </div>
 </div>
 
@@ -1042,7 +1120,11 @@ function show(id) {
   if (id !== "home") history.pushState({ page: id }, "");
   // Reset session dose rate when leaving entry screen
   if (id !== "entry") sessionDoseRate = null;
-  if (id === "home") { renderRecent(); }
+  if (id === "home") {
+    renderRecent();
+    var syncBtn = document.getElementById("syncBtn");
+    if (syncBtn) syncBtn.textContent = localStorage.getItem(LS.standalone) === "1" ? "📦 Standalone Data" : "🔄 FarmOS Sync";
+  }
   if (id === "history") { renderHistory(); }
   if (id === "settings") { renderSettings(); }
   if (id === "sync") {
@@ -2469,6 +2551,18 @@ function toggleSetGroup(head) {
 }
 
 // ===== STANDALONE MODE =====
+function showHint(msg) {
+  var modal   = document.getElementById("editModal");
+  var fields  = document.getElementById("editFields");
+  var title   = document.getElementById("editTitle");
+  var saveBtn = document.getElementById("modalSaveBtn");
+  if (!modal) return;
+  title.textContent = "💡 Tip";
+  fields.innerHTML = "<p style='font-size:15px;color:#ccc;line-height:1.6;'>" + msg + "</p>";
+  saveBtn.style.display = "none";
+  modal.style.display = "block";
+}
+
 function setStandaloneMode(on) {
   localStorage.setItem(LS.standalone, on ? "1" : "0");
   renderSettings();
