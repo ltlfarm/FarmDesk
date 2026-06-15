@@ -845,11 +845,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 <!-- ===== DASHBOARD ===== -->
 <div id="sd-screen-dashboard" class="screen active">
   <div class="box" style="padding-bottom:6px;">
-    <div class="cat-tabs">
-      <button class="cat-tab active" id="tab-Feed"    onclick="setTab('Feed')">🌾 Feed</button>
-      <button class="cat-tab"        id="tab-Medical" onclick="setTab('Medical')">💉 Medical</button>
-      <button class="cat-tab"        id="tab-Lab"     onclick="setTab('Lab')">🔬 Lab</button>
-      <button class="cat-tab"        id="tab-Add"     onclick="toggleAddItemPanel()" style="background:#2a2a2a;">➕</button>
+    <div class="cat-tabs" id="catTabsRow">
+      <!-- rendered by renderCatTabs() -->
     </div>
     <div id="stockList"><p style="color:#888;text-align:center;padding:20px;">Tap Sync to load inventory.</p></div>
   </div>
@@ -860,9 +857,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
     <input type="text" id="newItemName" placeholder="e.g. Straw, Baling Twine" enterkeyhint="next" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('newItemNotes').focus();}">
     <label>Category</label>
     <select id="newItemCat">
-      <option value="e5e7b94d-d8b3-4c78-8554-097edc968208">Feed</option>
-      <option value="eb01f4d2-7dbf-46af-b2ff-426575eff635">Medical</option>
-      <option value="2f1ac8ab-c6b6-4f91-a504-b48e2c921e57">Lab</option>
+      <!-- populated by renderNewItemCatOptions() -->
     </select>
     <label>Unit</label>
     <select id="newItemUnit">
@@ -5440,7 +5435,8 @@ const SD_LS = {
   lastSync:   'farmdesk_stock_lastsync',
   thresholds: 'farmdesk_stock_thresholds',
   pending:    'farmdesk_stock_pending',  // local-first queue
-  photos:     'farmdesk_stock_photos'   // base64 photos keyed by asset UUID
+  photos:     'farmdesk_stock_photos',   // base64 photos keyed by asset UUID
+  categories: 'farmdesk_stock_categories'
 };
 
 // ===== SHARED MODULE: farmOS taxonomy UUIDs =====
@@ -5476,7 +5472,8 @@ const INJECTABLE_KEYWORDS = ['super b', 'cdt', 'ivermectin', 'bactrim', 'penicil
 // ===== STATE =====
 let assets     = JSON.parse(localStorage.getItem(SD_LS.assets)     || '[]');
 let adjHistory    = JSON.parse(localStorage.getItem(SD_LS.history)    || '[]');
-let thresholds = JSON.parse(localStorage.getItem(SD_LS.thresholds) || '{}');
+let thresholds  = JSON.parse(localStorage.getItem(SD_LS.thresholds) || '{}');
+let sdCategories = JSON.parse(localStorage.getItem(SD_LS.categories) || 'null') || ['Feed','Medical','Lab'];
 let pending    = JSON.parse(localStorage.getItem(SD_LS.pending)    || '[]');
 let photos     = JSON.parse(localStorage.getItem(SD_LS.photos)     || '{}');
 currentPhoto = null; // declared once in the Goats section; reset here for Stock asset photos
@@ -5772,7 +5769,72 @@ function toggleAddItemPanel() {
   const open = panel.style.display === 'none' || panel.style.display === '';
   panel.style.display = open ? 'block' : 'none';
   if (btn) btn.classList.toggle('active', open);
-  if (open) setTimeout(() => document.getElementById('newItemName')?.focus(), 100);
+  if (open) {
+    renderNewItemCatOptions();
+    setTimeout(() => document.getElementById('newItemName')?.focus(), 100);
+  }
+}
+
+// ===== CATEGORY MANAGEMENT =====
+const CAT_EMOJIS = { Feed:'🌾', Medical:'💉', Lab:'🔬' };
+function getCatEmoji(cat) { return CAT_EMOJIS[cat] || '📦'; }
+
+function saveSdCategories() {
+  localStorage.setItem(SD_LS.categories, JSON.stringify(sdCategories));
+}
+
+function renderCatTabs() {
+  const row = document.getElementById('catTabsRow');
+  if (!row) return;
+  row.innerHTML = sdCategories.map(cat =>
+    `<button class="cat-tab${cat === currentTab ? ' active' : ''}" id="tab-${cat}" onclick="setTab('${cat}')">${getCatEmoji(cat)} ${cat}</button>`
+  ).join('') + `<button class="cat-tab" id="tab-Add" onclick="toggleAddItemPanel()" style="background:#2a2a2a;">➕</button>`;
+}
+
+function renderNewItemCatOptions() {
+  const sel = document.getElementById('newItemCat');
+  if (!sel) return;
+  sel.innerHTML = sdCategories.map(cat => `<option value="${cat}">${getCatEmoji(cat)} ${cat}</option>`).join('');
+}
+
+function sd_renderCategoryManager() {
+  const el = document.getElementById('sdCategoryList');
+  if (!el) return;
+  el.innerHTML = sdCategories.map((cat, i) =>
+    `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <span style="flex:1;font-size:15px;color:#ccc;">${getCatEmoji(cat)} ${cat}</span>
+      <button onclick="sd_removeCategory('${cat}')" class="secondary" style="margin:0;padding:6px 12px;font-size:13px;background:#8b0000;">🗑️</button>
+    </div>`
+  ).join('') || '<p style="color:#888;font-size:13px;">No categories.</p>';
+}
+
+function sd_addCategory() {
+  const inp = document.getElementById('sdNewCatInput');
+  const name = (inp ? inp.value : '').trim();
+  if (!name) { showToast('Enter a category name'); return; }
+  if (sdCategories.includes(name)) { showToast('Already exists'); return; }
+  sdCategories.push(name);
+  saveSdCategories();
+  if (inp) inp.value = '';
+  renderCatTabs();
+  renderNewItemCatOptions();
+  sd_renderCategoryManager();
+  showToast('✅ ' + name + ' added');
+}
+
+function sd_removeCategory(cat) {
+  const count = assets.filter(a => a.category === cat).length;
+  if (count > 0) {
+    if (!confirm(count + " item(s) are in this category. Remove category anyway? Items will still exist but will not appear under any tab.")) return;
+  }
+  sdCategories = sdCategories.filter(c => c !== cat);
+  saveSdCategories();
+  if (currentTab === cat) { currentTab = sdCategories[0] || 'Feed'; }
+  renderCatTabs();
+  renderNewItemCatOptions();
+  sd_renderCategoryManager();
+  renderDashboard();
+  showToast('Removed: ' + cat);
 }
 
 function setTab(tab) {
@@ -5785,6 +5847,7 @@ function setTab(tab) {
 
 // ===== DASHBOARD RENDER =====
 function renderDashboard() {
+  renderCatTabs();
   const list  = document.getElementById('stockList');
   const items = assets.filter(a => a.category === currentTab).sort((a,b) => a.name.localeCompare(b.name));
   if (!items.length) {
@@ -6570,6 +6633,15 @@ function sd_renderSettings() {
       </div>
       <div class="set-body">
         <div class="set-sub">
+          <strong>📂 Manage Categories</strong>
+          <p style="color:#888;font-size:13px;margin-top:4px;">Add or remove stock categories. Default: Feed, Medical, Lab.</p>
+          <div id="sdCategoryList"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <input id="sdNewCatInput" placeholder="New category name" style="flex:1;">
+            <button onclick="sd_addCategory()" style="margin:0;padding:10px 14px;">Add</button>
+          </div>
+        </div>
+        <div class="set-sub">
           <strong>Low Stock Thresholds</strong>
           <p style="color:#888;font-size:13px;margin-top:4px;">Amber warning when stock hits or falls below this value. 0 = off.</p>
           <div id="thresholdList"></div>
@@ -6583,6 +6655,7 @@ function sd_renderSettings() {
     </div>
   `;
   sd_renderThresholdList();
+  sd_renderCategoryManager();
 }
 function sd_renderThresholdList() {
   const list = document.getElementById('thresholdList');
@@ -6846,6 +6919,8 @@ window.addEventListener('popstate', function(e) {
   }
 });
 
+renderCatTabs();
+renderNewItemCatOptions();
 renderDashboard();
 populateInjectionSelects();
 updateSyncBadge();
