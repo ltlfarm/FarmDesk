@@ -3796,12 +3796,15 @@ function clearLogs() {
     localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
+    assets  = [];
+    pending = [];
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
     saveBtn.onclick = saveEdit;
     closeEdit();
     renderSettings();
     renderRecent();
+    renderDashboard();
     showToast("✅ All logs and inventory cleared");
   };
   modal.style.display = "block";
