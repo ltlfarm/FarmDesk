@@ -1314,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.16-1831"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "v1781653760"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7430,6 +7430,8 @@ async function bd_syncToFarmOS() {
         else if (item.action === 'create_bird')  await bd_pushCreateBird(item.bird, token);
         else if (item.action === 'update_bird')  await bd_pushUpdateBird(item.bird, token);
         else if (item.action === 'archive_bird') await bd_pushArchiveBird(item.birdUUID, token);
+        else if (item.action === 'create_group')  await bd_pushCreateGroup(item.flockName, token);
+        else if (item.action === 'group_assign')  await bd_pushGroupAssign(item.birdUUID, item.flockName, token);
         item.synced = true; synced++;
         if (logEl) logEl.textContent += 'OK: ' + (item.log ? item.log.logName : item.action) + '\n';
       } catch(e) {
@@ -7494,7 +7496,7 @@ async function bd_pushCreateBird(bird, token) {
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
   var data = await res.json();
   var lb = bd_birds.filter(function(b) { return b._localId === bird._localId; })[0];
-  if (lb && data.data && data.data.id) { lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); }
+  if (lb && data.data && data.data.id) { lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); if (lb.flock) { try { await bd_pushGroupAssign(lb.uuid, lb.flock, token); } catch(e) { bd_pending.push({ action: 'group_assign', birdUUID: lb.uuid, flockName: lb.flock, id: 'ga_' + Date.now(), synced: false }); localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending)); } } }
 }
 
 async function bd_pushUpdateBird(bird, token) {
@@ -7737,7 +7739,7 @@ function bd_saveBird() {
   if (!tag && !name) { bd_toast('Enter a tag or name'); return; }
   if (bd_editBirdId) {
     var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_editBirdId; })[0];
-    if (bird) { bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.photo = bd_currentBirdPhoto || null; bird.synced = false; if (bird.uuid) bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); }
+    if (bird) { var _oldFlock = bird.flock || ''; bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.photo = bd_currentBirdPhoto || null; bird.synced = false; if (bird.uuid) { bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); if ((flock || '') !== _oldFlock) bd_pending.push({ action: 'group_assign', birdUUID: bird.uuid, flockName: flock, id: 'ga_' + Date.now(), synced: false }); } }
   } else {
     var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, photo: bd_currentBirdPhoto || null, status: 'active', synced: false };
     bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
@@ -7970,7 +7972,10 @@ function bd_addFlock() {
   var name = document.getElementById('bd-new-flock-name').value.trim();
   var species = document.getElementById('bd-new-flock-species').value.trim();
   if (!name) { bd_toast('Enter a flock name'); return; }
-  bd_flocks.push({ name: name, species: species, nestBoxes: [] });
+  bd_flocks.push({ name: name, species: species, nestBoxes: [], uuid: null });
+  bd_pending.push({ action: 'create_group', flockName: name, id: 'grp_' + Date.now(), synced: false });
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge();
   localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks));
   document.getElementById('bd-new-flock-name').value = ''; document.getElementById('bd-new-flock-species').value = '';
   bd_renderFlockList(); bd_toast('Flock added');
@@ -8600,6 +8605,31 @@ function medDeductClose() {
 // ===== MODULE SWITCHER ======
 // ============================
 
+
+
+// ===== SHARED MODULE: group/flock membership (farmOS asset--group) =====
+async function bd_ensureGroupUUID(flockName, token) {
+  if (!flockName) return null;
+  var flock = bd_flocks.filter(function(f) { return f.name === flockName; })[0];
+  if (flock && flock.uuid) return flock.uuid;
+  var q = bd_apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(flockName) + '&page[limit]=1');
+  var r = await fetch(q, { headers: bd_authHeaders(token) });
+  if (r.ok) { var d = await r.json(); if (d.data && d.data[0]) { var id = d.data[0].id; if (flock) { flock.uuid = id; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); } return id; } }
+  var payload = { data: { type: 'asset--group', attributes: { name: flockName } } };
+  var res = await fetch(bd_apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  var jd = await res.json(); var nid = jd.data && jd.data.id;
+  if (flock && nid) { flock.uuid = nid; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
+  return nid;
+}
+async function bd_pushCreateGroup(flockName, token) { await bd_ensureGroupUUID(flockName, token); }
+async function bd_pushGroupAssign(birdUUID, flockName, token) {
+  if (!birdUUID) return;
+  var groupId = flockName ? await bd_ensureGroupUUID(flockName, token) : null;
+  var payload = { data: { type: 'log--activity', attributes: { name: flockName ? ('Move to ' + flockName) : 'Remove from flock', status: 'done', timestamp: String(Math.floor(Date.now()/1000)), is_group_assignment: true }, relationships: { asset: { data: [{ type: 'asset--animal', id: birdUUID }] }, group: { data: groupId ? [{ type: 'asset--group', id: groupId }] : [] } } } };
+  var res = await fetch(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('assign HTTP ' + res.status + ': ' + err.slice(0,120)); }
+}
 
 </script>
 
