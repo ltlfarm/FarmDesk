@@ -499,6 +499,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
         <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
         <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
         <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
+        <button onclick="syncAllModules()" class="wide" style="margin-top:8px;">🔄 Sync All Modules</button>
+        <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
 
       <div class="set-sub">
@@ -613,6 +615,9 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
   <!-- ════ STOCK DESK — renders its own drawer when the Stock module is on ════ -->
   <div id="sd-settings-inject"></div>
+
+  <!-- ════ BIRD DESK — renders its own drawer when the Birds module is on ════ -->
+  <div id="bd-settings-inject"></div>
 
 </div>
 
@@ -1309,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.16-1755"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.16-1831"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3342,16 +3347,47 @@ function renderSettings() {
 }
 
 // Renders one checkbox per registered module into Settings
+const MODULE_ORDER_KEY = 'farmdesk_modules_order';
+
+function applyModuleOrder() {
+  const saved = JSON.parse(localStorage.getItem(MODULE_ORDER_KEY) || 'null');
+  if (!saved || !Array.isArray(saved)) return;
+  const reordered = [];
+  saved.forEach(id => { const m = MODULES.find(x => x.id === id); if (m) reordered.push(m); });
+  MODULES.forEach(m => { if (!reordered.find(x => x.id === m.id)) reordered.push(m); });
+  MODULES.splice(0, MODULES.length, ...reordered);
+}
+
+function moveModule(id, dir) {
+  const idx = MODULES.findIndex(m => m.id === id);
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= MODULES.length) return;
+  const tmp = MODULES[idx]; MODULES[idx] = MODULES[newIdx]; MODULES[newIdx] = tmp;
+  localStorage.setItem(MODULE_ORDER_KEY, JSON.stringify(MODULES.map(m => m.id)));
+  renderModuleBar();
+  renderModuleToggles();
+}
+
 function renderModuleToggles() {
   const box = document.getElementById("moduleToggles");
   if (!box || typeof MODULES === "undefined") return;
   const cfg = JSON.parse(localStorage.getItem("farmdesk_modules_enabled") || "{}");
-  box.innerHTML = MODULES.map(m => `
-    <label style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:15px;">
-      <input type="checkbox" ${cfg[m.id] !== false ? "checked" : ""}
-        onchange="setModuleEnabled('${m.id}', this.checked)" style="width:20px;height:20px;">
-      ${m.label}
-    </label>`).join("");
+  box.innerHTML = '<p style="color:#888;font-size:13px;margin:0 0 6px;">Use arrows to reorder modules in the header bar.</p>' +
+    MODULES.map((m, i) => {
+      const upDisabled  = i === 0 ? 'disabled' : '';
+      const downDisabled = i === MODULES.length - 1 ? 'disabled' : '';
+      return `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <button ${upDisabled} onclick="moveModule('${m.id}',-1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;" ${upDisabled ? 'style="opacity:0.3"' : ''}>▲</button>
+          <button ${downDisabled} onclick="moveModule('${m.id}',1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;" ${downDisabled ? 'style="opacity:0.3"' : ''}>▼</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:10px;font-size:15px;flex:1;">
+          <input type="checkbox" ${cfg[m.id] !== false ? "checked" : ""}
+            onchange="setModuleEnabled('${m.id}', this.checked)" style="width:20px;height:20px;">
+          ${m.label}
+        </label>
+      </div>`;
+    }).join("");
 }
 
 // ===== PROC SUPPLIES: add/remove rows in entry form =====
@@ -7304,11 +7340,13 @@ function bd_renderExcludedTypes() {
 }
 
 function bd_toggleExcludeIdx(i) {
-  var type = bd_typeListGlobal[i]; if (!type) return;
+  var type = bd_typeListGlobal[i] || _bd_settingsTypes[i]; if (!type) return;
   var idx = bd_excluded.indexOf(type);
   if (idx >= 0) bd_excluded.splice(idx, 1); else bd_excluded.push(type);
   localStorage.setItem(BD_LS.excluded, JSON.stringify(bd_excluded));
-  bd_renderExcludedTypes(); bd_renderBirds();
+  bd_renderExcludedTypes();
+  if (typeof bd_renderExcludedTypesInSettings === 'function') bd_renderExcludedTypesInSettings();
+  bd_renderBirds();
 }
 
 function bd_togglePass() {
@@ -7971,12 +8009,120 @@ function bd_populateFlock(elId, selected) {
   }).join('');
 }
 
+
+// ===== BIRDDESK SETTINGS DRAWER =====
+function bd_renderSettings() {
+  var container = document.getElementById('bd-settings-inject');
+  if (!container) return;
+  var birdsOn = typeof moduleEnabled === 'function' ? moduleEnabled('birds') : true;
+  container.innerHTML = birdsOn ? (
+    '<div class="set-group" id="setgrp-birds">' +
+      '<div class="set-head" onclick="toggleSetGroup(this)">' +
+        '<span style="color:#3a7;">&#x1F426; Bird Desk</span><span class="set-arrow">&#x25BC;</span>' +
+      '</div>' +
+      '<div class="set-body">' +
+        '<div class="set-sub">' +
+          '<strong>Flocks &amp; Nest Boxes</strong>' +
+          '<p style="color:#888;font-size:13px;margin-top:4px;">Configure flocks and nest box counts for egg collection.</p>' +
+          '<button onclick="bd_openFlockManager()" class="wide secondary" style="margin-top:6px;">Manage Flocks &amp; Nest Boxes</button>' +
+        '</div>' +
+        '<div class="set-sub">' +
+          '<strong>Species &amp; Breeds</strong>' +
+          '<p style="color:#888;font-size:13px;margin-top:4px;">Add custom breeds to each species.</p>' +
+          '<button onclick="bd_openSpeciesManager()" class="wide secondary" style="margin-top:6px;">Manage Species &amp; Breeds</button>' +
+        '</div>' +
+        '<div class="set-sub">' +
+          '<strong>Animal Type Filter</strong>' +
+          '<p style="color:#888;font-size:13px;margin-top:4px;">Exclude non-bird types fetched from farmOS.</p>' +
+          '<div id="bd-settings-type-list"></div>' +
+        '</div>' +
+        '<div class="set-sub">' +
+          '<button onclick="bd_clearAllData()" class="wide danger">&#x1F5D1;&#xFE0F; Clear All Bird Data</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>'
+  ) : '';
+  if (birdsOn) {
+    bd_renderExcludedTypesInSettings();
+  }
+}
+
+var _bd_settingsTypes = [];
+function bd_renderExcludedTypesInSettings() {
+  var el = document.getElementById('bd-settings-type-list'); if (!el) return;
+  var types = {};
+  bd_birds.forEach(function(b) { if (b.species && b.type !== 'feeder') types[b.species] = true; });
+  _bd_settingsTypes = Object.keys(types).sort();
+  if (!_bd_settingsTypes.length) { el.innerHTML = '<p style="color:#888;font-size:13px;">Fetch birds first.</p>'; return; }
+  el.innerHTML = _bd_settingsTypes.map(function(t, i) {
+    var excluded = bd_excluded.indexOf(t) >= 0;
+    var bg = excluded ? '#8b0000' : '#1b4d1e';
+    var label = excluded ? 'Excluded' : 'Included';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #333;">' +
+      '<span style="flex:1;font-size:15px;">' + t + '</span>' +
+      '<button onclick="bd_toggleExcludeIdx(' + i + ')" style="margin:0;padding:8px 16px;font-size:14px;background:' + bg + ';">' + label + '</button>' +
+    '</div>';
+  }).join('');
+}
+
+function bd_clearAllData() {
+  bd_showConfirm('Clear All Bird Data?',
+    '<p style="color:#ccc;">This wipes all local bird data, logs, and pending syncs.</p><p style="color:#c66;">Cannot be undone.</p>',
+    function() {
+      [BD_LS.assets, BD_LS.history, BD_LS.pending, BD_LS.lastSync, BD_LS.excluded, BD_LS.flocks, BD_LS.species].forEach(function(k) { localStorage.removeItem(k); });
+      bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
+      bd_excluded = [];
+      bd_speciesCfg = { Chicken: ["Rhode Island Red","Leghorn","Barred Rock","Buff Orpington","Australorp","Silkie"], Duck: ["Pekin","Khaki Campbell","Rouen","Muscovy","Indian Runner"], Goose: ["Toulouse","Embden","Chinese","African","Pilgrim"], Other: [] };
+      bd_updateSyncBadge(); bd_renderBirds();
+      bd_toast('Bird data cleared');
+    }
+  );
+}
+
 // ===== STARTUP =====
 (function bd_init() {
   bd_updateSyncBadge();
   bd_setSpeciesFilter('');
   bd_renderBirds();
 })();
+
+// ===== SYNC ALL MODULES =====
+async function syncAllModules() {
+  var statusEl = document.getElementById('syncAllStatus');
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Starting sync...'; statusEl.style.color = '#888'; }
+  var results = [];
+
+  // Goats
+  try {
+    if (typeof syncToFarmOS === 'function' && document.getElementById('screen-sync')) {
+      if (statusEl) statusEl.textContent = '⏳ Syncing Goats...';
+      await syncToFarmOS(true);
+      results.push('🐐 Goats: done');
+    }
+  } catch(e) { results.push('🐐 Goats: failed — ' + e.message); }
+
+  // Stock
+  try {
+    if (typeof sd_syncToFarmOS === 'function') {
+      if (statusEl) statusEl.textContent = '⏳ Syncing Stock...';
+      await sd_syncToFarmOS(true);
+      results.push('📦 Stock: done');
+    }
+  } catch(e) { results.push('📦 Stock: failed — ' + e.message); }
+
+  // Birds
+  try {
+    if (typeof bd_syncToFarmOS === 'function') {
+      if (statusEl) statusEl.textContent = '⏳ Syncing Birds...';
+      await bd_syncToFarmOS(true);
+      results.push('🐦 Birds: done');
+    }
+  } catch(e) { results.push('🐦 Birds: failed — ' + e.message); }
+
+  var summary = results.join(' | ');
+  if (statusEl) { statusEl.textContent = summary; statusEl.style.color = '#3a7'; }
+  showToast('Sync complete');
+}
 
 // back button handled by shared module switcher popstate
 const _lastSync = localStorage.getItem(SD_LS.lastSync);
@@ -8088,6 +8234,8 @@ function openSharedSettings() {
     if (el) el.style.display = m.containerId === 'module-goatdesk' ? '' : 'none';
   });
   document.getElementById('headerTitle').textContent = '⚙️ FarmDesk';
+  if (typeof sd_renderSettings === 'function') sd_renderSettings();
+  if (typeof bd_renderSettings === 'function') bd_renderSettings();
   show('settings');
 }
 
@@ -8099,6 +8247,7 @@ function settingsHome() {
 
 // Restore saved module on startup (falls back if that module is now disabled)
 (function() {
+  if (typeof applyModuleOrder === 'function') applyModuleOrder();
   const saved = localStorage.getItem(MODULE_KEY) || 'goats';
   switchModule(saved);
 })();
