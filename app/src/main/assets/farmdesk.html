@@ -1147,8 +1147,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </div>
 
 <!-- LOG MODAL -->
-<div id="bd-log-modal" class="bd-modal" onclick="bd_closeLogModal(event)">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
+<div id="bd-log-modal" class="bd-modal" onclick="bd_closeLogModalOverlay()">
+  <div class="bd-modal-box" onclick="return false">
     <h3 id="bd-log-modal-title">Log</h3>
     <label>Log Type</label>
     <select id="bd-log-type" onchange="bd_renderLogFields()">
@@ -1174,8 +1174,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </div>
 
 <!-- ADD/EDIT BIRD MODAL -->
-<div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModal(event)">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
+<div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
+  <div class="bd-modal-box" onclick="return false">
     <h3 id="bd-bird-modal-title">Add Bird</h3>
     <label>Tag / ID</label>
     <input id="bd-bird-tag" placeholder="Tag number or ID">
@@ -1216,8 +1216,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </div>
 
 <!-- FLOCK MANAGER MODAL -->
-<div id="bd-flock-modal" class="bd-modal" onclick="bd_closeFlockModal(event)">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
+<div id="bd-flock-modal" class="bd-modal" onclick="bd_closeFlockModalOverlay()">
+  <div class="bd-modal-box" onclick="return false">
     <h3>Flock &amp; Nest Box Manager</h3>
     <div id="bd-flock-list"></div>
     <div class="box" style="margin-top:10px;">
@@ -1233,8 +1233,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </div>
 
 <!-- SPECIES MANAGER MODAL -->
-<div id="bd-species-modal" class="bd-modal" onclick="bd_closeSpeciesModal(event)">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
+<div id="bd-species-modal" class="bd-modal" onclick="bd_closeSpeciesModalOverlay()">
+  <div class="bd-modal-box" onclick="return false">
     <h3>Species &amp; Breed Manager</h3>
     <div id="bd-species-list"></div>
     <button class="wide secondary" onclick="bd_closeSpeciesModal()" style="margin-top:8px;">Close</button>
@@ -1242,8 +1242,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </div>
 
 <!-- CONFIRM MODAL -->
-<div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModal(event)">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
+<div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModalOverlay()">
+  <div class="bd-modal-box" onclick="return false">
     <h3 id="bd-confirm-title">Confirm</h3>
     <div id="bd-confirm-body"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -1254,8 +1254,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 </div>
 
 <!-- EDIT LOG MODAL -->
-<div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModal(event)">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
+<div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModalOverlay()">
+  <div class="bd-modal-box" onclick="return false">
     <h3 id="bd-edit-title">Edit Log</h3>
     <div id="bd-edit-fields"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -1309,7 +1309,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "2026.06.15-2218"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.16-1732"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7521,13 +7521,13 @@ function bd_renderBirds() {
         var id = b.uuid || b._localId;
         var meta = [b.breed, b.sex === 'F' ? 'Female' : b.sex === 'M' ? 'Male' : '', b.flock ? b.flock : ''].filter(function(x) { return x; }).join(' - ');
         var thumb = b.photo
-          ? "<img src='" + b.photo + "' class='bird-thumb' onclick="event.stopPropagation();bd_openPhotoViewer('" + b.photo + "')">"
-          : "<div class='bird-icon'>" + bd_speciesIcon(b.species) + "</div>";
-        return "<div class='bird-card' onclick="bd_openLogSheet('" + id + "')">" +
+          ? '<img src="' + b.photo + '" class="bird-thumb" onclick="bd_openPhotoViewer(this.src)">'
+          : '<div class="bird-icon">' + bd_speciesIcon(b.species) + '</div>';
+        return '<div class="bird-card" onclick="bd_openLogSheet(\'' + id + '\')">' +
           thumb +
-          "<div class='bird-info'><div class='bird-tag'>" + (b.tag||'') + "</div><div class='bird-name'>" + (b.name||'') + "</div><div class='bird-meta'>" + meta + "</div></div>" +
-          "<button onclick="event.stopPropagation();bd_openEditBird('" + id + "')" style='margin:0;padding:10px 14px;font-size:16px;background:#333;'>Edit</button>" +
-          "</div>";
+          '<div class="bird-info"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
+          '<button onclick="bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
+          '</div>';
       }).join('');
   }).join('');
 }
@@ -7798,7 +7798,7 @@ function bd_makeLogEl(l) {
   var summary = bd_logSummary(l);
   d.innerHTML =
     "<div class='log-top'>" +
-      "<input type='checkbox' class='log-select' data-id='" + l.id + "' style='width:auto;margin:0 8px 0 0;' onclick='event.stopPropagation()'>" +
+      "<input type='checkbox' class='log-select' data-id='" + l.id + "' style='width:auto;margin:0 8px 0 0;' onclick='return false'>" +
       "<span class='log-bird'>" + birdLabel + "</span>" +
       "<span class='log-type' style='margin-left:6px;'>" + l.type + "</span>" + syncTag +
       "<span class='log-arrow' style='margin-left:auto;color:#555;font-size:14px;'>&#x25BC;</span>" +
@@ -7891,6 +7891,16 @@ function bd_saveEdit() {
   bd_renderHistory(); bd_toast('Log updated');
 }
 function bd_closeEditModal(e) { if (!e || e.target === document.getElementById('bd-edit-modal')) document.getElementById('bd-edit-modal').style.display = 'none'; }
+
+// ===== WEBVIEW-SAFE MODAL WRAPPERS =====
+function bd_stopProp() { /* called from onclick — stops bubbling to overlay close */ return false; }
+function bd_closeLogModalOverlay()     { document.getElementById('bd-log-modal').style.display = 'none'; }
+function bd_closeBirdModalOverlay()    { document.getElementById('bd-bird-modal').style.display = 'none'; }
+function bd_closeFlockModalOverlay()   { document.getElementById('bd-flock-modal').style.display = 'none'; }
+function bd_closeSpeciesModalOverlay() { document.getElementById('bd-species-modal').style.display = 'none'; }
+function bd_closeConfirmModalOverlay() { document.getElementById('bd-confirm-modal').style.display = 'none'; }
+function bd_closeEditModalOverlay()    { document.getElementById('bd-edit-modal').style.display = 'none'; }
+
 
 // ===== CONFIRM MODAL =====
 function bd_showConfirm(title, body, onOk) {
