@@ -341,6 +341,11 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 .bd-modal-box h3 { margin:0 0 14px; color:#3a7; }
 #bd-photo-viewer { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.95); z-index:600; align-items:center; justify-content:center; }
 #bd-photo-viewer.open { display:flex; }
+body { overflow-x: hidden; }
+.module-switcher { overflow-x: auto; flex-wrap: nowrap; max-width: 52vw; scrollbar-width: none; -ms-overflow-style: none; }
+.module-switcher::-webkit-scrollbar { display: none; }
+header { gap: 8px; }
+header > div:last-child { min-width: 0; }
 
 
 </style>
@@ -1314,7 +1319,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "v1781674087"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "v1781676001"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8217,7 +8222,7 @@ function renderModuleBar() {
   const active  = localStorage.getItem(MODULE_KEY) || 'goats';
   bar.style.display = enabled.length > 1 ? '' : 'none'; // hide bar if only one module
   bar.innerHTML = enabled.map(m =>
-    `<button class="module-btn${m.id === active ? ' active' : ''}" onclick="switchModule('${m.id}')">${m.label}</button>`
+    `<button class="module-btn${m.id === active ? ' active' : ''}" onclick="goModule('${m.id}')">${m.label}</button>`
   ).join('');
 }
 
@@ -8234,6 +8239,12 @@ function switchModule(modId) {
     if (mod.onActivate) mod.onActivate();
   }
   renderModuleBar();
+}
+
+function goModule(id) {
+  var cur = localStorage.getItem(MODULE_KEY);
+  if (id !== cur) history.pushState({ mod: id }, '');
+  switchModule(id);
 }
 
 // ── SHARED SETTINGS ──
