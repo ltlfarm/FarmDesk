@@ -5325,6 +5325,9 @@ async function syncToFarmOS() {
             }
           }
 
+          // Reconcile to farmOS identity: stamp the returned UUID locally so the
+          // next pull matches this log (no duplicate) and it is never re-pushed.
+          if (logUUID) { l.id = logUUID; l.fromFarmOS = true; l.farmosBundle = "log--" + farmosType; }
           l.synced = true;
           ok++;
           logEl.textContent += `✅ ${l.goat} | ${farmosLogName(l)}${l.data?.photo ? " 📷" : ""}${l.data?.fileAttach ? " 📎" : ""}\n`;
