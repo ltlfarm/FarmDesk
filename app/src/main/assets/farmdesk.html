@@ -1314,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "v1781670359"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "v1781674087"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7571,7 +7571,7 @@ function bd_renderBirds() {
         return '<div class="bird-card" onclick="bd_openLogSheet(\'' + id + '\')">' +
           thumb +
           '<div class="bird-info"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
-          '<button onclick="bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
+          '<button onclick="event.stopPropagation();bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
           '</div>';
       }).join('');
   }).join('');
