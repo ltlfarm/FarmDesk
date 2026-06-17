@@ -1314,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "v1781653760"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "v1781660714"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7380,15 +7380,20 @@ async function bd_fetchAssets() {
   try {
     var token = await bd_getToken(cfg);
     var h = bd_authHeaders(token);
-    var res = await fetch(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type'), { headers: h });
+    var res = await fetch(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
-    var typeMap = {};
-    (data.included || []).forEach(function(inc) { if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || ''; });
+    var typeMap = {}; var groupMap = {};
+    (data.included || []).forEach(function(inc) { if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || ''; else if (inc.type === 'asset--group') groupMap[inc.id] = inc.attributes.name || ''; });
+    Object.keys(groupMap).forEach(function(gid) { var nm = groupMap[gid]; if (!bd_flocks.some(function(f) { return f.uuid === gid || f.name === nm; })) { bd_flocks.push({ name: nm, species: '', nestBoxes: [], uuid: gid }); } else { bd_flocks.forEach(function(f) { if (f.name === nm && !f.uuid) f.uuid = gid; }); } });
+    localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks));
     var fetched = (data.data || []).filter(function(a) { return !a.attributes.archived; }).map(function(a) {
       var typeRel = a.relationships && a.relationships.animal_type && a.relationships.animal_type.data;
       var species = typeRel ? (typeMap[typeRel.id] || '') : '';
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: a.attributes.breed || '', sex: a.attributes.sex || '', status: 'active', notes: (a.attributes.notes && a.attributes.notes.value) ? a.attributes.notes.value : '', flock: '', synced: true };
+      var grpRel = a.relationships && a.relationships.group && a.relationships.group.data;
+      var grpId = (grpRel && grpRel.length) ? grpRel[0].id : ((grpRel && grpRel.id) ? grpRel.id : null);
+      var grpFlock = grpId ? (groupMap[grpId] || '') : '';
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: a.attributes.breed || '', sex: a.attributes.sex || '', status: 'active', notes: (a.attributes.notes && a.attributes.notes.value) ? a.attributes.notes.value : '', flock: grpFlock, synced: true };
     });
     var resEq = await fetch(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
@@ -7398,7 +7403,7 @@ async function bd_fetchAssets() {
     }
     var prevFlock = {};
     bd_birds.forEach(function(b) { if (b.uuid && b.flock) prevFlock[b.uuid] = b.flock; });
-    fetched.forEach(function(b) { if (prevFlock[b.uuid]) b.flock = prevFlock[b.uuid]; });
+    fetched.forEach(function(b) { if (!b.flock && prevFlock[b.uuid]) b.flock = prevFlock[b.uuid]; });
     var localOnly = bd_birds.filter(function(b) { return !b.uuid && b.status !== 'archived' && b.type !== 'feeder'; });
     bd_birds = fetched.concat(feeders).concat(localOnly);
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
@@ -7944,6 +7949,7 @@ function bd_closeEditModalOverlay()    { document.getElementById('bd-edit-modal'
 
 // ===== CONFIRM MODAL =====
 function bd_showConfirm(title, body, onOk) {
+  var _cm = document.getElementById('bd-confirm-modal'); if (_cm.parentNode !== document.body) document.body.appendChild(_cm);
   document.getElementById('bd-confirm-title').textContent = title;
   document.getElementById('bd-confirm-body').innerHTML = body;
   document.getElementById('bd-confirm-ok').onclick = function() { document.getElementById('bd-confirm-modal').style.display = 'none'; onOk(); };
@@ -7952,7 +7958,7 @@ function bd_showConfirm(title, body, onOk) {
 function bd_closeConfirmModal(e) { if (!e || e.target === document.getElementById('bd-confirm-modal')) document.getElementById('bd-confirm-modal').style.display = 'none'; }
 
 // ===== FLOCK MANAGER =====
-function bd_openFlockManager() { bd_renderFlockList(); document.getElementById('bd-flock-modal').style.display = 'block'; }
+function bd_openFlockManager() { var m = document.getElementById('bd-flock-modal'); if (m.parentNode !== document.body) document.body.appendChild(m); bd_renderFlockList(); m.style.display = 'block'; }
 function bd_closeFlockModal(e) { if (!e || e.target === document.getElementById('bd-flock-modal')) document.getElementById('bd-flock-modal').style.display = 'none'; }
 function bd_renderFlockList() {
   var list = document.getElementById('bd-flock-list');
@@ -7986,7 +7992,7 @@ function bd_deleteBox(fi, bi) { bd_flocks[fi].nestBoxes.splice(bi,1); localStora
 function bd_updateBoxName(fi, bi, val) { bd_flocks[fi].nestBoxes[bi] = val; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
 
 // ===== SPECIES MANAGER =====
-function bd_openSpeciesManager() { bd_renderSpeciesList(); document.getElementById('bd-species-modal').style.display = 'block'; }
+function bd_openSpeciesManager() { var m = document.getElementById('bd-species-modal'); if (m.parentNode !== document.body) document.body.appendChild(m); bd_renderSpeciesList(); m.style.display = 'block'; }
 function bd_closeSpeciesModal(e) { if (!e || e.target === document.getElementById('bd-species-modal')) document.getElementById('bd-species-modal').style.display = 'none'; }
 function bd_renderSpeciesList() {
   var list = document.getElementById('bd-species-list');
