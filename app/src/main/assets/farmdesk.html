@@ -346,6 +346,12 @@ body { overflow-x: hidden; }
 .module-switcher::-webkit-scrollbar { display: none; }
 header { gap: 8px; }
 header > div:last-child { min-width: 0; }
+@media (orientation: portrait) {
+  header { flex-direction: column; align-items: stretch; gap: 8px; }
+  header > div:last-child { width: 100%; align-items: stretch; }
+  header > div:last-child > div:first-child { width: 100%; }
+  .module-switcher { max-width: none; flex: 1 1 auto; min-width: 0; }
+}
 
 
 </style>
@@ -504,7 +510,7 @@ header > div:last-child { min-width: 0; }
         <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
         <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
         <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
-        <button onclick="syncAllModules()" class="wide" style="margin-top:8px;">🔄 Sync All Modules</button>
+        <button onclick="syncAllModules()" class="wide" style="margin-top:8px;">⬇️ Sync All (Pull from farmOS)</button>
         <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
 
@@ -1319,7 +1325,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "v1781677231"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8104,40 +8110,43 @@ function bd_clearAllData() {
 
 // ===== SYNC ALL MODULES =====
 async function syncAllModules() {
+  // PULL ONLY — refreshes local data from farmOS so the device stays current.
+  // This never pushes. Pushing is done deliberately per-module via the
+  // dedicated "Push to FarmOS" buttons on the Sync screen.
   var statusEl = document.getElementById('syncAllStatus');
-  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Starting sync...'; statusEl.style.color = '#888'; }
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Pulling latest from farmOS...'; statusEl.style.color = '#888'; }
   var results = [];
 
-  // Goats
+  // Goats — pull
   try {
-    if (typeof syncToFarmOS === 'function' && document.getElementById('screen-sync')) {
-      if (statusEl) statusEl.textContent = '⏳ Syncing Goats...';
-      await syncToFarmOS(true);
-      results.push('🐐 Goats: done');
+    if (typeof fetchAnimalUUIDs === 'function' && document.getElementById('screen-sync')) {
+      if (statusEl) statusEl.textContent = '⬇️ Pulling Goats...';
+      await fetchAnimalUUIDs(true);
+      results.push('🐐 Goats: pulled');
     }
   } catch(e) { results.push('🐐 Goats: failed — ' + e.message); }
 
-  // Stock
+  // Stock — pull
   try {
-    if (typeof sd_syncToFarmOS === 'function') {
-      if (statusEl) statusEl.textContent = '⏳ Syncing Stock...';
-      await sd_syncToFarmOS(true);
-      results.push('📦 Stock: done');
+    if (typeof refreshAssets === 'function') {
+      if (statusEl) statusEl.textContent = '⬇️ Pulling Stock...';
+      await refreshAssets(true);
+      results.push('📦 Stock: pulled');
     }
   } catch(e) { results.push('📦 Stock: failed — ' + e.message); }
 
-  // Birds
+  // Birds — pull
   try {
-    if (typeof bd_syncToFarmOS === 'function') {
-      if (statusEl) statusEl.textContent = '⏳ Syncing Birds...';
-      await bd_syncToFarmOS(true);
-      results.push('🐦 Birds: done');
+    if (typeof bd_fetchAssets === 'function') {
+      if (statusEl) statusEl.textContent = '⬇️ Pulling Birds...';
+      await bd_fetchAssets();
+      results.push('🐦 Birds: pulled');
     }
   } catch(e) { results.push('🐦 Birds: failed — ' + e.message); }
 
   var summary = results.join(' | ');
   if (statusEl) { statusEl.textContent = summary; statusEl.style.color = '#3a7'; }
-  showToast('Sync complete');
+  showToast('Pull complete — local is current');
 }
 
 // back button handled by shared module switcher popstate
@@ -8296,8 +8305,9 @@ function closeTopOverlay() {
 }
 
 window.addEventListener('popstate', function(e) {
+  history.pushState({ page: 'guard' }, ''); // re-arm: Android back moves up a level in-app, never exits unexpectedly
   // Any open popup/modal closes first — universal across modules
-  if (closeTopOverlay()) { history.pushState({ page: 'overlay' }, ''); return; }
+  if (closeTopOverlay()) { return; }
   const mod = localStorage.getItem(MODULE_KEY) || 'goats';
   // Back press while in shared Settings opened from a non-goats module
   const gdEl = document.getElementById('module-goatdesk');
