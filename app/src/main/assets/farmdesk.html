@@ -1153,7 +1153,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- LOG MODAL -->
 <div id="bd-log-modal" class="bd-modal" onclick="bd_closeLogModalOverlay()">
-  <div class="bd-modal-box" onclick="return false">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-log-modal-title">Log</h3>
     <label>Log Type</label>
     <select id="bd-log-type" onchange="bd_renderLogFields()">
@@ -1180,7 +1180,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- ADD/EDIT BIRD MODAL -->
 <div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
-  <div class="bd-modal-box" onclick="return false">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-bird-modal-title">Add Bird</h3>
     <label>Tag / ID</label>
     <input id="bd-bird-tag" placeholder="Tag number or ID">
@@ -1222,7 +1222,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- FLOCK MANAGER MODAL -->
 <div id="bd-flock-modal" class="bd-modal" onclick="bd_closeFlockModalOverlay()">
-  <div class="bd-modal-box" onclick="return false">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3>Flock &amp; Nest Box Manager</h3>
     <div id="bd-flock-list"></div>
     <div class="box" style="margin-top:10px;">
@@ -1239,7 +1239,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- SPECIES MANAGER MODAL -->
 <div id="bd-species-modal" class="bd-modal" onclick="bd_closeSpeciesModalOverlay()">
-  <div class="bd-modal-box" onclick="return false">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3>Species &amp; Breed Manager</h3>
     <div id="bd-species-list"></div>
     <button class="wide secondary" onclick="bd_closeSpeciesModal()" style="margin-top:8px;">Close</button>
@@ -1248,7 +1248,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- CONFIRM MODAL -->
 <div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModalOverlay()">
-  <div class="bd-modal-box" onclick="return false">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-confirm-title">Confirm</h3>
     <div id="bd-confirm-body"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -1260,7 +1260,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 
 <!-- EDIT LOG MODAL -->
 <div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModalOverlay()">
-  <div class="bd-modal-box" onclick="return false">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-edit-title">Edit Log</h3>
     <div id="bd-edit-fields"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
@@ -1314,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "v1781660714"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "v1781670359"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
