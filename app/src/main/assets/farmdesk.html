@@ -334,6 +334,9 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 .bd-bottom-nav button { flex:1; margin:0; padding:12px 4px; font-size:13px; border-radius:0; background:transparent; color:#888; border-right:1px solid #222; }
 .bd-bottom-nav button.active { color:#3a7; border-top:2px solid #3a7; }
 .bd-bottom-nav button:last-child { border-right:none; }
+.gd-bottom-nav button { flex:1; margin:0; padding:12px 4px; font-size:13px; border-radius:0; background:transparent; color:#888; border-right:1px solid #222; }
+.gd-bottom-nav button.active { color:#3a7; border-top:2px solid #3a7; }
+.gd-bottom-nav button:last-child { border-right:none; }
 #bd-loading { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:400; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:#fff; font-size:18px; }
 #bd-loading.active { display:flex; }
 .bd-modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:500; overflow-y:auto; padding:20px; }
@@ -382,7 +385,7 @@ header > div:last-child { min-width: 0; }
 <div id="module-goatdesk">
 
 
-<!-- ===== HOME ===== -->
+<!-- ===== HOME (LOG TAB) ===== -->
 <div id="screen-home" class="screen active">
   <div class="box">
     <div class="nav-bar">
@@ -395,18 +398,9 @@ header > div:last-child { min-width: 0; }
       <button onclick="startFlow('birth')">🐐🍼 Birth</button>
       <button onclick="startFlow('activity')">📝 Activity</button>
     </div>
-    <div class="nav-bar">
+    <div class="nav-bar" style="margin-top:6px;">
       <button onclick="startFlow('wv')" class="secondary">Weight + Vitals</button>
       <button onclick="startFlow('wvm')" class="secondary">Weight + Vitals + Med</button>
-    </div>
-    <div class="nav-bar">
-      <button onclick="show('history')" class="secondary">📋 History</button>
-      <button onclick="show('settings')" class="secondary">⚙️ Settings</button>
-      <button onclick="show('animals')" class="secondary">🐐 Animals</button>
-      <button onclick="show('scheduler')" class="secondary">📅 Scheduler</button>
-      <button id="syncBtn" onclick="show('sync')" class="secondary">🔄 FarmOS Sync</button>
-      <button onclick="show('standalone')" class="secondary">📦 Data</button>
-      <button onclick="show('help')" class="secondary">❓ Help</button>
     </div>
   </div>
 
@@ -452,8 +446,7 @@ header > div:last-child { min-width: 0; }
 <!-- ===== HISTORY ===== -->
 <div id="screen-history" class="screen">
   <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
-    <h3 style="margin:10px 0 6px;">History</h3>
+    <h3 style="margin:4px 0 10px;">History</h3>
 
     <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Filter logs to one animal, or leave as All Animals to see everything.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterGoat"><option value="">All Animals</option></select>
@@ -497,8 +490,7 @@ header > div:last-child { min-width: 0; }
 <!-- ===== SCHEDULER ===== -->
 <div id="screen-scheduler" class="screen">
   <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
-    <h3 style="margin:10px 0 4px;">📅 Task Scheduler</h3>
+    <h3 style="margin:4px 0 4px;">📅 Task Scheduler</h3>
     <p style="color:#888;font-size:13px;margin:0 0 8px;">Create pending tasks for future work. Select multiple animals to create one task each.</p>
   </div>
 
@@ -539,8 +531,7 @@ header > div:last-child { min-width: 0; }
 <!-- ===== ANIMALS ===== -->
 <div id="screen-animals" class="screen">
   <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
-    <h3 style="margin:10px 0 6px;">🐐 Animals</h3>
+    <h3 style="margin:4px 0 6px;">🐐 Animals</h3>
   </div>
 
   <div class="box">
@@ -577,6 +568,14 @@ header > div:last-child { min-width: 0; }
     <div id="animalsExcludedList"></div>
   </div>
 </div>
+
+<nav class="bottom-nav gd-bottom-nav">
+  <button id="gd-nav-home"      class="active" onclick="show('home')">📋<br>Log</button>
+  <button id="gd-nav-scheduler"            onclick="show('scheduler')">📅<br>Scheduler</button>
+  <button id="gd-nav-history"              onclick="show('history')">🗒️<br>History</button>
+  <button id="gd-nav-animals"              onclick="show('animals')">🐐<br>Animals</button>
+  <button id="gd-nav-sync"                 onclick="show('sync')">🔄<br>Sync</button>
+</nav>
 
 </div><!-- end module-goatdesk -->
 
@@ -1314,6 +1313,7 @@ const LS = {
   cfg:            "farmdesk_cfg",
   animalUUIDs:    "farmdesk_animalUUIDs",
   goatTypeUUID:   "farmdesk_goatTypeUUID",
+  flagSchema:     "farmdesk_flagSchema",
   profiles:       "farmdesk_animal_profiles",
   configLogUUID:  "farmdesk_configLogUUID",
   lastSync:       "farmdesk_lastSync",
@@ -1326,7 +1326,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781802172"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781805242"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1439,6 +1439,9 @@ function show(id) {
     if (id === 'settings') { renderSettings(); }
     if (id === 'sync') {
       if (localStorage.getItem(LS.standalone) === '1') { show('standalone'); return; }
+      // Highlight sync nav button before leaving module
+      document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
+      var sn = document.getElementById('gd-nav-sync'); if (sn) sn.classList.add('active');
       renderSync();
     }
     if (id === 'standalone') { renderStandaloneScreen(); }
@@ -1450,13 +1453,14 @@ function show(id) {
   const screenEl = document.getElementById("screen-"+id);
   if (screenEl) screenEl.classList.add("active");
   if (id !== "home") history.pushState({ page: id }, "");
+  // Update bottom nav active state
+  document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
+  const navMap = { home: 'gd-nav-home', history: 'gd-nav-history', animals: 'gd-nav-animals', scheduler: 'gd-nav-scheduler' };
+  const activeBtn = document.getElementById(navMap[id]);
+  if (activeBtn) activeBtn.classList.add('active');
   // Reset session dose rate when leaving entry screen
   if (id !== "entry") sessionDoseRate = null;
-  if (id === "home") {
-    renderRecent();
-    var syncBtn = document.getElementById("syncBtn");
-    if (syncBtn) syncBtn.textContent = localStorage.getItem(LS.standalone) === "1" ? "📦 Standalone Data" : "🔄 FarmOS Sync";
-  }
+  if (id === "home") { renderRecent(); }
   if (id === "history") { renderHistory(); }
   if (id === "animals") { renderAnimalsScreen(); }
   if (id === "scheduler") { renderScheduler(); }
@@ -3781,6 +3785,48 @@ function animalDetailLine(name) {
   return [sex, animalAge(p.birthdate), p.breed || p.type].filter(Boolean).join(" \u00B7 ") || "Tap to log";
 }
 
+function flagBadgesHTML(flags, clickable, animalName) {
+  if (!flags || !flags.length) return '';
+  return flags.map(function(f) {
+    var label = f.replace(/_/g,' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+    var style = 'display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#5a3a00;color:#f90;margin:2px;';
+    if (clickable && animalName) {
+      return '<span style="' + style + 'cursor:pointer;" onclick="setAnimalFlag(' + JSON.stringify(animalName) + ',' + JSON.stringify(f) + ',false)">🚩 ' + label + ' ✕</span>';
+    }
+    return '<span style="' + style + '">🚩 ' + label + '</span>';
+  }).join('');
+}
+
+async function setAnimalFlag(name, flag, on) {
+  var p = animalProfiles[name];
+  if (!p) return;
+  var uuid = animalUUIDs[name];
+  if (!uuid) { showToast('⚠️ Sync first to get animal UUID'); return; }
+  var flags = Array.isArray(p.flags) ? p.flags.slice() : [];
+  if (on && !flags.includes(flag)) flags.push(flag);
+  if (!on) flags = flags.filter(function(f){ return f !== flag; });
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Not connected to farmOS'); return; }
+  try {
+    var token = await getToken(cfg);
+    var res = await fetch(apiUrl('/api/asset/animal/' + uuid), {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+      body: JSON.stringify({ data: { type: 'asset--animal', id: uuid, attributes: { flag: flags } } })
+    });
+    if (res.ok) {
+      p.flags = flags;
+      saveProfilesSafely();
+      openAnimalProfile(name); // re-render profile modal
+    } else {
+      var err = await res.text();
+      showToast('⚠️ Flag update failed: ' + res.status);
+    }
+  } catch(e) {
+    showToast('⚠️ ' + e.message);
+  }
+}
+
 function openAnimalProfile(name) {
   var p = animalProfiles[name] || {};
   var sex = p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : "\u2014";
@@ -3795,9 +3841,29 @@ function openAnimalProfile(name) {
         ? '<img data-photoid="' + p.photoId + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;background:#333;">'
         : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>');
   function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ""; }
+
+  // Build flags section — active flags (tappable to remove) + available flags to add
+  var activeFlags = Array.isArray(p.flags) ? p.flags : [];
+  var allFlags = JSON.parse(localStorage.getItem(LS.flagSchema) || '[]');
+  var inactiveFlags = allFlags.filter(function(f){ return !activeFlags.includes(f); });
+  var flagsHTML = '';
+  if (allFlags.length) {
+    flagsHTML = '<div style="margin:10px 0 4px;"><strong style="color:#9c9;">Flags:</strong></div>';
+    if (activeFlags.length) {
+      flagsHTML += '<div style="margin-bottom:4px;">' + flagBadgesHTML(activeFlags, true, name) + '</div>';
+    }
+    if (inactiveFlags.length) {
+      flagsHTML += '<div>' + inactiveFlags.map(function(f){
+        var label = f.replace(/_/g,' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+        return '<span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#333;color:#888;margin:2px;cursor:pointer;" onclick="setAnimalFlag(' + JSON.stringify(name) + ',' + JSON.stringify(f) + ',true)">+ ' + label + '</span>';
+      }).join('') + '</div>';
+    }
+  }
+
   body.innerHTML = img +
     row("Tag/ID", p.tag) + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
     row("Species", p.type) + row("Breed", p.breed) + row("Group", p.group) + row("Notes", p.notes) +
+    flagsHTML +
     '<div style="display:flex;gap:8px;margin-top:12px;">' +
     '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="flex:1;margin:0;">Log for ' + name + '</button>' +
     '<button onclick="editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
@@ -3849,6 +3915,7 @@ function saveAnimalProfile(name) {
     group:     document.getElementById("epGroup").value,
     notes:     document.getElementById("epNotes").value,
     tag:       document.getElementById("epTag").value,
+    flags:     p.flags || [],
     photo:     p.photo || null,
     photoId:   p.photoId || null,
     photoUrl:  p.photoUrl || null
@@ -3875,6 +3942,13 @@ function renderAnimalsScreen() {
     var wrap = document.createElement("div");
     wrap.innerHTML = assetCardHTML(prof.photo || null, g, animalDetailLine(g), "", prof.photoId || null);
     var card = wrap.firstElementChild;
+    // Flag badges
+    if (prof.flags && prof.flags.length) {
+      var flagDiv = document.createElement('div');
+      flagDiv.style.cssText = 'padding:0 10px 6px;';
+      flagDiv.innerHTML = flagBadgesHTML(prof.flags, false, null);
+      card.appendChild(flagDiv);
+    }
     card.onclick = function(){ openAnimalProfile(g); };
     var rm = document.createElement("button");
     rm.textContent = "✕ Remove";
@@ -4944,7 +5018,24 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) { el.style.color = "#888"; el.textContent = "Fetching config..."; }
     await pullConfig(token);
 
-    // ===== STEP 2: Fetch this module's animals =====
+    // ===== STEP 2: Fetch flag schema (once — cached) =====
+    // Fetches allowed flag values from farmOS JSON Schema so the app works
+    // on any instance regardless of what custom flags are configured.
+    try {
+      const schemaRes = await fetch(apiUrl('/api/schema/asset/animal'), { headers: authHeaders });
+      if (schemaRes.ok) {
+        const schema = await schemaRes.json();
+        const flagProp = schema?.properties?.flag || schema?.definitions?.flag;
+        let flagValues = [];
+        if (flagProp) {
+          // Try items.enum (array field) or enum directly
+          flagValues = (flagProp.items && flagProp.items.enum) || flagProp.enum || [];
+        }
+        if (flagValues.length) localStorage.setItem(LS.flagSchema, JSON.stringify(flagValues));
+      }
+    } catch(fe) { /* schema fetch is best-effort */ }
+
+    // ===== STEP 3: Fetch this module's animals =====
     // Each module only pulls its own kinds, matched against the farmOS
     // animal_type term: goats here; a bird module would list bird types.
     // Animals with NO type set are still included (never silently hide
@@ -4996,6 +5087,7 @@ async function fetchAnimalUUIDs(silent = false) {
         type:      typeName ? (typeName.charAt(0).toUpperCase()+typeName.slice(1)) : "",
         group:     a.attributes.group_name || "",
         notes:     ((a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || "").toString().replace(/<[^>]*>/g,"").trim(),
+        flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
         photoUrl:  imgId ? (typeNames[imgId] || null) : null,
         photo:     prevPhoto
       };
@@ -8379,6 +8471,9 @@ const MODULES = [
       document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
       const gdHome = document.getElementById('screen-home');
       if (gdHome) gdHome.classList.add('active');
+      document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
+      const gdNav = document.getElementById('gd-nav-home');
+      if (gdNav) gdNav.classList.add('active');
       renderRecent();
     } },
   { id: 'stock', label: '📦 Stock', title: '📦 FarmDesk',
