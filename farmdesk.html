@@ -1314,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781747666"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781748383"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7201,14 +7201,9 @@ function bd_updateSyncBadge() {
 
 // ===== AUTH =====
 function bd_saveCfg() {
-  // Credentials are managed solely in Goats → FarmOS Sync (shared farmdesk_cfg)
-  // This function is retained as a no-op to avoid errors from any remaining call sites
-  var url  = '';
-  var user = '';
-  var pass = '';
-  var cfg  = { url: url, user: user, pass: pass };
-  localStorage.setItem(BD_LS.cfg, JSON.stringify(cfg));
-  return cfg;
+  // Credentials managed solely in Goats → FarmOS Sync (shared farmdesk_cfg)
+  // True no-op — never writes to localStorage
+  return JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
 }
 
 async function bd_getToken(cfg) {
@@ -7402,7 +7397,6 @@ function bd_togglePass() {
 }
 
 async function bd_testConnection() {
-  bd_saveCfg();
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
   var el = document.getElementById('bd-test-result');
   if (!cfg.url || !cfg.user || !cfg.pass) { if (el) { el.textContent = 'Fill in all fields first'; el.style.color = '#c90'; } return; }
