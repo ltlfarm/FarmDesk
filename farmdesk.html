@@ -1325,7 +1325,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781746146"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781746505"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7402,8 +7402,8 @@ async function bd_testConnection() {
 }
 
 async function bd_fetchAssets() {
-  // Only call bd_saveCfg() if the sync screen inputs are visible and populated
-  // (avoids wiping saved credentials when called from syncAllModules)
+  // Only save cfg from DOM inputs if the bird sync screen inputs are visible and populated
+  // Prevents wiping saved credentials when called from syncAllModules()
   var urlInput = document.getElementById('bd-farmos-url');
   if (urlInput && urlInput.value.trim()) bd_saveCfg();
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
