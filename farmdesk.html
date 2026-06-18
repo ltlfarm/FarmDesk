@@ -1179,14 +1179,6 @@ header > div:last-child { min-width: 0; }
 </div>
 
 <!-- ADD/EDIT BIRD MODAL -->
-<!-- BIRD PROFILE MODAL -->
-<div id="bd-profile-modal" class="bd-modal" onclick="bd_closeBirdProfile()" style="display:none;">
-  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div id="bd-profile-modal-content"></div>
-    <button class="secondary wide" onclick="bd_closeBirdProfile()" style="margin-top:10px;">Close</button>
-  </div>
-</div>
-
 <div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
   <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-bird-modal-title">Add Bird</h3>
@@ -7631,32 +7623,49 @@ function bd_renderBirds() {
 }
 
 // ===== BIRD PROFILE =====
-// Uses dedicated profile modal — does NOT touch the edit modal
 function bd_openBirdProfile(id) {
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
   if (!bird) return;
-  var modal = document.getElementById('bd-profile-modal');
-  if (!modal) return;
+  var modal = document.getElementById('bd-bird-modal');
+  var title = document.getElementById('bd-bird-modal-title');
+  var box   = modal ? modal.querySelector('.bd-modal-box') : null;
+  if (!modal || !box) return;
   var sexLabel = bird.sex === 'F' ? 'Female' : bird.sex === 'M' ? 'Male' : '';
   var photoHTML = bird.photo
-    ? '<img src="' + bird.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:12px;cursor:zoom-in;" onclick="bd_openPhotoViewer(this.src)">'
-    : '<div style="width:100%;height:80px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:12px;">' + bd_speciesIcon(bird.species) + '</div>';
-  function row(k,v){ return v ? '<div style="margin:5px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
-  document.getElementById('bd-profile-modal-content').innerHTML =
-    '<h3 style="margin:0 0 10px;color:#3a7;">' + (bird.name || bird.tag || 'Bird') + '</h3>' +
-    photoHTML +
+    ? '<img src="' + bird.photo + '" style="width:100%;max-height:220px;border-radius:8px;object-fit:cover;margin-bottom:10px;cursor:zoom-in;" onclick="bd_openPhotoViewer(this.src)">'
+    : '<div style="width:100%;height:100px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">' + bd_speciesIcon(bird.species) + '</div>';
+  function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
+  title.textContent = bird.name || bird.tag || 'Bird';
+  var profileDiv = document.getElementById('bd-bird-profile-view');
+  if (!profileDiv) {
+    profileDiv = document.createElement('div');
+    profileDiv.id = 'bd-bird-profile-view';
+    box.insertBefore(profileDiv, box.querySelector('label'));
+  }
+  box.querySelectorAll('label, input, select').forEach(function(el){ el.style.display = 'none'; });
+  var saveRow = box.querySelector('div[style*="margin-top:14px"]');
+  if (saveRow) saveRow.style.display = 'none';
+  profileDiv.style.display = '';
+  profileDiv.innerHTML = photoHTML +
     row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
     row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
     '<div style="display:flex;gap:8px;margin-top:14px;">' +
-      '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openLogSheet(b);" style="flex:1;margin:0;">&#x1F4CB; Log</button>' +
-      '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openEditBird(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">&#x270F;&#xFE0F; Edit</button>' +
+      '<button onclick="bd_closeBirdProfile();bd_openLogSheet(this.dataset.bid)" data-bid="' + id + '" style="flex:1;margin:0;">📋 Log for ' + (bird.name || bird.tag || 'Bird') + '</button>' +
+      '<button onclick="bd_closeBirdProfile();bd_openEditBird(this.dataset.bid)" data-bid="' + id + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
     '</div>';
-  modal.style.display = 'flex';
+  modal.style.display = 'block';
 }
 
 function bd_closeBirdProfile() {
-  var modal = document.getElementById('bd-profile-modal');
-  if (modal) modal.style.display = 'none';
+  var modal = document.getElementById('bd-bird-modal');
+  var box   = modal ? modal.querySelector('.bd-modal-box') : null;
+  if (!box) return;
+  var profileDiv = document.getElementById('bd-bird-profile-view');
+  if (profileDiv) { profileDiv.style.display = 'none'; profileDiv.innerHTML = ''; }
+  box.querySelectorAll('label, input, select').forEach(function(el){ el.style.display = ''; });
+  var saveRow = box.querySelector('div[style*="margin-top:14px"]');
+  if (saveRow) saveRow.style.display = '';
+  modal.style.display = 'none';
 }
 
 // ===== LOG MODAL =====
@@ -8380,7 +8389,7 @@ function closeTopOverlay() {
   if (em && em.style.display === 'block') { closeEdit(); return true; }
   var sm = document.getElementById('sd-editModal');
   if (sm && sm.style.display === 'block') { sd_closeEdit(); return true; }
-  var bdModals = ['bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
+  var bdModals = ['bd-profile-modal','bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
   for (var i = 0; i < bdModals.length; i++) {
     var bm = document.getElementById(bdModals[i]);
     if (bm && bm.style.display === 'block') { bm.style.display = 'none'; return true; }
