@@ -1313,6 +1313,7 @@ const LS = {
   formulas:       "farmdesk_formulas",
   cfg:            "farmdesk_cfg",
   animalUUIDs:    "farmdesk_animalUUIDs",
+  goatTypeUUID:   "farmdesk_goatTypeUUID",
   profiles:       "farmdesk_animal_profiles",
   configLogUUID:  "farmdesk_configLogUUID",
   lastSync:       "farmdesk_lastSync",
@@ -1325,7 +1326,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781765494"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781802172"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1392,7 +1393,19 @@ let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // k
   }
 })();
 
-let lastMed   = localStorage.getItem(LS.lastMed)   || "";
+// ===== ONE-TIME MIGRATION: birth log kids string → array =====
+(function migrateBirthKids() {
+  let changed = false;
+  logs = logs.map(l => {
+    if (l.type === 'birth' && l.data && typeof l.data.kids === 'string') {
+      l.data.kids = l.data.kids.split(',').map(s => s.trim()).filter(Boolean).map(name => ({ name, sex: '', tag: '' }));
+      if (!l.data.sire) l.data.sire = '';
+      changed = true;
+    }
+    return l;
+  });
+  if (changed) localStorage.setItem(LS.logs, JSON.stringify(logs));
+})();
 let lastRoute = localStorage.getItem(LS.lastRoute) || "Oral";
 
 let formulas = JSON.parse(localStorage.getItem(LS.formulas) || "null") || {
@@ -1832,11 +1845,19 @@ function renderStep() {
 
   if (t === "birth") {
     box.innerHTML = `
-      <label>Kids (comma separated)</label>
-      <input id="f_kids" placeholder="e.g. Daisy, Duke">
+      <label>Kids</label>
+      <div id="f_kidRows"></div>
+      <button type="button" onclick="addBirthKidRow()" style="width:100%;background:#333;font-size:14px;margin-top:4px;">➕ Add Kid</button>
 
-      <label>Dam (mother)</label>
+      <label style="margin-top:10px;">Dam (mother)</label>
       <select id="f_dam">
+        <option value="">— select —</option>
+        ${goats.map(g => `<option>${g}</option>`).join("")}
+      </select>
+
+      <label>Sire (father)</label>
+      <select id="f_sire">
+        <option value="">— unknown —</option>
         ${goats.map(g => `<option>${g}</option>`).join("")}
       </select>
 
@@ -1862,6 +1883,7 @@ function renderStep() {
       <input type="file" id="f_birthfile" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleFileAttach(this)">
       <div id="photoPreview" style="margin-top:8px;"></div>
     `;
+    addBirthKidRow(); // start with one empty row
   }
 
   if (t === "activity") {
@@ -2539,7 +2561,8 @@ function saveStep() {
 
   if (t === "birth") {
     entry.data = {
-      kids:  document.getElementById("f_kids")?.value || "",
+      kids:  getBirthKids(),
+      sire:  document.getElementById("f_sire")?.value || "",
       dam:   document.getElementById("f_dam")?.value || "",
       type:  document.getElementById("f_birthtype")?.value || "Natural",
       notes: document.getElementById("f_birthnotes")?.value || "",
@@ -2604,6 +2627,40 @@ function saveStep() {
   return true;
 }
 
+function addBirthKidRow(kid, editMode) {
+  var containerId = editMode ? 'ed_kidRows' : 'f_kidRows';
+  var container = document.getElementById(containerId);
+  if (!container) return;
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center;';
+  row.innerHTML = `
+    <input placeholder="Name" value="${(kid&&kid.name)||''}" style="flex:2;margin:0;" data-kid-name>
+    <select style="flex:1;margin:0;" data-kid-sex>
+      <option value="">Sex</option>
+      <option value="M"${kid&&kid.sex==='M'?' selected':''}>M</option>
+      <option value="F"${kid&&kid.sex==='F'?' selected':''}>F</option>
+      <option value="W"${kid&&kid.sex==='W'?' selected':''}>W</option>
+    </select>
+    <input placeholder="Tag" value="${(kid&&kid.tag)||''}" style="flex:1;margin:0;" data-kid-tag>
+    <button type="button" onclick="this.parentNode.remove()" style="margin:0;padding:8px 10px;background:#8b0000;font-size:13px;flex:0;">✕</button>
+  `;
+  container.appendChild(row);
+}
+
+function getBirthKids(editMode) {
+  var containerId = editMode ? 'ed_kidRows' : 'f_kidRows';
+  var rows = document.querySelectorAll('#' + containerId + ' > div');
+  var kids = [];
+  rows.forEach(function(row) {
+    var name = (row.querySelector('[data-kid-name]').value || '').trim();
+    var sex  = row.querySelector('[data-kid-sex]').value || '';
+    var tag  = (row.querySelector('[data-kid-tag]').value || '').trim();
+    kids.push({ name: name, sex: sex, tag: tag });
+  });
+  return kids;
+}
+
+
 // Save current step and go home — used by plain Save button and task form saves
 function saveAndHome() {
   if (!saveStep()) return;
@@ -2660,7 +2717,13 @@ function formatLog(l) {
     const obsText  = obsTitle && obsNote && obsNote.startsWith(obsTitle) ? obsTitle : (obsTitle && obsNote ? obsTitle + ": " + obsNote : obsTitle || obsNote);
     out = obsText + (l.data.sev ? " (" + l.data.sev + ")" : "");
   }
-  else if (l.type === "birth") out = "Kids: " + (l.data.kids || "?") + " — Dam: " + (l.data.dam || "");
+  else if (l.type === "birth") {
+    var kidNames = Array.isArray(l.data.kids)
+      ? l.data.kids.map(function(k){ return k.name || '?'; }).filter(Boolean).join(', ') || '?'
+      : (l.data.kids || '?');
+    out = "Kids: " + kidNames + " — Dam: " + (l.data.dam || "");
+    if (l.data.sire) out += " — Sire: " + l.data.sire;
+  }
   else if (l.type === "activity") out = (l.data.title || "") + (l.data.desc ? " — " + l.data.desc : "");
   else out = JSON.stringify(l.data);
   // Append notes only if present and not a duplicate of the main output
@@ -4904,6 +4967,12 @@ async function fetchAnimalUUIDs(silent = false) {
 
     animalUUIDs = {};
     const archivedNames = [];
+    // Capture the goat animal_type UUID for use when creating kid assets on birth
+    Object.entries(typeNames).forEach(([uuid, name]) => {
+      if (MODULE_ANIMAL_TYPES.includes(name)) {
+        localStorage.setItem(LS.goatTypeUUID, uuid);
+      }
+    });
 
     animalRows.forEach(a => {
       const name = (a.attributes.name || "").trim();
@@ -5256,7 +5325,7 @@ function buildFarmOSPayload(l) {
         timestamp: String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000)),
         status:    l.status === "pending" ? "pending" : "done",
         notes: {
-          value:  formatLog(l) + (l.loggedBy ? `\nLogged by: ${l.loggedBy}` : ""),
+          value:  formatLog(l) + (l.loggedBy ? `\nLogged by: ${l.loggedBy}` : "") + (l.type === 'birth' && l.data.sire ? `\nSire: ${l.data.sire}` : ""),
           format: "default"
         }
       }
@@ -5364,8 +5433,62 @@ async function syncToFarmOS() {
             }
           }
 
-          // Reconcile to farmOS identity: stamp the returned UUID locally so the
-          // next pull matches this log (no duplicate) and it is never re-pushed.
+          // ===== KID ASSET CREATION (birth logs only) =====
+          if (l.type === 'birth' && logUUID && Array.isArray(l.data.kids)) {
+            const goatTypeUUID = localStorage.getItem(LS.goatTypeUUID);
+            const birthTs = String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000));
+            const kidUUIDs = [];
+            for (const kid of l.data.kids) {
+              if (!kid.name) continue;
+              try {
+                const kidPayload = { data: {
+                  type: 'asset--animal',
+                  attributes: {
+                    name: kid.name,
+                    status: 'active',
+                    ...(kid.sex ? { sex: kid.sex.toLowerCase() === 'm' ? 'male' : kid.sex.toLowerCase() === 'f' ? 'female' : kid.sex.toLowerCase() } : {}),
+                    ...(kid.tag ? { id_tag: [{ id: kid.tag, type: 'tag' }] } : {}),
+                    birthdate: new Date(parseInt(birthTs) * 1000).toISOString().slice(0, 10)
+                  },
+                  ...(goatTypeUUID ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeUUID } } } } : {})
+                }};
+                const kidRes = await fetch(apiUrl('/api/asset/animal'), { method: 'POST', headers, body: JSON.stringify(kidPayload) });
+                if (kidRes.ok) {
+                  const kidData = await kidRes.json();
+                  const kidUUID = kidData?.data?.id;
+                  if (kidUUID) {
+                    kidUUIDs.push(kidUUID);
+                    animalUUIDs[kid.name] = kidUUID;
+                    if (!goats.includes(kid.name)) goats.push(kid.name);
+                    logEl.textContent += `  🐐 Created: ${kid.name}${kid.sex ? ' ('+kid.sex+')' : ''}${kid.tag ? ' #'+kid.tag : ''}\n`;
+                  }
+                } else {
+                  const err = await kidRes.text();
+                  logEl.textContent += `  ⚠️ Kid asset failed (${kid.name}): ${kidRes.status} ${err.slice(0,60)}\n`;
+                }
+              } catch(ke) {
+                logEl.textContent += `  ⚠️ Kid asset error (${kid.name}): ${ke.message}\n`;
+              }
+            }
+            // PATCH birth log to link kid assets
+            if (kidUUIDs.length > 0) {
+              try {
+                const patchPayload = { data: {
+                  type: 'log--birth',
+                  id: logUUID,
+                  relationships: {
+                    asset: { data: kidUUIDs.map(id => ({ type: 'asset--animal', id })) }
+                  }
+                }};
+                const patchRes = await fetch(apiUrl('/api/log/birth/' + logUUID), { method: 'PATCH', headers, body: JSON.stringify(patchPayload) });
+                if (!patchRes.ok) logEl.textContent += `  ⚠️ Birth log link failed: ${patchRes.status}\n`;
+                else { localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs)); localStorage.setItem(LS.goats, JSON.stringify(goats)); }
+              } catch(pe) {
+                logEl.textContent += `  ⚠️ Birth log link error: ${pe.message}\n`;
+              }
+            }
+          }
+          // ===== END KID ASSET CREATION =====
           if (logUUID) { l.id = logUUID; l.fromFarmOS = true; l.farmosBundle = "log--" + farmosType; }
           l.synced = true;
           ok++;
@@ -5624,16 +5747,23 @@ function openEdit(id) {
     `;
   }
   if (l.type === "birth") {
+    const editKids = Array.isArray(l.data.kids) ? l.data.kids : [];
     html += `
-      <label>Kids</label><input id="ed_kids" value="${l.data.kids||""}">
+      <label>Kids</label>
+      <div id="ed_kidRows"></div>
+      <button type="button" onclick="addBirthKidRow(null, true)" style="width:100%;background:#333;font-size:14px;margin-top:4px;">➕ Add Kid</button>
       <label>Dam</label>
-      <select id="ed_dam">${goats.map(g=>`<option${g===l.data.dam?" selected":""}>${g}</option>`).join("")}</select>
+      <select id="ed_dam"><option value="">— select —</option>${goats.map(g=>`<option${g===l.data.dam?" selected":""}>${g}</option>`).join("")}</select>
+      <label>Sire</label>
+      <select id="ed_sire"><option value="">— unknown —</option>${goats.map(g=>`<option${g===l.data.sire?" selected":""}>${g}</option>`).join("")}</select>
       <label>Birth type</label>
       <select id="ed_birthtype">
         ${["Natural","Assisted","C-section"].map(s=>`<option${s===l.data.type?" selected":""}>${s}</option>`).join("")}
       </select>
       <label>Notes</label><textarea id="ed_birthnotes" rows="2">${l.data.notes||""}</textarea>
     `;
+    // Populate kid rows after render
+    setTimeout(function() { editKids.forEach(function(k){ addBirthKidRow(k, true); }); if (!editKids.length) addBirthKidRow(null, true); }, 0);
   }
   if (l.type === "activity") {
     const prevTitles = [...new Set(
@@ -5716,7 +5846,8 @@ function saveEdit() {
     l.data.sev   = document.getElementById("ed_sev").value;
   }
   if (l.type === "birth") {
-    l.data.kids  = document.getElementById("ed_kids").value;
+    l.data.kids  = getBirthKids(true);
+    l.data.sire  = document.getElementById("ed_sire").value;
     l.data.dam   = document.getElementById("ed_dam").value;
     l.data.type  = document.getElementById("ed_birthtype").value;
     l.data.notes = document.getElementById("ed_birthnotes").value;
