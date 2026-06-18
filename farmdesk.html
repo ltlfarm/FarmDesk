@@ -1314,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781751524"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781752309"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4384,25 +4384,24 @@ function clearLogs() {
   saveBtn.textContent = "🗑️ Confirm Clear All";
   saveBtn.style.background = "#8b0000";
   saveBtn.onclick = () => {
-    // Goat data
     logs = [];
     localStorage.setItem(LS.logs, JSON.stringify(logs));
-    // Clear goat photo keys
     Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
-    // Stock data
     localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
     assets  = [];
     pending = [];
     adjHistory = [];
-    // Bird data — all of it including roster
     localStorage.removeItem(BD_LS.assets);
     localStorage.removeItem(BD_LS.history);
     localStorage.removeItem(BD_LS.pending);
     localStorage.removeItem(BD_LS.flocks);
     localStorage.removeItem(BD_LS.lastSync);
-    bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
+    bd_birds = [];
+    bd_history = [];
+    bd_pending = [];
+    bd_flocks = [];
     bd_updateSyncBadge();
     bd_renderBirds();
     bd_renderHistory();
@@ -4602,8 +4601,6 @@ function logout() {
     localStorage.removeItem(BD_LS.lastSync);
     localStorage.removeItem(BD_LS.excluded);
     localStorage.removeItem(BD_LS.flocks);
-    localStorage.removeItem(SD_LS.thresholds);
-    Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
     logs = []; weights = {}; goats = [...DEFAULT_ANIMALS]; excludedAnimals = [];
     assets = []; pending = []; adjHistory = [];
     bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = []; bd_excluded = [];
@@ -7406,11 +7403,7 @@ function bd_toggleExcludeIdx(i) {
   bd_renderBirds();
 }
 
-function bd_togglePass() {
-  var p = document.getElementById('bd-farmos-pass'); var btn = document.getElementById('bd-showPassBtn');
-  p.type = p.type === 'password' ? 'text' : 'password';
-  btn.textContent = p.type === 'password' ? '\uD83D\uDC41' : '\uD83D\uDE48';
-}
+
 
 async function bd_testConnection() {
   bd_saveCfg();
@@ -7657,6 +7650,7 @@ function bd_openBirdProfile(id) {
   var saveRow = box.querySelector('div[style*="margin-top:14px"]');
   if (saveRow) saveRow.style.display = 'none';
   profileDiv.style.display = '';
+  profileDiv.onclick = function(e) { e.stopPropagation(); };
   profileDiv.innerHTML = photoHTML +
     row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
     row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
@@ -8195,9 +8189,10 @@ function bd_clearAllData() {
     '<p style="color:#ccc;">This wipes all local bird data, logs, and pending syncs.</p><p style="color:#c66;">Cannot be undone.</p>',
     function() {
       [BD_LS.assets, BD_LS.history, BD_LS.pending, BD_LS.lastSync, BD_LS.excluded, BD_LS.flocks, BD_LS.species].forEach(function(k) { localStorage.removeItem(k); });
-      bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = []; bd_excluded = [];
-      bd_speciesCfg = JSON.parse(localStorage.getItem(BD_LS.species) || 'null') || { Chicken: [], Duck: [], Goose: [], Other: [] };
-      bd_updateSyncBadge(); bd_renderBirds(); bd_renderHistory();
+      bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
+      bd_excluded = [];
+      bd_speciesCfg = { Chicken: ["Rhode Island Red","Leghorn","Barred Rock","Buff Orpington","Australorp","Silkie"], Duck: ["Pekin","Khaki Campbell","Rouen","Muscovy","Indian Runner"], Goose: ["Toulouse","Embden","Chinese","African","Pilgrim"], Other: [] };
+      bd_updateSyncBadge(); bd_renderBirds();
       bd_toast('Bird data cleared');
     }
   );
