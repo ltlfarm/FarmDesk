@@ -508,9 +508,21 @@ header > div:last-child { min-width: 0; }
       <div class="set-sub">
         <strong>🔗 FarmOS Connection</strong>
         <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
-        <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
-        <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
-        <button onclick="syncAllModules()" class="wide" style="margin-top:8px;">⬇️ Sync All (Pull from farmOS)</button>
+        <label>FarmOS URL</label>
+        <input id="farmosUrl" placeholder="https://yourfarm.farmos.net" type="url" oninput="saveFarmOSCfg()">
+        <div id="recentUrlContainer" style="margin-top:4px;"></div>
+        <label>Username</label>
+        <input id="farmosUser" placeholder="farmOS username" autocomplete="username" oninput="saveFarmOSCfg()">
+        <label>Password</label>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input id="farmosPass" placeholder="farmOS password" type="password" autocomplete="current-password" style="flex:1;margin-top:0;" oninput="saveFarmOSCfg()">
+          <button onclick="togglePass()" id="showPassBtn" style="margin:0;padding:10px 14px;font-size:16px;background:#555;">👁</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button onclick="testFarmOS()" style="flex:1;margin:0;">Test Connection</button>
+        </div>
+        <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
+        <button onclick="syncAllModules()" class="wide" style="margin-top:10px;">⬇️ Sync All (Pull from farmOS)</button>
         <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
 
@@ -854,30 +866,13 @@ header > div:last-child { min-width: 0; }
     <h3 style="margin:10px 0 6px;">🔄 FarmOS Sync</h3>
   </div>
 
-  <div class="box" id="connectionBox">
-    <strong>Connection</strong>
-    <label>FarmOS URL</label>
-    <input id="farmosUrl" placeholder="https://yourfarm.farmos.net" type="url">
-    <div id="recentUrlContainer" style="margin-top:4px;"></div>
-    <label>Username</label>
-    <input id="farmosUser" placeholder="farmOS username" autocomplete="username">
-    <label>Password</label>
-    <div style="display:flex;gap:6px;margin-top:4px;">
-      <input id="farmosPass" placeholder="farmOS password" type="password" autocomplete="current-password" style="flex:1;margin-top:0;">
-      <button onclick="togglePass()" id="showPassBtn" style="margin:0;padding:10px 14px;font-size:16px;background:#555;">👁</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <button onclick="testFarmOS()" style="flex:1;margin:0;">Test Connection</button>
-      <button onclick="fetchAnimalUUIDs()" class="secondary" style="flex:1;margin:0;">🔄 Fetch Logs</button>
-    </div>
-    <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
-  </div>
-
-
   <div class="box">
     <strong>Sync</strong>
+    <div id="connStatusLine2" style="font-size:13px;color:#888;margin-bottom:8px;"></div>
     <p style="color:#888;font-size:13px;">Unsynced local logs: <span id="unsyncedCount">0</span></p>
-    <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to FarmOS</button>
+    <button onclick="fetchAnimalUUIDs()" class="wide secondary" style="margin-bottom:8px;">⬇️ Fetch Logs from farmOS</button>
+    <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to farmOS</button>
+    <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
     <div id="syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
   </div>
 
@@ -3210,6 +3205,13 @@ function renderSettings() {
   if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
   const connLine = document.getElementById("connStatusLine");
   if (connLine) connLine.textContent = cfg.url ? "✅ Connected: " + cfg.url : "❌ Not configured";
+  if (cfg.url  && document.getElementById("farmosUrl"))  document.getElementById("farmosUrl").value  = cfg.url;
+  if (cfg.user && document.getElementById("farmosUser")) document.getElementById("farmosUser").value = cfg.user;
+  if (cfg.pass && document.getElementById("farmosPass")) document.getElementById("farmosPass").value = cfg.pass;
+  renderRecentUrlList();
+  const urls = getRecentUrls();
+  const urlEl = document.getElementById("farmosUrl");
+  if (urlEl && !cfg.url && urls.length === 1) urlEl.value = urls[0];
   const verLine = document.getElementById("appVersionLine");
   if (verLine) verLine.textContent = "FarmDesk version: " + APP_VERSION;
   // Logo preview
@@ -4386,24 +4388,16 @@ function clearLogs() {
   saveBtn.onclick = () => {
     logs = [];
     localStorage.setItem(LS.logs, JSON.stringify(logs));
-    Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
     localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
     assets  = [];
     pending = [];
-    adjHistory = [];
-    localStorage.removeItem(BD_LS.assets);
-    localStorage.removeItem(BD_LS.history);
-    localStorage.removeItem(BD_LS.pending);
-    localStorage.removeItem(BD_LS.flocks);
-    localStorage.removeItem(BD_LS.lastSync);
-    bd_birds = [];
+    localStorage.setItem(BD_LS.history, JSON.stringify([]));
+    localStorage.setItem(BD_LS.pending, JSON.stringify([]));
     bd_history = [];
     bd_pending = [];
-    bd_flocks = [];
     bd_updateSyncBadge();
-    bd_renderBirds();
     bd_renderHistory();
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
@@ -4462,21 +4456,11 @@ function togglePass() {
 
 function renderSync() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
-  if (cfg.url)  document.getElementById("farmosUrl").value  = cfg.url;
-  if (cfg.user) document.getElementById("farmosUser").value = cfg.user;
-  if (cfg.pass) document.getElementById("farmosPass").value = cfg.pass;
-  renderRecentUrlList();
-  // Auto-fill if only one saved URL
-  const urls = getRecentUrls();
-  const urlEl = document.getElementById("farmosUrl");
-  if (urlEl && !cfg.url && urls.length === 1) urlEl.value = urls[0];
-
+  const connLine2 = document.getElementById("connStatusLine2");
+  if (connLine2) connLine2.textContent = cfg.url ? "✅ " + cfg.url : "❌ Not configured — set in ⚙️ Settings";
   const unsynced = logs.filter(l => !l.synced).length;
   document.getElementById("unsyncedCount").textContent = unsynced;
   document.getElementById("syncLog").textContent = "";
-
-  const userInfo = document.getElementById("settingsUserInfo");
-  if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
 }
 
 function saveFarmOSCfg() {
@@ -7403,7 +7387,11 @@ function bd_toggleExcludeIdx(i) {
   bd_renderBirds();
 }
 
-
+function bd_togglePass() {
+  var p = document.getElementById('bd-farmos-pass'); var btn = document.getElementById('bd-showPassBtn');
+  p.type = p.type === 'password' ? 'text' : 'password';
+  btn.textContent = p.type === 'password' ? '\uD83D\uDC41' : '\uD83D\uDE48';
+}
 
 async function bd_testConnection() {
   bd_saveCfg();
@@ -7650,7 +7638,6 @@ function bd_openBirdProfile(id) {
   var saveRow = box.querySelector('div[style*="margin-top:14px"]');
   if (saveRow) saveRow.style.display = 'none';
   profileDiv.style.display = '';
-  profileDiv.onclick = function(e) { e.stopPropagation(); };
   profileDiv.innerHTML = photoHTML +
     row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
     row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
