@@ -361,7 +361,10 @@ header > div:last-child { min-width: 0; }
 <header>
   <div style="display:flex;align-items:center;gap:10px;">
     <img id="farmLogo" src="" alt="" style="height:40px;width:auto;display:none;border-radius:4px;">
-    <span id="headerTitle">🐐 FarmDesk</span>
+    <div style="display:flex;flex-direction:column;gap:1px;">
+      <span id="headerTitle">🐐 FarmDesk</span>
+      <small id="farmNameSubtitle" style="color:#888;font-size:12px;display:none;"></small>
+    </div>
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
     <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
@@ -491,6 +494,96 @@ header > div:last-child { min-width: 0; }
   <div id="historyLogs"></div>
 </div>
 
+<!-- ===== SCHEDULER ===== -->
+<div id="screen-scheduler" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="show('home')">← Home</button>
+    <h3 style="margin:10px 0 4px;">📅 Task Scheduler</h3>
+    <p style="color:#888;font-size:13px;margin:0 0 8px;">Create pending tasks for future work. Select multiple animals to create one task each.</p>
+  </div>
+
+  <div class="box">
+    <label>Log Type</label>
+    <select id="sch_type" onchange="renderSchedulerTypeFields()">
+      <option value="med">💉 Med</option>
+      <option value="obs">👁️ Observation</option>
+      <option value="hoof">Hoof</option>
+      <option value="proc">✂️ Procedure</option>
+      <option value="birth">🐐🍼 Birth</option>
+      <option value="activity">📝 Activity</option>
+    </select>
+
+    <label>Animals <span style="color:#888;font-size:12px;">(tap to select multiple)</span></label>
+    <div id="sch_animals" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button type="button" onclick="schSelectAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Select All</button>
+      <button type="button" onclick="schClearAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Clear</button>
+    </div>
+
+    <label>Date &amp; Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="sch_time" style="flex:1;">
+      <button onclick="schSetNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+
+    <div id="sch_type_fields" style="margin-top:4px;"></div>
+
+    <label>Notes</label>
+    <textarea id="sch_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
+
+    <button onclick="saveScheduledTasks()" style="width:100%;margin-top:12px;">📅 Schedule Tasks</button>
+    <div id="sch_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- ===== ANIMALS ===== -->
+<div id="screen-animals" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="show('home')">← Home</button>
+    <h3 style="margin:10px 0 6px;">🐐 Animals</h3>
+  </div>
+
+  <div class="box">
+    <strong>Active Animals</strong>
+    <p style="color:#888;font-size:13px;">Removed animals won't return on Fetch unless restored.</p>
+    <div id="animalsAnimalList"></div>
+    <div style="margin-top:12px;">
+      <strong style="font-size:15px;">Add Animal</strong>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <input id="animalsNewName" placeholder="Name *" style="flex:1;">
+        <input id="animalsNewTag" placeholder="Tag/ID" style="flex:1;">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <input id="animalsNewSpecies" placeholder="Species (goat, sheep...)" style="flex:1;">
+        <input id="animalsNewBreed" placeholder="Breed" style="flex:1;">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <select id="animalsNewSex" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+          <option value="">Sex</option>
+          <option value="F">Female</option>
+          <option value="M">Male</option>
+          <option value="W">Wether</option>
+        </select>
+        <input id="animalsNewDob" type="date" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+      <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
+      <button onclick="addAnimalFromScreen()" style="width:100%;margin-top:8px;">+ Add Animal</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <strong>Excluded Animals</strong>
+    <p style="color:#888;font-size:13px;">Archived in farmOS or manually removed. Restore to re-add to selector.</p>
+    <div id="animalsExcludedList"></div>
+  </div>
+</div>
+
+</div><!-- end module-goatdesk -->
+
+<!-- ===== APP-LEVEL SCREENS (Settings, Sync, Help, Standalone) ===== -->
+<!-- These live outside all module divs — reachable regardless of active module -->
+<div id="app-screens" style="display:none;">
+
 <!-- ===== SETTINGS ===== -->
 <div id="screen-settings" class="screen">
   <div class="box">
@@ -501,7 +594,7 @@ header > div:last-child { min-width: 0; }
   <!-- ════ GENERIC — applies to the whole app ════ -->
   <div class="set-group open" id="setgrp-general">
     <div class="set-head" onclick="toggleSetGroup(this)">
-      <span>⚙️ General</span><span class="set-arrow">▲</span>
+      <span style="color:#3a7;">⚙️ General</span><span class="set-arrow">▲</span>
     </div>
     <div class="set-body">
 
@@ -546,7 +639,7 @@ header > div:last-child { min-width: 0; }
       <div class="set-sub">
         <strong>Farm Name</strong>
         <p style="color:#888;font-size:13px;">Used in exported XML filename.</p>
-        <input id="farmNameInput" placeholder="e.g. Living the Life Farm" style="width:100%;box-sizing:border-box;" oninput="localStorage.setItem(LS.farmName, this.value.trim())">
+        <input id="farmNameInput" placeholder="e.g. Living the Life Farm" style="width:100%;box-sizing:border-box;" oninput="localStorage.setItem(LS.farmName, this.value.trim()); updateFarmNameSubtitle();">
       </div>
 
       <div class="set-sub">
@@ -642,91 +735,7 @@ header > div:last-child { min-width: 0; }
   <!-- ════ BIRD DESK — renders its own drawer when the Birds module is on ════ -->
   <div id="bd-settings-inject"></div>
 
-</div>
-
-<!-- ===== SCHEDULER ===== -->
-<div id="screen-scheduler" class="screen">
-  <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
-    <h3 style="margin:10px 0 4px;">📅 Task Scheduler</h3>
-    <p style="color:#888;font-size:13px;margin:0 0 8px;">Create pending tasks for future work. Select multiple animals to create one task each.</p>
-  </div>
-
-  <div class="box">
-    <label>Log Type</label>
-    <select id="sch_type" onchange="renderSchedulerTypeFields()">
-      <option value="med">💉 Med</option>
-      <option value="obs">👁️ Observation</option>
-      <option value="hoof">Hoof</option>
-      <option value="proc">✂️ Procedure</option>
-      <option value="birth">🐐🍼 Birth</option>
-      <option value="activity">📝 Activity</option>
-    </select>
-
-    <label>Animals <span style="color:#888;font-size:12px;">(tap to select multiple)</span></label>
-    <div id="sch_animals" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
-    <div style="display:flex;gap:6px;margin-top:6px;">
-      <button type="button" onclick="schSelectAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Select All</button>
-      <button type="button" onclick="schClearAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Clear</button>
-    </div>
-
-    <label>Date &amp; Time</label>
-    <div style="display:flex;gap:6px;margin-top:4px;">
-      <input type="datetime-local" id="sch_time" style="flex:1;">
-      <button onclick="schSetNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
-    </div>
-
-    <div id="sch_type_fields" style="margin-top:4px;"></div>
-
-    <label>Notes</label>
-    <textarea id="sch_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
-
-    <button onclick="saveScheduledTasks()" style="width:100%;margin-top:12px;">📅 Schedule Tasks</button>
-    <div id="sch_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
-  </div>
-</div>
-
-<!-- ===== ANIMALS ===== -->
-<div id="screen-animals" class="screen">
-  <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
-    <h3 style="margin:10px 0 6px;">🐐 Animals</h3>
-  </div>
-
-  <div class="box">
-    <strong>Active Animals</strong>
-    <p style="color:#888;font-size:13px;">Removed animals won't return on Fetch unless restored.</p>
-    <div id="animalsAnimalList"></div>
-    <div style="margin-top:12px;">
-      <strong style="font-size:15px;">Add Animal</strong>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <input id="animalsNewName" placeholder="Name *" style="flex:1;">
-        <input id="animalsNewTag" placeholder="Tag/ID" style="flex:1;">
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <input id="animalsNewSpecies" placeholder="Species (goat, sheep...)" style="flex:1;">
-        <input id="animalsNewBreed" placeholder="Breed" style="flex:1;">
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <select id="animalsNewSex" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-          <option value="">Sex</option>
-          <option value="F">Female</option>
-          <option value="M">Male</option>
-          <option value="W">Wether</option>
-        </select>
-        <input id="animalsNewDob" type="date" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-      </div>
-      <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
-      <button onclick="addAnimalFromScreen()" style="width:100%;margin-top:8px;">+ Add Animal</button>
-    </div>
-  </div>
-
-  <div class="box">
-    <strong>Excluded Animals</strong>
-    <p style="color:#888;font-size:13px;">Archived in farmOS or manually removed. Restore to re-add to selector.</p>
-    <div id="animalsExcludedList"></div>
-  </div>
-</div>
+</div><!-- end screen-settings -->
 
 <!-- ===== STANDALONE DATA SCREEN ===== -->
 <div id="screen-standalone" class="screen">
@@ -883,7 +892,7 @@ header > div:last-child { min-width: 0; }
 
 
 
-</div>
+</div><!-- end app-screens -->
 
 <!-- ===== STOCKDESK MODULE ===== -->
 <div id="module-stockdesk" style="display:none;">
@@ -1123,7 +1132,7 @@ header > div:last-child { min-width: 0; }
   <div class="box">
     <strong>Connection</strong>
     <div id="bd-conn-status" style="font-size:14px;color:#888;margin:6px 0 10px;"></div>
-    <button onclick="switchModule('goats');show('sync')" class="secondary wide" style="margin-bottom:8px;">⚙️ Change in FarmOS Sync</button>
+    <button onclick="openSharedSettings()" class="secondary wide" style="margin-bottom:8px;">⚙️ Change in Settings</button>
     <button id="bd-fetch-btn" onclick="bd_fetchAssets()" class="wide">🔄 Fetch Birds from farmOS</button>
     <div id="bd-test-result" style="margin-top:8px;font-size:13px;color:#888;"></div>
   </div>
@@ -1316,7 +1325,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781763421"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781765494"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1404,7 +1413,27 @@ let _lastSavedEntry = null; // set by saveStep, read by saveAndHome/nextAction f
 history.pushState({ page: "home" }, "");
 
 function show(id) {
+  // Settings, Sync, Help, Standalone are app-level — not inside module-goatdesk
+  const appScreenIds = ['settings','sync','standalone','help'];
+  if (appScreenIds.includes(id)) {
+    document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('module-goatdesk').style.display = 'none';
+    document.getElementById('app-screens').style.display = '';
+    const screenEl = document.getElementById('screen-' + id);
+    if (screenEl) screenEl.classList.add('active');
+    if (id !== 'home') history.pushState({ page: id }, '');
+    if (id === 'settings') { renderSettings(); }
+    if (id === 'sync') {
+      if (localStorage.getItem(LS.standalone) === '1') { show('standalone'); return; }
+      renderSync();
+    }
+    if (id === 'standalone') { renderStandaloneScreen(); }
+    return;
+  }
   document.querySelectorAll("#module-goatdesk .screen").forEach(s => s.classList.remove("active"));
+  document.getElementById('app-screens').style.display = 'none';
+  document.getElementById('module-goatdesk').style.display = '';
   const screenEl = document.getElementById("screen-"+id);
   if (screenEl) screenEl.classList.add("active");
   if (id !== "home") history.pushState({ page: id }, "");
@@ -1416,12 +1445,6 @@ function show(id) {
     if (syncBtn) syncBtn.textContent = localStorage.getItem(LS.standalone) === "1" ? "📦 Standalone Data" : "🔄 FarmOS Sync";
   }
   if (id === "history") { renderHistory(); }
-  if (id === "settings") { renderSettings(); }
-  if (id === "sync") {
-    if (localStorage.getItem(LS.standalone) === "1") { show("standalone"); return; }
-    renderSync();
-  }
-  if (id === "standalone") { renderStandaloneScreen(); }
   if (id === "animals") { renderAnimalsScreen(); }
   if (id === "scheduler") { renderScheduler(); }
 }
@@ -3383,18 +3406,19 @@ function renderModuleToggles() {
   const cfg = JSON.parse(localStorage.getItem("farmdesk_modules_enabled") || "{}");
   box.innerHTML = '<p style="color:#888;font-size:13px;margin:0 0 6px;">Use arrows to reorder modules in the header bar.</p>' +
     MODULES.map((m, i) => {
+      const isOn = cfg[m.id] !== false;
       const upDisabled  = i === 0 ? 'disabled' : '';
       const downDisabled = i === MODULES.length - 1 ? 'disabled' : '';
-      return `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      return `<div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:10px 12px;background:#333;border-radius:8px;">
         <div style="display:flex;flex-direction:column;gap:2px;">
-          <button ${upDisabled} onclick="moveModule('${m.id}',-1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;" ${upDisabled ? 'style="opacity:0.3"' : ''}>▲</button>
-          <button ${downDisabled} onclick="moveModule('${m.id}',1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;" ${downDisabled ? 'style="opacity:0.3"' : ''}>▼</button>
+          <button ${upDisabled} onclick="moveModule('${m.id}',-1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;">▲</button>
+          <button ${downDisabled} onclick="moveModule('${m.id}',1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;">▼</button>
         </div>
-        <label style="display:flex;align-items:center;gap:10px;font-size:15px;flex:1;">
-          <input type="checkbox" ${cfg[m.id] !== false ? "checked" : ""}
-            onchange="setModuleEnabled('${m.id}', this.checked)" style="width:20px;height:20px;">
-          ${m.label}
-        </label>
+        <span style="flex:1;font-size:15px;">${m.label}</span>
+        <button onclick="setModuleEnabled('${m.id}', ${!isOn})"
+          style="margin:0;padding:6px 16px;font-size:13px;font-weight:bold;border-radius:20px;background:${isOn ? '#3a7' : '#555'};color:${isOn ? '#fff' : '#aaa'};">
+          ${isOn ? 'ON' : 'OFF'}
+        </button>
       </div>`;
     }).join("");
 }
@@ -5845,10 +5869,9 @@ let needleMap  = {};
 
 // ===== SCREEN NAV =====
 function sd_show(id) {
-  // Settings lives in GoatDesk module — switch there
+  // Settings is now app-level
   if (id === 'settings') {
-    switchModule('goats');
-    show('settings');
+    openSharedSettings();
     return;
   }
   document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
@@ -8319,18 +8342,31 @@ function goModule(id) {
 function openSharedSettings() {
   MODULES.forEach(m => {
     const el = document.getElementById(m.containerId);
-    if (el) el.style.display = m.containerId === 'module-goatdesk' ? '' : 'none';
+    if (el) el.style.display = 'none';
   });
+  document.getElementById('app-screens').style.display = '';
+  document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
+  const settingsEl = document.getElementById('screen-settings');
+  if (settingsEl) settingsEl.classList.add('active');
   document.getElementById('headerTitle').textContent = '⚙️ FarmDesk';
+  updateFarmNameSubtitle();
   if (typeof sd_renderSettings === 'function') sd_renderSettings();
   if (typeof bd_renderSettings === 'function') bd_renderSettings();
-  show('settings');
+  renderSettings();
 }
 
 function settingsHome() {
+  document.getElementById('app-screens').style.display = 'none';
   const active = localStorage.getItem(MODULE_KEY) || enabledModules()[0].id;
-  if (active === 'goats' && moduleEnabled('goats')) { show('home'); return; }
   switchModule(moduleEnabled(active) ? active : enabledModules()[0].id);
+}
+
+function updateFarmNameSubtitle() {
+  var el = document.getElementById('farmNameSubtitle');
+  if (!el) return;
+  var name = (localStorage.getItem(LS.farmName) || '').trim();
+  if (name) { el.textContent = name; el.style.display = ''; }
+  else { el.style.display = 'none'; }
 }
 
 // Restore saved module on startup (falls back if that module is now disabled)
@@ -8338,6 +8374,7 @@ function settingsHome() {
   if (typeof applyModuleOrder === 'function') applyModuleOrder();
   const saved = localStorage.getItem(MODULE_KEY) || 'goats';
   switchModule(saved);
+  updateFarmNameSubtitle();
 })();
 
 // ===== BACK BUTTON — module aware =====
@@ -8366,9 +8403,9 @@ window.addEventListener('popstate', function(e) {
   // Any open popup/modal closes first — universal across modules
   if (closeTopOverlay()) { return; }
   const mod = localStorage.getItem(MODULE_KEY) || 'goats';
-  // Back press while in shared Settings opened from a non-goats module
-  const gdEl = document.getElementById('module-goatdesk');
-  if (gdEl && gdEl.style.display !== 'none' && mod !== 'goats') { settingsHome(); return; }
+  // Back press while in app-level screens (Settings, Sync, Help, Standalone)
+  const appEl = document.getElementById('app-screens');
+  if (appEl && appEl.style.display !== 'none') { settingsHome(); return; }
   if (mod === 'goats') {
     const active = document.querySelector('#module-goatdesk .screen.active');
     if (active && active.id !== 'screen-home') show('home');
