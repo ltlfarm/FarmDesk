@@ -1095,6 +1095,7 @@ header > div:last-child { min-width: 0; }
 <div id="bd-screen-history" class="screen">
   <div class="box">
     <h3 style="margin:0 0 10px;">History</h3>
+    <input id="bd-hist-search" placeholder="Search tag or name..." oninput="bd_renderHistory()" style="width:100%;box-sizing:border-box;margin-bottom:8px;">
     <div class="filter-chips">
       <button class="chip active" onclick="bd_setHistFilter('all',this)">All</button>
       <button class="chip" onclick="bd_setHistFilter('egg',this)">Eggs</button>
@@ -1127,19 +1128,9 @@ header > div:last-child { min-width: 0; }
   </div>
   <div class="box">
     <strong>Connection</strong>
-    <label>FarmOS URL</label>
-    <input id="bd-farmos-url" placeholder="https://yourfarm.farmos.net" type="url">
-    <label>Username</label>
-    <input id="bd-farmos-user" placeholder="farmOS username" autocomplete="username">
-    <label>Password</label>
-    <div style="display:flex;gap:6px;margin-top:4px;">
-      <input id="bd-farmos-pass" placeholder="farmOS password" type="password" autocomplete="current-password" style="flex:1;margin-top:0;">
-      <button onclick="bd_togglePass()" id="bd-showPassBtn" style="margin:0;padding:10px 14px;font-size:16px;background:#555;">&#x1F441;</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <button onclick="bd_testConnection()" style="flex:1;margin:0;">Test Connection</button>
-      <button onclick="bd_fetchAssets()" class="secondary" style="flex:1;margin:0;">Fetch Birds</button>
-    </div>
+    <div id="bd-conn-status" style="font-size:14px;color:#888;margin:6px 0 10px;"></div>
+    <button onclick="switchModule('goats');show('sync')" class="secondary wide" style="margin-bottom:8px;">⚙️ Change in FarmOS Sync</button>
+    <button id="bd-fetch-btn" onclick="bd_fetchAssets()" class="wide">🔄 Fetch Birds from farmOS</button>
     <div id="bd-test-result" style="margin-top:8px;font-size:13px;color:#888;"></div>
   </div>
   <div class="box">
@@ -1156,9 +1147,7 @@ header > div:last-child { min-width: 0; }
     <div id="bd-excluded-types-list"></div>
     <p style="color:#888;font-size:12px;margin-top:6px;">Excluded types are hidden in the Birds screen.</p>
   </div>
-  <div class="box">
-    <button onclick="bd_logout()" class="wide secondary">Log Out</button>
-  </div>
+
   <div id="bd-sync-log" style="font-size:13px;color:#888;padding:10px;white-space:pre-wrap;"></div>
 </div>
 
@@ -1325,7 +1314,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781755235"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4397,11 +4386,25 @@ function clearLogs() {
   saveBtn.onclick = () => {
     logs = [];
     localStorage.setItem(LS.logs, JSON.stringify(logs));
+    Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
     localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
     localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
     assets  = [];
     pending = [];
+    adjHistory = [];
+    localStorage.removeItem(BD_LS.assets);
+    localStorage.removeItem(BD_LS.history);
+    localStorage.removeItem(BD_LS.pending);
+    localStorage.removeItem(BD_LS.flocks);
+    localStorage.removeItem(BD_LS.lastSync);
+    bd_birds = [];
+    bd_history = [];
+    bd_pending = [];
+    bd_flocks = [];
+    bd_updateSyncBadge();
+    bd_renderBirds();
+    bd_renderHistory();
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
     saveBtn.onclick = saveEdit;
@@ -4560,7 +4563,10 @@ function apiUrl(path) {
 function logout() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const url = cfg.url || "";
-  const unsyncedCount = logs.filter(l => !l.synced).length;
+  const unsyncedGoat  = logs.filter(l => !l.synced).length;
+  const unsyncedStock = pending.filter(p => !p.synced).length;
+  const unsyncedBird  = bd_pending.filter(p => !p.synced).length;
+  const unsyncedCount = unsyncedGoat + unsyncedStock + unsyncedBird;
 
   const modal = document.getElementById("editModal");
   const fields = document.getElementById("editFields");
@@ -4570,22 +4576,12 @@ function logout() {
   fields.innerHTML = `
     <p style="color:#ccc;">Logged in as <strong>${cfg.user || "unknown"}</strong></p>
     <p style="color:#ccc;">Farm: <strong>${url || "unknown"}</strong></p>
-    ${unsyncedCount > 0 ? `<p style="color:#c90;">⚠️ ${unsyncedCount} unsynced log${unsyncedCount > 1 ? "s" : ""} will be kept and available next time you log in here.</p>` : ""}
-    <p style="color:#888;font-size:14px;margin-top:8px;">Synced logs, animals, and config will be cleared. Unsynced logs are kept.</p>
+    ${unsyncedCount > 0 ? `<p style="color:#c90;">⚠️ ${unsyncedCount} unsynced item${unsyncedCount > 1 ? "s" : ""} across all modules will be lost.</p>` : ""}
+    <p style="color:#888;font-size:14px;margin-top:8px;">All local data, animals, and config will be cleared.</p>
   `;
   saveBtn.textContent = "🚪 Confirm Logout";
   saveBtn.style.background = "#555";
   saveBtn.onclick = () => {
-    // Save unsynced logs to per-URL storage before clearing
-    if (url) {
-      const unsynced = logs.filter(l => !l.synced);
-      if (unsynced.length > 0) {
-        localStorage.setItem(LS.logsForUrl(url), JSON.stringify(unsynced));
-      } else {
-        localStorage.removeItem(LS.logsForUrl(url));
-      }
-    }
-    // Clear farm-specific data
     localStorage.removeItem(LS.cfg);
     localStorage.removeItem(LS.logs);
     localStorage.removeItem(LS.weights);
@@ -4594,12 +4590,21 @@ function logout() {
     localStorage.removeItem(LS.animalUUIDs);
     localStorage.removeItem(LS.configLogUUID);
     localStorage.removeItem(LS.lastSync);
-    localStorage.removeItem("farmdesk_role"); // clean up any legacy role key
-    // Reset in-memory state
-    logs = [];
-    weights = {};
-    goats = [...DEFAULT_ANIMALS];
-    excludedAnimals = [];
+    localStorage.removeItem("farmdesk_role");
+    localStorage.removeItem(SD_LS.assets);
+    localStorage.removeItem(SD_LS.pending);
+    localStorage.removeItem(SD_LS.history);
+    localStorage.removeItem(SD_LS.lastSync);
+    localStorage.removeItem(BD_LS.assets);
+    localStorage.removeItem(BD_LS.history);
+    localStorage.removeItem(BD_LS.pending);
+    localStorage.removeItem(BD_LS.lastSync);
+    localStorage.removeItem(BD_LS.excluded);
+    localStorage.removeItem(BD_LS.flocks);
+    logs = []; weights = {}; goats = [...DEFAULT_ANIMALS]; excludedAnimals = [];
+    assets = []; pending = []; adjHistory = [];
+    bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = []; bd_excluded = [];
+    bd_updateSyncBadge();
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
     saveBtn.onclick = saveEdit;
@@ -5104,7 +5109,23 @@ async function fetchAnimalUUIDs(silent = false) {
       }
     });
 
-    localStorage.setItem(LS.logs, JSON.stringify(logs));
+    // Trim to prevent localStorage quota errors:
+    // Always keep unsynced/local logs; cap farmOS-sourced logs to 200 most recent.
+    const MAX_FARMOS_LOGS = 200;
+    const localLogs  = logs.filter(l => !l.fromFarmOS);
+    const farmosSorted = logs.filter(l => l.fromFarmOS)
+      .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
+      .slice(0, MAX_FARMOS_LOGS);
+    logs = localLogs.concat(farmosSorted);
+
+    try {
+      localStorage.setItem(LS.logs, JSON.stringify(logs));
+    } catch(e) {
+      // Still over quota — trim to 50 farmOS logs and retry
+      logs = localLogs.concat(farmosSorted.slice(0, 50));
+      localStorage.setItem(LS.logs, JSON.stringify(logs));
+      if (!silent && el) { el.textContent = '⚠️ Storage full — kept 50 most recent logs. Clear old data to free space.'; el.style.color = '#c90'; }
+    }
     localStorage.setItem(LS.weights, JSON.stringify(weights));
 
     // Update last sync time
@@ -7054,7 +7075,10 @@ function sd_renderHistory() {
       </div>
       <div class="history-drawer" style="display:none;margin-top:10px;border-top:1px solid #333;padding-top:10px;">
         ${h.notes ? `<div style="color:#aaa;font-size:13px;margin-bottom:8px;">${h.notes}</div>` : ''}
-        <button onclick="event.stopPropagation();openEditLog('${h.id}')" style="margin:0;padding:10px 16px;font-size:14px;">✏️ Edit Log</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button onclick="event.stopPropagation();openEditLog('${h.id}')" style="margin:0;padding:10px 16px;font-size:14px;">✏️ Edit</button>
+          <button onclick="event.stopPropagation();cloneStockLog('${h.id}')" style="margin:0;padding:10px 16px;font-size:14px;background:#4a3a7a;">⧉ Clone</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -7185,9 +7209,11 @@ function bd_updateSyncBadge() {
 
 // ===== AUTH =====
 function bd_saveCfg() {
-  var url  = document.getElementById('bd-farmos-url')  ? document.getElementById('bd-farmos-url').value.trim().replace(/\/$/, '')  : '';
-  var user = document.getElementById('bd-farmos-user') ? document.getElementById('bd-farmos-user').value.trim() : '';
-  var pass = document.getElementById('bd-farmos-pass') ? document.getElementById('bd-farmos-pass').value : '';
+  // Credentials are managed solely in Goats → FarmOS Sync (shared farmdesk_cfg)
+  // This function is retained as a no-op to avoid errors from any remaining call sites
+  var url  = '';
+  var user = '';
+  var pass = '';
   var cfg  = { url: url, user: user, pass: pass };
   localStorage.setItem(BD_LS.cfg, JSON.stringify(cfg));
   return cfg;
@@ -7328,11 +7354,25 @@ function bd_closePhotoViewer() { var v = document.getElementById('bd-photo-viewe
 // ===== SYNC SCREEN =====
 function bd_renderSync() {
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
-  if (cfg.url  && document.getElementById('bd-farmos-url'))  document.getElementById('bd-farmos-url').value  = cfg.url;
-  if (cfg.user && document.getElementById('bd-farmos-user')) document.getElementById('bd-farmos-user').value = cfg.user;
-  if (cfg.pass && document.getElementById('bd-farmos-pass')) document.getElementById('bd-farmos-pass').value = cfg.pass;
   var ls = localStorage.getItem(BD_LS.lastSync);
   var el = document.getElementById('bd-last-sync'); if (el) el.textContent = ls || 'Never';
+  var connStatus = document.getElementById('bd-conn-status');
+  if (connStatus) connStatus.textContent = cfg.url ? '✅ ' + cfg.url : '❌ Not configured — set in Settings → FarmOS Sync';
+  var isStandalone = localStorage.getItem(LS.standalone) === '1';
+  var pushBtn = document.querySelector('#bd-screen-sync .wide');
+  var fetchBtn = document.getElementById('bd-fetch-btn');
+  if (pushBtn) pushBtn.style.display = isStandalone ? 'none' : '';
+  if (fetchBtn) fetchBtn.style.display = isStandalone ? 'none' : '';
+  var standaloneNote = document.getElementById('bd-standalone-note');
+  if (!standaloneNote) {
+    standaloneNote = document.createElement('div');
+    standaloneNote.id = 'bd-standalone-note';
+    standaloneNote.className = 'box';
+    standaloneNote.innerHTML = '<p style="color:#c90;margin:0;">⚠️ Standalone mode — farmOS sync disabled.</p>';
+    var syncScreen = document.getElementById('bd-screen-sync');
+    if (syncScreen) syncScreen.insertBefore(standaloneNote, syncScreen.firstChild);
+  }
+  standaloneNote.style.display = isStandalone ? '' : 'none';
   bd_updateSyncBadge();
   bd_renderExcludedTypes();
 }
@@ -7363,11 +7403,7 @@ function bd_toggleExcludeIdx(i) {
   bd_renderBirds();
 }
 
-function bd_togglePass() {
-  var p = document.getElementById('bd-farmos-pass'); var btn = document.getElementById('bd-showPassBtn');
-  p.type = p.type === 'password' ? 'text' : 'password';
-  btn.textContent = p.type === 'password' ? '\uD83D\uDC41' : '\uD83D\uDE48';
-}
+
 
 async function bd_testConnection() {
   bd_saveCfg();
@@ -7386,9 +7422,8 @@ async function bd_testConnection() {
 }
 
 async function bd_fetchAssets() {
-  bd_saveCfg();
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { bd_toast('Save connection settings first'); return; }
+  if (!cfg.url || !cfg.user || !cfg.pass) { bd_toast('Set connection in Settings → FarmOS Sync'); return; }
   bd_setLoading(true, 'Fetching birds from farmOS...');
   var el = document.getElementById('bd-test-result');
   try {
@@ -7582,13 +7617,60 @@ function bd_renderBirds() {
         var thumb = b.photo
           ? '<img src="' + b.photo + '" class="bird-thumb" onclick="bd_openPhotoViewer(this.src)">'
           : '<div class="bird-icon">' + bd_speciesIcon(b.species) + '</div>';
-        return '<div class="bird-card" onclick="bd_openLogSheet(\'' + id + '\')">' +
+        return '<div class="bird-card">' +
           thumb +
-          '<div class="bird-info"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
-          '<button onclick="event.stopPropagation();bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
+          '<div class="bird-info" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
+          '<button onclick="bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
           '</div>';
       }).join('');
   }).join('');
+}
+
+// ===== BIRD PROFILE =====
+function bd_openBirdProfile(id) {
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
+  if (!bird) return;
+  var modal = document.getElementById('bd-bird-modal');
+  var title = document.getElementById('bd-bird-modal-title');
+  var box   = modal ? modal.querySelector('.bd-modal-box') : null;
+  if (!modal || !box) return;
+  var sexLabel = bird.sex === 'F' ? 'Female' : bird.sex === 'M' ? 'Male' : '';
+  var photoHTML = bird.photo
+    ? '<img src="' + bird.photo + '" style="width:100%;max-height:220px;border-radius:8px;object-fit:cover;margin-bottom:10px;cursor:zoom-in;" onclick="bd_openPhotoViewer(this.src)">'
+    : '<div style="width:100%;height:100px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">' + bd_speciesIcon(bird.species) + '</div>';
+  function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
+  title.textContent = bird.name || bird.tag || 'Bird';
+  var profileDiv = document.getElementById('bd-bird-profile-view');
+  if (!profileDiv) {
+    profileDiv = document.createElement('div');
+    profileDiv.id = 'bd-bird-profile-view';
+    box.insertBefore(profileDiv, box.querySelector('label'));
+  }
+  box.querySelectorAll('label, input, select').forEach(function(el){ el.style.display = 'none'; });
+  var saveRow = box.querySelector('div[style*="margin-top:14px"]');
+  if (saveRow) saveRow.style.display = 'none';
+  profileDiv.style.display = '';
+  profileDiv.onclick = function(e) { e.stopPropagation(); };
+  profileDiv.innerHTML = photoHTML +
+    row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
+    row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
+    '<div style="display:flex;gap:8px;margin-top:14px;">' +
+      '<button onclick="bd_closeBirdProfile();bd_openLogSheet(this.dataset.bid)" data-bid="' + id + '" style="flex:1;margin:0;">📋 Log for ' + (bird.name || bird.tag || 'Bird') + '</button>' +
+      '<button onclick="bd_closeBirdProfile();bd_openEditBird(this.dataset.bid)" data-bid="' + id + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
+    '</div>';
+  modal.style.display = 'block';
+}
+
+function bd_closeBirdProfile() {
+  var modal = document.getElementById('bd-bird-modal');
+  var box   = modal ? modal.querySelector('.bd-modal-box') : null;
+  if (!box) return;
+  var profileDiv = document.getElementById('bd-bird-profile-view');
+  if (profileDiv) { profileDiv.style.display = 'none'; profileDiv.innerHTML = ''; }
+  box.querySelectorAll('label, input, select').forEach(function(el){ el.style.display = ''; });
+  var saveRow = box.querySelector('div[style*="margin-top:14px"]');
+  if (saveRow) saveRow.style.display = '';
+  modal.style.display = 'none';
 }
 
 // ===== LOG MODAL =====
@@ -7763,10 +7845,14 @@ function bd_saveBird() {
     var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, photo: bd_currentBirdPhoto || null, status: 'active', synced: false };
     bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
   }
-  localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
-  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
-  bd_updateSyncBadge();
   document.getElementById('bd-bird-modal').style.display = 'none';
+  try {
+    localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+    localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  } catch(e) {
+    bd_toast('⚠️ Saved locally but storage full — photo may not persist');
+  }
+  bd_updateSyncBadge();
   bd_toast('Bird saved'); bd_renderBirds();
 }
 
@@ -7829,12 +7915,14 @@ function bd_setHistFilter(f, btn) {
 }
 function bd_renderHistory() {
   var list = document.getElementById('bd-history-list'); if (!list) return;
+  var search = (document.getElementById('bd-hist-search') ? document.getElementById('bd-hist-search').value : '').toLowerCase().trim();
   var logs = bd_history.slice();
   if (bd_histFilter === 'egg')       logs = logs.filter(function(l) { return l.type === 'egg'; });
   if (bd_histFilter === 'health')    logs = logs.filter(function(l) { return ['weight','med','obs','proc','hatch'].indexOf(l.type) >= 0; });
   if (bd_histFilter === 'feed')      logs = logs.filter(function(l) { return l.type === 'feed'; });
   if (bd_histFilter === 'mortality') logs = logs.filter(function(l) { return l.type === 'mortality'; });
-  if (!logs.length) { list.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No logs yet.</div>"; return; }
+  if (search) logs = logs.filter(function(l) { return (l.birdTag||'').toLowerCase().indexOf(search) >= 0 || (l.birdName||'').toLowerCase().indexOf(search) >= 0 || (l.flock||'').toLowerCase().indexOf(search) >= 0; });
+  if (!logs.length) { list.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No logs found.</div>"; return; }
   list.innerHTML = ''; logs.slice(0,100).forEach(function(l) { list.appendChild(bd_makeLogEl(l)); });
 }
 function bd_logSummary(l) {
@@ -7855,10 +7943,16 @@ function bd_makeLogEl(l) {
   var syncTag = !l.synced ? "<span style='color:#c90;font-size:11px;margin-left:4px;'>pending</span>" : '';
   var timeStr = l.timeISO ? new Date(l.timeISO).toLocaleString() : '';
   var summary = bd_logSummary(l);
+  var birdNameHTML;
+  if (l.type !== 'egg' && l.birdId) {
+    birdNameHTML = "<span class='log-bird log-animal' data-bid='" + l.birdId + "' onclick='event.stopPropagation();bd_openBirdProfile(this.dataset.bid)' style='cursor:pointer;text-decoration:underline dotted;'>" + birdLabel + "</span>";
+  } else {
+    birdNameHTML = "<span class='log-bird'>" + birdLabel + "</span>";
+  }
   d.innerHTML =
     "<div class='log-top'>" +
       "<input type='checkbox' class='log-select' data-id='" + l.id + "' style='width:auto;margin:0 8px 0 0;' onclick='return false'>" +
-      "<span class='log-bird'>" + birdLabel + "</span>" +
+      birdNameHTML +
       "<span class='log-type' style='margin-left:6px;'>" + l.type + "</span>" + syncTag +
       "<span class='log-arrow' style='margin-left:auto;color:#555;font-size:14px;'>&#x25BC;</span>" +
     "</div>" +
@@ -8172,6 +8266,7 @@ const MODULES = [
       document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
       const gdHome = document.getElementById('screen-home');
       if (gdHome) gdHome.classList.add('active');
+      renderRecent();
     } },
   { id: 'stock', label: '📦 Stock', title: '📦 FarmDesk',
     containerId: 'module-stockdesk',
@@ -8383,6 +8478,23 @@ function sd_deleteSelected() {
     updateSyncBadge();
   };
   modal.style.display = 'block';
+}
+
+function cloneStockLog(id) {
+  var orig = adjHistory.find(function(h) { return h.id === id; });
+  if (!orig) return;
+  var clone = JSON.parse(JSON.stringify(orig));
+  clone.id = 'clone_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+  clone.time = new Date().toISOString();
+  clone.synced = false;
+  clone.source = 'local';
+  adjHistory.unshift(clone);
+  pending.push({ id: clone.id, type: 'adjustment', uuid: clone.uuid, action: clone.action, amount: clone.amount, notes: clone.notes, timestamp: String(Math.floor(new Date(clone.time).getTime()/1000)), synced: false });
+  localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
+  localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
+  updateSyncBadge();
+  sd_renderHistory();
+  showToast('⧉ Cloned — edit if needed, then sync');
 }
 
 function sd_clearHistory() {
