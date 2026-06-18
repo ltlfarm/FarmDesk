@@ -508,21 +508,9 @@ header > div:last-child { min-width: 0; }
       <div class="set-sub">
         <strong>🔗 FarmOS Connection</strong>
         <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
-        <label>FarmOS URL</label>
-        <input id="farmosUrl" placeholder="https://yourfarm.farmos.net" type="url" oninput="saveFarmOSCfg()">
-        <div id="recentUrlContainer" style="margin-top:4px;"></div>
-        <label>Username</label>
-        <input id="farmosUser" placeholder="farmOS username" autocomplete="username" oninput="saveFarmOSCfg()">
-        <label>Password</label>
-        <div style="display:flex;gap:6px;margin-top:4px;">
-          <input id="farmosPass" placeholder="farmOS password" type="password" autocomplete="current-password" style="flex:1;margin-top:0;" oninput="saveFarmOSCfg()">
-          <button onclick="togglePass()" id="showPassBtn" style="margin:0;padding:10px 14px;font-size:16px;background:#555;">👁</button>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:10px;">
-          <button onclick="testFarmOS()" style="flex:1;margin:0;">Test Connection</button>
-        </div>
-        <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
-        <button onclick="syncAllModules()" class="wide" style="margin-top:10px;">⬇️ Sync All (Pull from farmOS)</button>
+        <p style="color:#888;font-size:13px;">Server URL, login, fetch and push live on the Sync screen.</p>
+        <button onclick="show('sync')" class="wide secondary">Open FarmOS Sync</button>
+        <button onclick="syncAllModules()" class="wide" style="margin-top:8px;">⬇️ Sync All (Pull from farmOS)</button>
         <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
 
@@ -866,13 +854,30 @@ header > div:last-child { min-width: 0; }
     <h3 style="margin:10px 0 6px;">🔄 FarmOS Sync</h3>
   </div>
 
+  <div class="box" id="connectionBox">
+    <strong>Connection</strong>
+    <label>FarmOS URL</label>
+    <input id="farmosUrl" placeholder="https://yourfarm.farmos.net" type="url">
+    <div id="recentUrlContainer" style="margin-top:4px;"></div>
+    <label>Username</label>
+    <input id="farmosUser" placeholder="farmOS username" autocomplete="username">
+    <label>Password</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input id="farmosPass" placeholder="farmOS password" type="password" autocomplete="current-password" style="flex:1;margin-top:0;">
+      <button onclick="togglePass()" id="showPassBtn" style="margin:0;padding:10px 14px;font-size:16px;background:#555;">👁</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="testFarmOS()" style="flex:1;margin:0;">Test Connection</button>
+      <button onclick="fetchAnimalUUIDs()" class="secondary" style="flex:1;margin:0;">🔄 Fetch Logs</button>
+    </div>
+    <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
+  </div>
+
+
   <div class="box">
     <strong>Sync</strong>
-    <div id="connStatusLine2" style="font-size:13px;color:#888;margin-bottom:8px;"></div>
     <p style="color:#888;font-size:13px;">Unsynced local logs: <span id="unsyncedCount">0</span></p>
-    <button onclick="fetchAnimalUUIDs()" class="wide secondary" style="margin-bottom:8px;">⬇️ Fetch Logs from farmOS</button>
-    <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to farmOS</button>
-    <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
+    <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to FarmOS</button>
     <div id="syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
   </div>
 
@@ -1174,6 +1179,14 @@ header > div:last-child { min-width: 0; }
 </div>
 
 <!-- ADD/EDIT BIRD MODAL -->
+<!-- BIRD PROFILE MODAL -->
+<div id="bd-profile-modal" class="bd-modal" onclick="bd_closeBirdProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div id="bd-profile-modal-content"></div>
+    <button class="secondary wide" onclick="bd_closeBirdProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
 <div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
   <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-bird-modal-title">Add Bird</h3>
@@ -3205,13 +3218,6 @@ function renderSettings() {
   if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
   const connLine = document.getElementById("connStatusLine");
   if (connLine) connLine.textContent = cfg.url ? "✅ Connected: " + cfg.url : "❌ Not configured";
-  if (cfg.url  && document.getElementById("farmosUrl"))  document.getElementById("farmosUrl").value  = cfg.url;
-  if (cfg.user && document.getElementById("farmosUser")) document.getElementById("farmosUser").value = cfg.user;
-  if (cfg.pass && document.getElementById("farmosPass")) document.getElementById("farmosPass").value = cfg.pass;
-  renderRecentUrlList();
-  const urls = getRecentUrls();
-  const urlEl = document.getElementById("farmosUrl");
-  if (urlEl && !cfg.url && urls.length === 1) urlEl.value = urls[0];
   const verLine = document.getElementById("appVersionLine");
   if (verLine) verLine.textContent = "FarmDesk version: " + APP_VERSION;
   // Logo preview
@@ -4456,11 +4462,21 @@ function togglePass() {
 
 function renderSync() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
-  const connLine2 = document.getElementById("connStatusLine2");
-  if (connLine2) connLine2.textContent = cfg.url ? "✅ " + cfg.url : "❌ Not configured — set in ⚙️ Settings";
+  if (cfg.url)  document.getElementById("farmosUrl").value  = cfg.url;
+  if (cfg.user) document.getElementById("farmosUser").value = cfg.user;
+  if (cfg.pass) document.getElementById("farmosPass").value = cfg.pass;
+  renderRecentUrlList();
+  // Auto-fill if only one saved URL
+  const urls = getRecentUrls();
+  const urlEl = document.getElementById("farmosUrl");
+  if (urlEl && !cfg.url && urls.length === 1) urlEl.value = urls[0];
+
   const unsynced = logs.filter(l => !l.synced).length;
   document.getElementById("unsyncedCount").textContent = unsynced;
   document.getElementById("syncLog").textContent = "";
+
+  const userInfo = document.getElementById("settingsUserInfo");
+  if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
 }
 
 function saveFarmOSCfg() {
@@ -7615,49 +7631,32 @@ function bd_renderBirds() {
 }
 
 // ===== BIRD PROFILE =====
+// Uses dedicated profile modal — does NOT touch the edit modal
 function bd_openBirdProfile(id) {
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
   if (!bird) return;
-  var modal = document.getElementById('bd-bird-modal');
-  var title = document.getElementById('bd-bird-modal-title');
-  var box   = modal ? modal.querySelector('.bd-modal-box') : null;
-  if (!modal || !box) return;
+  var modal = document.getElementById('bd-profile-modal');
+  if (!modal) return;
   var sexLabel = bird.sex === 'F' ? 'Female' : bird.sex === 'M' ? 'Male' : '';
   var photoHTML = bird.photo
-    ? '<img src="' + bird.photo + '" style="width:100%;max-height:220px;border-radius:8px;object-fit:cover;margin-bottom:10px;cursor:zoom-in;" onclick="bd_openPhotoViewer(this.src)">'
-    : '<div style="width:100%;height:100px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">' + bd_speciesIcon(bird.species) + '</div>';
-  function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
-  title.textContent = bird.name || bird.tag || 'Bird';
-  var profileDiv = document.getElementById('bd-bird-profile-view');
-  if (!profileDiv) {
-    profileDiv = document.createElement('div');
-    profileDiv.id = 'bd-bird-profile-view';
-    box.insertBefore(profileDiv, box.querySelector('label'));
-  }
-  box.querySelectorAll('label, input, select').forEach(function(el){ el.style.display = 'none'; });
-  var saveRow = box.querySelector('div[style*="margin-top:14px"]');
-  if (saveRow) saveRow.style.display = 'none';
-  profileDiv.style.display = '';
-  profileDiv.innerHTML = photoHTML +
+    ? '<img src="' + bird.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:12px;cursor:zoom-in;" onclick="bd_openPhotoViewer(this.src)">'
+    : '<div style="width:100%;height:80px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:12px;">' + bd_speciesIcon(bird.species) + '</div>';
+  function row(k,v){ return v ? '<div style="margin:5px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
+  document.getElementById('bd-profile-modal-content').innerHTML =
+    '<h3 style="margin:0 0 10px;color:#3a7;">' + (bird.name || bird.tag || 'Bird') + '</h3>' +
+    photoHTML +
     row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
     row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
     '<div style="display:flex;gap:8px;margin-top:14px;">' +
-      '<button onclick="bd_closeBirdProfile();bd_openLogSheet(this.dataset.bid)" data-bid="' + id + '" style="flex:1;margin:0;">📋 Log for ' + (bird.name || bird.tag || 'Bird') + '</button>' +
-      '<button onclick="bd_closeBirdProfile();bd_openEditBird(this.dataset.bid)" data-bid="' + id + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
+      '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openLogSheet(b);" style="flex:1;margin:0;">&#x1F4CB; Log</button>' +
+      '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openEditBird(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">&#x270F;&#xFE0F; Edit</button>' +
     '</div>';
-  modal.style.display = 'block';
+  modal.style.display = 'flex';
 }
 
 function bd_closeBirdProfile() {
-  var modal = document.getElementById('bd-bird-modal');
-  var box   = modal ? modal.querySelector('.bd-modal-box') : null;
-  if (!box) return;
-  var profileDiv = document.getElementById('bd-bird-profile-view');
-  if (profileDiv) { profileDiv.style.display = 'none'; profileDiv.innerHTML = ''; }
-  box.querySelectorAll('label, input, select').forEach(function(el){ el.style.display = ''; });
-  var saveRow = box.querySelector('div[style*="margin-top:14px"]');
-  if (saveRow) saveRow.style.display = '';
-  modal.style.display = 'none';
+  var modal = document.getElementById('bd-profile-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 // ===== LOG MODAL =====
