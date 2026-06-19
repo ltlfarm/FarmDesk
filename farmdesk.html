@@ -501,7 +501,7 @@ header > div:last-child { min-width: 0; }
 
   <div class="box">
     <strong>Active Animals</strong>
-    <p style="color:#888;font-size:13px;">Removed animals won't return on Fetch unless restored.</p>
+    <p style="color:#888;font-size:13px;">Use 🏷️ Sell, 💀 Death, or ❓ Retype to remove an animal — each writes a real record to farmOS so it's gone for everyone who syncs, not just this device.</p>
     <div id="animalsAnimalList"></div>
     <div style="margin-top:12px;">
       <strong style="font-size:15px;">Add Animal</strong>
@@ -523,14 +523,12 @@ header > div:last-child { min-width: 0; }
         <input id="animalsNewDob" type="date" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       </div>
       <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+        <input type="checkbox" id="animalsNewIsPurchase" style="width:18px;height:18px;">
+        📦 This animal was purchased (logs a Purchase record in farmOS)
+      </label>
       <button onclick="addAnimalFromScreen()" style="width:100%;margin-top:8px;">+ Add Animal</button>
     </div>
-  </div>
-
-  <div class="box">
-    <strong>Excluded Animals</strong>
-    <p style="color:#888;font-size:13px;">Archived in farmOS or manually removed. Restore to re-add to selector.</p>
-    <div id="animalsExcludedList"></div>
   </div>
 </div>
 
@@ -3723,34 +3721,6 @@ function deleteFormula(name) {
 
 
 
-function restoreAnimal(name) {
-  excludedAnimals = excludedAnimals.filter(n => n !== name);
-  localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
-  if (!goats.includes(name)) {
-    goats.push(name);
-    goats.sort();
-    localStorage.setItem(LS.goats, JSON.stringify(goats));
-  }
-  populateGoatSelect();
-  renderAnimalsScreen();
-}
-
-function removeAnimal(name) {
-  goats = goats.filter(g => g !== name);
-  // Add to exclusion list so Fetch Animals never re-adds it
-  if (!excludedAnimals.includes(name)) {
-    excludedAnimals.push(name);
-    localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
-  }
-  // Delete the animal's stored photo file and profile entry
-  var _p = animalProfiles[name];
-  if (_p && _p.photoId) Photos.remove(_p.photoId);
-  if (_p) { delete animalProfiles[name]; saveProfilesSafely(); }
-  localStorage.setItem(LS.goats, JSON.stringify(goats));
-  populateGoatSelect();
-  renderAnimalsScreen();
-}
-
 // ===== SHARED MODULE: animals screen =====
 // ===== SHARED MODULE: photo storage (native APK file store, browser fallback)
 // APK: photos saved as files via AndroidBridge; only the id lives in
@@ -3976,7 +3946,227 @@ function openAnimalProfile(name) {
   lazyLoadPhotos(body);
 }
 
-// ===== SHARED MODULE: Goat herd groups (farmOS asset--group) =====
+// ===== SHARED MODULE: animal lifecycle — purchase, sale, death =====
+// farmOS-native log types for entering/leaving the farm. Sale and death
+// both archive the asset on success so it naturally drops out of fetch
+// results — no local-only exclusion list needed.
+
+async function createPurchaseLog(animalName, details) {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { return { ok: false, reason: 'offline' }; }
+  var uuid = animalUUIDs[animalName];
+  if (!uuid) { return { ok: false, reason: 'no-uuid' }; }
+  try {
+    var token = await getToken(cfg);
+    var payload = { data: {
+      type: 'log--purchase',
+      attributes: {
+        name: 'Purchase: ' + animalName,
+        status: 'done',
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        notes: { value: (details && details.notes) || '', format: 'default' }
+      },
+      relationships: { asset: { data: [{ type: 'asset--animal', id: uuid }] } }
+    }};
+    var res = await fetch(apiUrl('/api/log/purchase'), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { var err = await res.text(); return { ok: false, reason: 'HTTP ' + res.status }; }
+    return { ok: true };
+  } catch(e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
+async function archiveAnimalWithLog(animalName, logBundle, details) {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
+  var uuid = animalUUIDs[animalName];
+  if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
+  try {
+    var token = await getToken(cfg);
+    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+    var attrs = {
+      name: (logBundle === 'sale' ? 'Sale: ' : 'Death: ') + animalName,
+      status: 'done',
+      timestamp: String(Math.floor(Date.now() / 1000)),
+      notes: { value: (details && details.notes) || '', format: 'default' }
+    };
+    var payload = { data: {
+      type: 'log--' + logBundle,
+      attributes: attrs,
+      relationships: { asset: { data: [{ type: 'asset--animal', id: uuid }] } }
+    }};
+    var res = await fetch(apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
+    // Archive the animal asset
+    var archivePayload = { data: { type: 'asset--animal', id: uuid, attributes: { status: 'archived' } } };
+    var archiveRes = await fetch(apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: headers, body: JSON.stringify(archivePayload) });
+    if (!archiveRes.ok) { showToast('⚠️ Log saved but archive failed — remove manually in farmOS'); return false; }
+    return true;
+  } catch(e) {
+    showToast('⚠️ ' + e.message);
+    return false;
+  }
+}
+
+function openSellAnimalModal(name) {
+  var modal = document.getElementById('editModal');
+  var fields = document.getElementById('editFields');
+  var title = document.getElementById('editTitle');
+  if (!modal || !fields) return;
+  if (title) title.textContent = '🏷️ Sell ' + name;
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;">Records a sale log in farmOS and archives this animal.</p>' +
+    '<label>Notes (buyer, price, etc.)</label>' +
+    '<textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>';
+  var sb = document.getElementById('modalSaveBtn');
+  if (sb) {
+    sb.style.display = '';
+    sb.textContent = '🏷️ Confirm Sale';
+    sb.style.background = '#8b6500';
+    sb.onclick = async function() {
+      var notes = document.getElementById('lifecycleNotes').value || '';
+      sb.disabled = true; sb.textContent = 'Saving...';
+      var ok = await archiveAnimalWithLog(name, 'sale', { notes: notes });
+      sb.disabled = false; sb.textContent = '🏷️ Confirm Sale';
+      if (ok) {
+        showToast('✅ ' + name + ' sold and archived');
+        closeEdit();
+        delete animalProfiles[name];
+        saveProfilesSafely();
+        goats = goats.filter(g => g !== name);
+        localStorage.setItem(LS.goats, JSON.stringify(goats));
+        renderAnimalsScreen();
+      }
+    };
+  }
+  modal.style.display = 'block';
+}
+
+function openDeathAnimalModal(name) {
+  var modal = document.getElementById('editModal');
+  var fields = document.getElementById('editFields');
+  var title = document.getElementById('editTitle');
+  if (!modal || !fields) return;
+  if (title) title.textContent = '💀 Record Death: ' + name;
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;">Records a death observation in farmOS and archives this animal.</p>' +
+    '<label>Cause / Notes</label>' +
+    '<textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>';
+  var sb = document.getElementById('modalSaveBtn');
+  if (sb) {
+    sb.style.display = '';
+    sb.textContent = '💀 Confirm Death';
+    sb.style.background = '#8b0000';
+    sb.onclick = async function() {
+      var notes = document.getElementById('lifecycleNotes').value || '';
+      sb.disabled = true; sb.textContent = 'Saving...';
+      var ok = await archiveAnimalWithLog(name, 'observation', { notes: 'Death recorded. ' + notes });
+      sb.disabled = false; sb.textContent = '💀 Confirm Death';
+      if (ok) {
+        showToast('✅ ' + name + ' recorded and archived');
+        closeEdit();
+        delete animalProfiles[name];
+        saveProfilesSafely();
+        goats = goats.filter(g => g !== name);
+        localStorage.setItem(LS.goats, JSON.stringify(goats));
+        renderAnimalsScreen();
+      }
+    };
+  }
+  modal.style.display = 'block';
+}
+
+function openRetypeAnimalModal(name) {
+  var modal = document.getElementById('editModal');
+  var fields = document.getElementById('editFields');
+  var title = document.getElementById('editTitle');
+  if (!modal || !fields) return;
+  if (title) title.textContent = '❓ Retype: ' + name;
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;">This corrects the animal\'s species in farmOS so it stops appearing in the wrong module for everyone who syncs.</p>' +
+    '<label>Actual species</label>' +
+    '<input id="lifecycleRetype" placeholder="e.g. Dog, Cat, Sheep, Chicken">';
+  var sb = document.getElementById('modalSaveBtn');
+  if (sb) {
+    sb.style.display = '';
+    sb.textContent = '❓ Confirm Retype';
+    sb.style.background = '#555';
+    sb.onclick = async function() {
+      var typeName = (document.getElementById('lifecycleRetype').value || '').trim();
+      if (!typeName) { showToast('⚠️ Enter a species'); return; }
+      sb.disabled = true; sb.textContent = 'Saving...';
+      var ok = await retypeAnimal(animalUUIDs[name], typeName, 'farmdesk_cfg');
+      sb.disabled = false; sb.textContent = '❓ Confirm Retype';
+      if (ok) {
+        showToast('✅ ' + name + ' retyped as ' + typeName);
+        closeEdit();
+        delete animalProfiles[name];
+        saveProfilesSafely();
+        goats = goats.filter(g => g !== name);
+        localStorage.setItem(LS.goats, JSON.stringify(goats));
+        renderAnimalsScreen();
+      }
+    };
+  }
+  modal.style.display = 'block';
+}
+
+
+// Used by the "Not a goat?" / "Not a bird?" flows in any module. Finds or
+// creates the taxonomy_term--animal_type term, then PATCHes the asset's
+// animal_type relationship. This is the real fix for untyped/mistyped
+// animals — it corrects the farmOS record itself so every device that
+// syncs sees the animal in its correct module going forward.
+async function ensureAnimalTypeUUID(typeName, token) {
+  if (!typeName) return null;
+  var q = apiUrl('/api/taxonomy_term/animal_type?filter[name]=' + encodeURIComponent(typeName) + '&page[limit]=1');
+  var r = await fetch(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+  if (r.ok) {
+    var d = await r.json();
+    if (d.data && d.data[0]) return d.data[0].id;
+  }
+  var payload = { data: { type: 'taxonomy_term--animal_type', attributes: { name: typeName } } };
+  var res = await fetch(apiUrl('/api/taxonomy_term/animal_type'), {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) { var err = await res.text(); throw new Error('type HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  var jd = await res.json();
+  return jd.data && jd.data.id;
+}
+
+async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
+  var cfg = JSON.parse(localStorage.getItem(cfgKey || 'farmdesk_cfg') || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
+  if (!animalUUID) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
+  try {
+    var token = await getToken(cfg);
+    var typeId = await ensureAnimalTypeUUID(newTypeName, token);
+    if (!typeId) { showToast('⚠️ Could not resolve type'); return false; }
+    var payload = { data: {
+      type: 'asset--animal',
+      id: animalUUID,
+      relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } }
+    }};
+    var res = await fetch(apiUrl('/api/asset/animal/' + animalUUID), {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
+    return true;
+  } catch(e) {
+    showToast('⚠️ Retype failed: ' + e.message);
+    return false;
+  }
+}
+
+
 // Same pattern as Bird flocks — group membership assigned via log--activity
 // with is_group_assignment, not a direct attribute on the animal asset.
 function openGroupModal() {
@@ -4273,37 +4463,29 @@ function renderAnimalsScreen() {
       card.appendChild(flagDiv);
     }
     card.onclick = function(){ openAnimalProfile(g); };
-    var rm = document.createElement("button");
-    rm.textContent = "✕ Remove";
-    rm.style.cssText = "padding:4px 10px;font-size:12px;background:#8b0000;margin:0 0 8px 0;width:100%;";
-    rm.onclick = function(e){ e.stopPropagation(); removeAnimal(g); };
+    var actionRow = document.createElement("div");
+    actionRow.style.cssText = "display:flex;gap:6px;margin:0 0 8px 0;";
+    var sellBtn = document.createElement("button");
+    sellBtn.textContent = "🏷️ Sell";
+    sellBtn.style.cssText = "flex:1;padding:6px 4px;font-size:12px;background:#8b6500;margin:0;";
+    sellBtn.onclick = function(e){ e.stopPropagation(); openSellAnimalModal(g); };
+    var deathBtn = document.createElement("button");
+    deathBtn.textContent = "💀 Death";
+    deathBtn.style.cssText = "flex:1;padding:6px 4px;font-size:12px;background:#8b0000;margin:0;";
+    deathBtn.onclick = function(e){ e.stopPropagation(); openDeathAnimalModal(g); };
+    var retypeBtn = document.createElement("button");
+    retypeBtn.textContent = "❓ Retype";
+    retypeBtn.style.cssText = "flex:1;padding:6px 4px;font-size:12px;background:#555;margin:0;";
+    retypeBtn.onclick = function(e){ e.stopPropagation(); openRetypeAnimalModal(g); };
+    actionRow.appendChild(sellBtn);
+    actionRow.appendChild(deathBtn);
+    actionRow.appendChild(retypeBtn);
     al.appendChild(card);
-    al.appendChild(rm);
+    al.appendChild(actionRow);
   });
   lazyLoadPhotos(al); // fill in <img data-photoid> from the file store
-
-  const el = document.getElementById("animalsExcludedList");
-  el.innerHTML = "";
-  if (!excludedAnimals.length) {
-    el.innerHTML = "<div style='color:#666;font-size:14px;'>None</div>";
-    return;
-  }
-  excludedAnimals.forEach(name => {
-    const row = document.createElement("div");
-    row.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;padding:6px 8px;border-radius:6px;background:#333;";
-    const n = document.createElement("span");
-    n.style.cssText = "flex:1;color:#888;";
-    n.textContent = name;
-    const btn = document.createElement("button");
-    btn.textContent = "↩ Restore";
-    btn.style.cssText = "padding:4px 10px;font-size:13px;background:#555;margin:0;";
-    btn.onclick = () => restoreAnimal(name);
-    row.appendChild(n);
-    row.appendChild(btn);
-    el.appendChild(row);
-  });
 }
-function addAnimalFromScreen() {
+async function addAnimalFromScreen() {
   var name = (document.getElementById("animalsNewName").value || "").trim();
   if (!name) { showToast("Name is required"); return; }
   if (goats.includes(name)) { showToast("Animal already exists"); return; }
@@ -4313,6 +4495,7 @@ function addAnimalFromScreen() {
   var sex     = document.getElementById("animalsNewSex").value || "";
   var dob     = document.getElementById("animalsNewDob").value || "";
   var notes   = (document.getElementById("animalsNewNotes").value || "").trim();
+  var isPurchase = document.getElementById("animalsNewIsPurchase").checked;
 
   goats.push(name);
   localStorage.setItem(LS.goats, JSON.stringify(goats));
@@ -4335,10 +4518,52 @@ function addAnimalFromScreen() {
   });
   document.getElementById("animalsNewSex").value = "";
   document.getElementById("animalsNewDob").value = "";
+  document.getElementById("animalsNewIsPurchase").checked = false;
 
   populateGoatSelect();
   renderAnimalsScreen();
   showToast("✅ " + name + " added");
+
+  if (isPurchase) {
+    var cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
+    if (!cfg.url || !cfg.user || !cfg.pass) {
+      showToast("⚠️ Connect to farmOS in Settings to log the purchase — animal saved locally for now");
+      return;
+    }
+    showToast("Creating farmOS record for purchase...");
+    try {
+      var token = await getToken(cfg);
+      var goatTypeId = localStorage.getItem(LS.goatTypeUUID);
+      var assetPayload = { data: {
+        type: 'asset--animal',
+        attributes: {
+          name: name,
+          status: 'active',
+          ...(sex ? { sex: sex.toLowerCase() === 'm' ? 'male' : sex.toLowerCase() === 'f' ? 'female' : sex.toLowerCase() } : {}),
+          ...(dob ? { birthdate: dob } : {}),
+          ...(tag ? { id_tag: [{ id: tag, type: 'tag' }] } : {})
+        },
+        ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
+      }};
+      var assetRes = await fetch(apiUrl('/api/asset/animal'), {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+        body: JSON.stringify(assetPayload)
+      });
+      if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
+      var assetData = await assetRes.json();
+      var newUUID = assetData.data && assetData.data.id;
+      if (newUUID) {
+        animalUUIDs[name] = newUUID;
+        localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
+        var purchaseResult = await createPurchaseLog(name, { notes: notes });
+        if (purchaseResult.ok) showToast("✅ Purchase logged in farmOS");
+        else showToast("⚠️ Animal created but purchase log failed: " + purchaseResult.reason);
+      }
+    } catch(e) {
+      showToast("⚠️ farmOS purchase record failed: " + e.message);
+    }
+  }
 }
 
 
@@ -5285,13 +5510,14 @@ const CONFIG_LOG_NAME = "_goatdesk_config";
 let configLogUUID = localStorage.getItem(LS.configLogUUID) || null;
 
 function buildConfigPayload(existingUUID) {
-  // ===== SHARED MODULE: config sync blob — excluded list, formulas, proc/method lists =====
-  // NOTE: active animal list is NOT stored here — derived from farmOS asset list on fetch
+  // ===== SHARED MODULE: config sync blob — formulas, proc/method lists, app-wide setup =====
+  // NOTE: active animal list is NOT stored here — derived from farmOS asset list on fetch.
+  // Animal exclusion is no longer tracked here either — Sell/Death/Retype write real
+  // farmOS records (archived status, animal_type) so removal is correct for every device.
   const config = {
     formulas,
     customProcs:   [...new Set(logs.filter(l=>l.type==="proc"&&l.data.proc).map(l=>l.data.proc))],
     customMethods: [...new Set(logs.filter(l=>l.type==="proc"&&l.data.method).map(l=>l.data.method))],
-    excludedAnimals,
     logo: localStorage.getItem("farmdesk_logo") || null
   };
   const payload = {
@@ -5379,19 +5605,8 @@ async function pullConfig(token) {
     formulas = config.formulas;
     localStorage.setItem(LS.formulas, JSON.stringify(formulas));
   }
-  // Animal list is NOT synced via config — derived from farmOS assets on fetch
-  if (Array.isArray(config.excludedAnimals)) {
-    // Merge remote excluded list with local — union, never remove local exclusions
-    config.excludedAnimals.forEach(name => {
-      if (!excludedAnimals.some(e => e.toLowerCase() === name.toLowerCase())) {
-        excludedAnimals.push(name);
-      }
-    });
-    localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
-    // Remove any newly-excluded animals from active list
-    goats = goats.filter(g => !excludedAnimals.some(e => e.toLowerCase() === g.toLowerCase()));
-    localStorage.setItem(LS.goats, JSON.stringify(goats));
-  }
+  // Animal list is NOT synced via config — derived from farmOS assets on fetch.
+  // Exclusion is no longer config-blob based — see buildConfigPayload note.
   // Custom proc/method lists are derived from logs — no need to store separately
   // Apply logo — only set if no local custom logo already saved (local overrides remote)
   if (config.logo && !localStorage.getItem("farmdesk_logo")) {
@@ -5516,19 +5731,17 @@ async function fetchAnimalUUIDs(silent = false) {
         photoUrl:  imgId ? (typeNames[imgId] || null) : null,
         photo:     prevPhoto
       };
-      // Add to goat list only if not already present (case-insensitive check) and not excluded
+      // Add to goat list only if not already present (case-insensitive check)
       const alreadyInList = goats.some(g => g.toLowerCase() === name.toLowerCase());
-      const isExcluded = excludedAnimals.some(e => e.toLowerCase() === name.toLowerCase());
-      if (!alreadyInList && !isExcluded) {
+      if (!alreadyInList) {
         goats.push(name);
       }
     });
 
-    // Auto-exclude archived animals
+    // Archived animals (sold, died, retyped) simply drop off the active list —
+    // their farmOS status is the single source of truth, no local exclusion list needed
     archivedNames.forEach(name => {
       goats = goats.filter(g => g.toLowerCase() !== name.toLowerCase());
-      const alreadyExcluded = excludedAnimals.some(e => e.toLowerCase() === name.toLowerCase());
-      if (!alreadyExcluded) excludedAnimals.push(name);
     });
 
     // Deduplicate goat list (keep first occurrence, case-insensitive)
@@ -5541,7 +5754,6 @@ async function fetchAnimalUUIDs(silent = false) {
     });
     goats.sort();
     localStorage.setItem(LS.goats, JSON.stringify(goats));
-    localStorage.setItem(LS.excluded, JSON.stringify(excludedAnimals));
     localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
 
     // Download new profile photos and shrink to thumbnails (parallel)
@@ -7874,6 +8086,11 @@ function openEditLog(id) {
 // ===== BIRDDESK MODULE ======
 // ============================
 
+// Bird species this module owns — lowercase animal_type term names.
+// Matches the pattern used by Goat's MODULE_ANIMAL_TYPES. Extend this list
+// if the farm adds other bird species typed in farmOS (e.g. turkey, quail).
+const BD_ANIMAL_TYPES = ["chicken", "duck", "goose"];
+
 const BD_LS = {
   cfg:      "farmdesk_cfg",
   assets:   "farmdesk_bird_assets",
@@ -8156,7 +8373,17 @@ async function bd_fetchAssets() {
     (data.included || []).forEach(function(inc) { if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || ''; else if (inc.type === 'asset--group') groupMap[inc.id] = inc.attributes.name || ''; });
     Object.keys(groupMap).forEach(function(gid) { var nm = groupMap[gid]; if (!bd_flocks.some(function(f) { return f.uuid === gid || f.name === nm; })) { bd_flocks.push({ name: nm, species: '', nestBoxes: [], uuid: gid }); } else { bd_flocks.forEach(function(f) { if (f.name === nm && !f.uuid) f.uuid = gid; }); } });
     localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks));
-    var fetched = (data.data || []).filter(function(a) { return !a.attributes.archived; }).map(function(a) {
+    // Only pull animals typed as a bird species this module owns. Untyped
+    // animals (no animal_type set) still come through — never silently hide
+    // someone's flock — but anything explicitly typed as another module's
+    // species (e.g. Goat) is correctly excluded here.
+    var fetched = (data.data || []).filter(function(a) {
+      if (a.attributes.archived) return false;
+      var typeRel = a.relationships && a.relationships.animal_type && a.relationships.animal_type.data;
+      var typeName = typeRel ? (typeMap[typeRel.id] || '').toLowerCase() : '';
+      if (typeName && BD_ANIMAL_TYPES.indexOf(typeName) < 0) return false; // other module's animal
+      return true;
+    }).map(function(a) {
       var typeRel = a.relationships && a.relationships.animal_type && a.relationships.animal_type.data;
       var species = typeRel ? (typeMap[typeRel.id] || '') : '';
       var grpRel = a.relationships && a.relationships.group && a.relationships.group.data;
@@ -8317,7 +8544,7 @@ function bd_speciesIcon(s) {
   var sl = s.toLowerCase();
   if (sl === 'chicken') return '&#x1F413;';
   if (sl === 'duck')    return '&#x1F986;';
-  if (sl === 'goose')   return '&#x1FAA2;';
+  if (sl === 'goose')   return '&#x1F9A2;';
   return '&#x1F426;';
 }
 
