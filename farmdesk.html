@@ -677,6 +677,7 @@ header > div:last-child { min-width: 0; }
         <strong>Account</strong>
         <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
         <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
+        <div id="cfgDebugLine" style="color:#666;font-size:11px;margin-bottom:8px;word-break:break-all;"></div>
         <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
       </div>
 
@@ -3353,6 +3354,11 @@ function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
   if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
+  const dbgLine = document.getElementById("cfgDebugLine");
+  if (dbgLine) {
+    const sdCfg = JSON.parse(localStorage.getItem("farmdesk_cfg") || "null");
+    dbgLine.textContent = "Debug — farmdesk_cfg: " + (sdCfg ? JSON.stringify({url: sdCfg.url, user: sdCfg.user, pass: sdCfg.pass ? "***" : "(empty)"}) : "null/missing");
+  }
   const connLine = document.getElementById("connStatusLine");
   if (connLine) connLine.textContent = cfg.url ? "✅ Connected: " + cfg.url : "❌ Not configured";
   if (cfg.url  && document.getElementById("farmosUrl"))  document.getElementById("farmosUrl").value  = cfg.url;
@@ -7878,7 +7884,11 @@ function bd_toggleExcludeIdx(i) {
 
 async function bd_fetchAssets() {
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { bd_toast('Set connection in ⚙️ Settings'); throw new Error('No credentials'); }
+  if (!cfg.url || !cfg.user || !cfg.pass) {
+    console.error('bd_fetchAssets: missing credentials. BD_LS.cfg key=' + BD_LS.cfg + ' raw=' + localStorage.getItem(BD_LS.cfg));
+    bd_toast('Set connection in ⚙️ Settings');
+    throw new Error('No credentials');
+  }
   bd_setLoading(true, 'Fetching birds from farmOS...');
   var el = document.getElementById('bd-test-result');
   try {
