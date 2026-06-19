@@ -489,46 +489,6 @@ header > div:last-child { min-width: 0; }
 </div>
 
 <!-- ===== SCHEDULER ===== -->
-<div id="screen-scheduler" class="screen">
-  <div class="box">
-    <h3 style="margin:4px 0 4px;">📅 Task Scheduler</h3>
-    <p style="color:#888;font-size:13px;margin:0 0 8px;">Create pending tasks for future work. Select multiple animals to create one task each.</p>
-  </div>
-
-  <div class="box">
-    <label>Log Type</label>
-    <select id="sch_type" onchange="renderSchedulerTypeFields()">
-      <option value="med">💉 Med</option>
-      <option value="obs">👁️ Observation</option>
-      <option value="hoof">Hoof</option>
-      <option value="proc">✂️ Procedure</option>
-      <option value="birth">🐐🍼 Birth</option>
-      <option value="activity">📝 Activity</option>
-    </select>
-
-    <label>Animals <span style="color:#888;font-size:12px;">(tap to select multiple)</span></label>
-    <div id="sch_animals" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
-    <div style="display:flex;gap:6px;margin-top:6px;">
-      <button type="button" onclick="schSelectAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Select All</button>
-      <button type="button" onclick="schClearAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Clear</button>
-    </div>
-
-    <label>Date &amp; Time</label>
-    <div style="display:flex;gap:6px;margin-top:4px;">
-      <input type="datetime-local" id="sch_time" style="flex:1;">
-      <button onclick="schSetNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
-    </div>
-
-    <div id="sch_type_fields" style="margin-top:4px;"></div>
-
-    <label>Notes</label>
-    <textarea id="sch_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
-
-    <button onclick="saveScheduledTasks()" style="width:100%;margin-top:12px;">📅 Schedule Tasks</button>
-    <div id="sch_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
-  </div>
-</div>
-
 <!-- ===== ANIMALS ===== -->
 <div id="screen-animals" class="screen">
   <div class="box">
@@ -587,6 +547,67 @@ header > div:last-child { min-width: 0; }
 <!-- ===== APP-LEVEL SCREENS (Settings, Sync, Help, Standalone) ===== -->
 <!-- These live outside all module divs — reachable regardless of active module -->
 <div id="app-screens" style="display:none;">
+
+<!-- ===== SCHEDULER (app-level, module-aware) ===== -->
+<div id="screen-scheduler" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="settingsHome()">← Home</button>
+    <h3 style="margin:10px 0 4px;">📅 Task Scheduler</h3>
+    <p style="color:#888;font-size:13px;margin:0 0 8px;">Create pending tasks for future work. Tasks created here appear in each module's pending list.</p>
+  </div>
+
+  <div class="box">
+    <label>Module</label>
+    <select id="sch_module" onchange="renderSchedulerModule()">
+      <!-- populated by renderScheduler() with enabled modules -->
+    </select>
+  </div>
+
+  <div id="sch_goats_panel" class="box" style="display:none;">
+    <label>Log Type</label>
+    <select id="sch_type" onchange="renderSchedulerTypeFields()">
+      <option value="med">💉 Med</option>
+      <option value="obs">👁️ Observation</option>
+      <option value="hoof">Hoof</option>
+      <option value="proc">✂️ Procedure</option>
+      <option value="birth">🐐🍼 Birth</option>
+      <option value="activity">📝 Activity</option>
+    </select>
+
+    <label>Groups <span style="color:#888;font-size:12px;">(tap to select members)</span></label>
+    <div id="sch_groups" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+
+    <label style="margin-top:8px;">Animals <span style="color:#888;font-size:12px;">(tap to select multiple)</span></label>
+    <div id="sch_animals" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button type="button" onclick="schSelectAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Select All</button>
+      <button type="button" onclick="schClearAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Clear</button>
+    </div>
+
+    <label>Date &amp; Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="sch_time" style="flex:1;">
+      <button onclick="schSetNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+
+    <div id="sch_type_fields" style="margin-top:4px;"></div>
+
+    <label>Notes</label>
+    <textarea id="sch_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
+
+    <button onclick="saveScheduledTasks()" style="width:100%;margin-top:12px;">📅 Schedule Tasks</button>
+    <div id="sch_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
+  </div>
+
+  <div id="sch_other_panel" class="box" style="display:none;">
+    <p style="color:#888;font-size:14px;text-align:center;padding:20px 0;">📅 Scheduling for this module is coming soon.</p>
+  </div>
+
+  <div class="box">
+    <strong>📋 All Pending Tasks</strong>
+    <div id="sch_taskList" style="margin-top:8px;"></div>
+  </div>
+</div>
 
 <!-- ===== DASHBOARD ===== -->
 <div id="screen-dashboard" class="screen">
@@ -1059,6 +1080,7 @@ header > div:last-child { min-width: 0; }
 <nav class="bottom-nav sd-bottom-nav">
   <button id="sd-nav-dashboard" class="active" onclick="sd_show('dashboard')">🏠<br>Stock</button>
   <button id="sd-nav-history"                  onclick="sd_show('history')">📋<br>History</button>
+  <button id="sd-nav-scheduler"                 onclick="show('scheduler')">📅<br>Scheduler</button>
   <button id="sd-nav-sync"                     onclick="sd_show('sync')">🔄<br>Sync<span id="syncBadge" class="pending-badge" style="display:none;"></span></button>
   <button id="sd-nav-settings"                 onclick="sd_show('settings')">⚙️<br>Settings</button>
 </nav>
@@ -1307,6 +1329,7 @@ header > div:last-child { min-width: 0; }
   <button id="bd-nav-birds"   onclick="bd_show('birds')"   class="active">&#x1F413; Birds</button>
   <button id="bd-nav-eggs"    onclick="bd_show('eggs')">&#x1F95A; Eggs</button>
   <button id="bd-nav-history" onclick="bd_show('history')">&#x1F4CB; History</button>
+  <button id="bd-nav-scheduler" onclick="show('scheduler')">&#x1F4C5; Scheduler</button>
   <button id="bd-nav-sync"    onclick="bd_show('sync')">&#x1F504; Sync</button>
 </nav>
 </div>
@@ -1495,6 +1518,7 @@ function showAppScreenInternal(id) {
   }
   if (id === 'standalone') { renderStandaloneScreen(); }
   if (id === 'dashboard') { renderDashboardScreen(); }
+  if (id === 'scheduler') { renderScheduler(); }
 }
 
 // Internal: actually display a goat module screen. No stack push.
@@ -1505,18 +1529,17 @@ function showGoatScreenInternal(id) {
   const screenEl = document.getElementById("screen-"+id);
   if (screenEl) screenEl.classList.add("active");
   document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
-  const navMap = { home: 'gd-nav-home', history: 'gd-nav-history', animals: 'gd-nav-animals', scheduler: 'gd-nav-scheduler' };
+  const navMap = { home: 'gd-nav-home', history: 'gd-nav-history', animals: 'gd-nav-animals' };
   const activeBtn = document.getElementById(navMap[id]);
   if (activeBtn) activeBtn.classList.add('active');
   if (id !== "entry") sessionDoseRate = null;
   if (id === "home") { renderRecent(); }
   if (id === "history") { renderHistory(); }
   if (id === "animals") { renderAnimalsScreen(); }
-  if (id === "scheduler") { renderScheduler(); }
 }
 
 function show(id) {
-  const appScreenIds = ['settings','sync','standalone','help','dashboard'];
+  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler'];
   if (appScreenIds.includes(id)) {
     showAppScreenInternal(id);
     pushNav('app', id);
@@ -4408,7 +4431,65 @@ function cloneLog(id) {
 
 // ===== SCHEDULER =====
 function renderScheduler() {
-  // Populate animal chips
+  // Populate module selector from enabled modules
+  const modSel = document.getElementById("sch_module");
+  if (!modSel) return;
+  const enabled = enabledModules();
+  modSel.innerHTML = enabled.map(m => `<option value="${m.id}">${m.label}</option>`).join("");
+  // Keep previous selection if still valid, else default to first enabled
+  const prevSel = modSel.dataset.lastValue;
+  if (prevSel && enabled.some(m => m.id === prevSel)) modSel.value = prevSel;
+  renderSchedulerModule();
+  renderAllPendingTasks();
+}
+
+function renderSchedulerModule() {
+  const modSel = document.getElementById("sch_module");
+  const modId = modSel ? modSel.value : 'goats';
+  if (modSel) modSel.dataset.lastValue = modId;
+  const goatsPanel = document.getElementById("sch_goats_panel");
+  const otherPanel = document.getElementById("sch_other_panel");
+  if (modId === 'goats') {
+    if (goatsPanel) goatsPanel.style.display = '';
+    if (otherPanel) otherPanel.style.display = 'none';
+    renderSchedulerGoatsPanel();
+  } else {
+    if (goatsPanel) goatsPanel.style.display = 'none';
+    if (otherPanel) otherPanel.style.display = '';
+  }
+}
+
+function renderSchedulerGoatsPanel() {
+  // Group chips
+  const groupContainer = document.getElementById("sch_groups");
+  if (groupContainer) {
+    if (!goatGroups.length) {
+      groupContainer.innerHTML = '<p style="color:#888;font-size:13px;margin:0;">No groups yet — manage in Animals screen.</p>';
+    } else {
+      groupContainer.innerHTML = "";
+      goatGroups.forEach(g => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.textContent = "🐐 " + g.name;
+        chip.dataset.group = g.name;
+        chip.style.cssText = "padding:6px 10px;font-size:13px;margin:0;background:#333;border-radius:16px;";
+        chip.onclick = () => {
+          // Selecting a group selects all its current members among the animal chips
+          const memberNames = goats.filter(name => animalProfiles[name] && animalProfiles[name].group === g.name);
+          const turningOn = chip.style.background !== "rgb(26, 93, 26)";
+          chip.style.background = turningOn ? "rgb(26, 93, 26)" : "#333";
+          document.querySelectorAll("#sch_animals button").forEach(b => {
+            if (memberNames.includes(b.dataset.animal)) {
+              b.style.background = turningOn ? "rgb(26, 93, 26)" : "#333";
+            }
+          });
+        };
+        groupContainer.appendChild(chip);
+      });
+    }
+  }
+
+  // Animal chips
   const container = document.getElementById("sch_animals");
   if (!container) return;
   container.innerHTML = "";
@@ -4433,8 +4514,38 @@ function renderScheduler() {
   if (timeEl) timeEl.value = local.toISOString().slice(0, 16);
 
   renderSchedulerTypeFields();
-  document.getElementById("sch_result").textContent = "";
-  document.getElementById("sch_notes").value = "";
+  const resultEl = document.getElementById("sch_result");
+  if (resultEl) resultEl.textContent = "";
+  const notesEl = document.getElementById("sch_notes");
+  if (notesEl) notesEl.value = "";
+}
+
+// Combined pending-task list across all enabled modules. Goats are fully
+// wired; Stock/Birds show a "coming soon" placeholder until their own
+// scheduling data model is built (Step B).
+function renderAllPendingTasks() {
+  const box = document.getElementById("sch_taskList");
+  if (!box) return;
+  const enabled = enabledModules().map(m => m.id);
+  let tasks = [];
+  if (enabled.includes('goats')) {
+    const goatLogs = JSON.parse(localStorage.getItem(LS.logs) || '[]');
+    goatLogs.filter(l => l.status === 'pending').forEach(t => {
+      tasks.push({ mod: 'goats', icon: '🐐', target: t.goat || 'All', type: t.type, time: t.time, id: t.id });
+    });
+  }
+  tasks.sort((a,b) => new Date(a.time) - new Date(b.time));
+  if (!tasks.length) {
+    box.innerHTML = '<p style="color:#888;font-size:13px;margin:0;">No pending tasks.</p>';
+    return;
+  }
+  box.innerHTML = tasks.map(t => {
+    const d = new Date(t.time);
+    const dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    return '<div style="padding:8px 0;border-top:1px solid #333;font-size:14px;display:flex;justify-content:space-between;align-items:center;">' +
+      '<span>' + t.icon + ' ' + t.target + ' — ' + t.type + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></span>' +
+      '</div>';
+  }).join('');
 }
 
 function schSetNow() {
@@ -4596,6 +4707,7 @@ function saveScheduledTasks() {
 
   localStorage.setItem(LS.logs, JSON.stringify(logs));
   renderPending();
+  renderAllPendingTasks();
 
   result.textContent = `✅ ${selected.length} task${selected.length > 1 ? "s" : ""} scheduled for ${new Date(timeISO).toLocaleDateString()}.`;
   result.style.color = "#3a7";
@@ -8978,7 +9090,7 @@ function renderDashboardScreen() {
       }).join('');
       if (tasks.length > 3) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (tasks.length - 3) + ' more</p>';
     }
-    html += '<button onclick="goModule(\'goats\');show(\'scheduler\')" class="secondary wide" style="margin-top:8px;">View Scheduler</button></div>';
+    html += '<button onclick="show(\'scheduler\')" class="secondary wide" style="margin-top:8px;">View Scheduler</button></div>';
   }
 
   // ===== WARNING TAGS (flagged animals — Goats only, where flags exist) =====
