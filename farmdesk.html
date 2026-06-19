@@ -6381,7 +6381,20 @@ function buildFarmOSPayload(l) {
   };
 
   // Link to animal asset if UUID is known
-  if (uuid) {
+  if (l.type === 'birth') {
+    // farmOS birth logs: "asset" = the newborn(s) — linked separately once
+    // the kid assets exist (see KID ASSET CREATION in syncToFarmOS) — and
+    // "mother" = the dam. Confirmed against a real farmOS Quick Form export
+    // (CSV: asset="Daze|Knight", mother="Athena"). An animal can only be the
+    // subject of one birth log ever (it's her own birth record), so never
+    // point "asset" at the dam here — that's what caused the 422.
+    const damUUID = animalUUIDs[l.data.dam];
+    if (damUUID) {
+      payload.data.relationships = {
+        mother: { data: { type: "asset--animal", id: damUUID } }
+      };
+    }
+  } else if (uuid) {
     payload.data.relationships = {
       asset: {
         data: [{ type: "asset--animal", id: uuid }]
