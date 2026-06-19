@@ -6101,16 +6101,17 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) el.textContent = "Fetching recent logs...";
 
     // include=image fetches the image file data alongside each log in one request
-    const [actRes, obsRes, medRes, maintRes] = await Promise.all([
+    const [actRes, obsRes, medRes, maintRes, birthRes] = await Promise.all([
       fetch(apiUrl("/api/log/activity?page[limit]=30&sort=-timestamp&include=image"),    { headers: authHeaders }),
       fetch(apiUrl("/api/log/observation?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
       fetch(apiUrl("/api/log/medical?page[limit]=30&sort=-timestamp&include=image"),     { headers: authHeaders }),
-      fetch(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders })
+      fetch(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
+      fetch(apiUrl("/api/log/birth?page[limit]=30&sort=-timestamp&include=image"),       { headers: authHeaders })
     ]);
 
     const allLogs = [];
     const imageUrlMap = {}; // file UUID -> absolute URL, built from included array
-    for (const res of [actRes, obsRes, medRes, maintRes]) {
+    for (const res of [actRes, obsRes, medRes, maintRes, birthRes]) {
       if (res.ok) {
         const d = await res.json();
         // Build image URL map from the included file entities
@@ -6160,13 +6161,23 @@ async function fetchAnimalUUIDs(silent = false) {
     const farmosLogs = [];
     allLogs.forEach(log => {
       const attrs = log.attributes;
+      const isBirth = log.type === 'log--birth';
       const assets = log.relationships?.asset?.data || [];
 
       const linkedAnimals = assets
         .map(a => Object.keys(animalUUIDs).find(name => animalUUIDs[name] === a.id))
         .filter(Boolean);
 
-      const goatLinks = linkedAnimals.filter(name => goats.includes(name));
+      // Birth logs: "asset" = the newborn(s), "mother" = the dam. Attribute
+      // the log to the dam (matches how it's created locally), not a kid.
+      let goatLinks;
+      if (isBirth) {
+        const motherRel = log.relationships?.mother?.data;
+        const motherName = motherRel ? Object.keys(animalUUIDs).find(name => animalUUIDs[name] === motherRel.id) : null;
+        goatLinks = (motherName && goats.includes(motherName)) ? [motherName] : [];
+      } else {
+        goatLinks = linkedAnimals.filter(name => goats.includes(name));
+      }
       if (goatLinks.length === 0) return;
 
       const logEntry = {
@@ -6191,6 +6202,23 @@ async function fetchAnimalUUIDs(silent = false) {
                   return new Date().toISOString();
                 })(),
         data:   (() => {
+                  // Birth logs don't fit the generic text-note parser — kids/dam
+                  // live in relationships (asset/mother), not text to regex apart.
+                  if (isBirth) {
+                    const notesText = attrs.notes?.value || "";
+                    const sireMatch = notesText.match(/Sire:\s*(.+)/);
+                    const parsed = {
+                      kids:  linkedAnimals.map(n => ({ name: n, sex: '', tag: '' })),
+                      dam:   goatLinks[0] || "",
+                      sire:  sireMatch ? sireMatch[1].trim() : "",
+                      type:  "Natural",
+                      notes: notesText
+                    };
+                    const imageRel = log.relationships?.image?.data;
+                    const imageArr = Array.isArray(imageRel) ? imageRel : (imageRel ? [imageRel] : []);
+                    if (imageArr.length > 0 && imageUrlMap[imageArr[0].id]) parsed.photo = imageUrlMap[imageArr[0].id];
+                    return parsed;
+                  }
                   const parsed = parseFarmOSNotes(log.type, attrs.name, attrs.notes?.value || "", attrs.quantity || []);
                   // Attach first image URL if one was uploaded with this log
                   const imageRel = log.relationships?.image?.data;
