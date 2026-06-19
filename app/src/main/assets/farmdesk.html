@@ -1366,7 +1366,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781908142"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781908709"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6554,7 +6554,7 @@ async function syncToFarmOS() {
         } else {
           const txt = await res.text();
           fail++;
-          logEl.textContent += `❌ ${l.goat} ${l.type} — ${res.status}: ${txt.slice(0,80)}\n`;
+          logEl.textContent += `❌ ${l.goat} ${l.type} — ${res.status}: ${txt.slice(0,250)}\n`;
         }
       } catch(e) {
         fail++;
@@ -6608,7 +6608,7 @@ async function syncToFarmOS() {
         } else {
           const txt = await res.text();
           fail++;
-          logEl.textContent += `❌ PATCH ${l.goat} ${l.type} — ${res.status}: ${txt.slice(0,80)}\n`;
+          logEl.textContent += `❌ PATCH ${l.goat} ${l.type} — ${res.status}: ${txt.slice(0,250)}\n`;
         }
       } catch(e) {
         fail++;
