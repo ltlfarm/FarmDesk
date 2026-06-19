@@ -8791,6 +8791,8 @@ function renderModuleBar() {
 function switchModule(modId) {
   if (!moduleEnabled(modId)) modId = enabledModules()[0].id;
   localStorage.setItem(MODULE_KEY, modId);
+  const appEl = document.getElementById('app-screens');
+  if (appEl) appEl.style.display = 'none';
   MODULES.forEach(m => {
     const el = document.getElementById(m.containerId);
     if (el) el.style.display = m.id === modId ? '' : 'none';
@@ -9015,6 +9017,8 @@ window.addEventListener('popstate', function(e) {
   const entry = navStack[navStack.length - 1];
   if (entry.mod !== 'app') {
     localStorage.setItem(MODULE_KEY, entry.mod);
+    const appEl = document.getElementById('app-screens');
+    if (appEl) appEl.style.display = 'none';
     MODULES.forEach(m => {
       const el = document.getElementById(m.containerId);
       if (el) el.style.display = m.id === entry.mod ? '' : 'none';

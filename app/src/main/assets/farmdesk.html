@@ -1340,7 +1340,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781837532"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781838452"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8791,6 +8791,8 @@ function renderModuleBar() {
 function switchModule(modId) {
   if (!moduleEnabled(modId)) modId = enabledModules()[0].id;
   localStorage.setItem(MODULE_KEY, modId);
+  const appEl = document.getElementById('app-screens');
+  if (appEl) appEl.style.display = 'none';
   MODULES.forEach(m => {
     const el = document.getElementById(m.containerId);
     if (el) el.style.display = m.id === modId ? '' : 'none';
@@ -9015,6 +9017,8 @@ window.addEventListener('popstate', function(e) {
   const entry = navStack[navStack.length - 1];
   if (entry.mod !== 'app') {
     localStorage.setItem(MODULE_KEY, entry.mod);
+    const appEl = document.getElementById('app-screens');
+    if (appEl) appEl.style.display = 'none';
     MODULES.forEach(m => {
       const el = document.getElementById(m.containerId);
       if (el) el.style.display = m.id === entry.mod ? '' : 'none';
