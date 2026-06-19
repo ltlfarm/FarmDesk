@@ -1366,7 +1366,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781881977"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781884513"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4375,6 +4375,9 @@ async function saveMoveLog() {
 
 function editAnimalProfile(name) {
   var p = animalProfiles[name] || {};
+  var modal = document.getElementById("editModal");
+  var body  = document.getElementById("editFields");
+  if (!modal || !body) return;
   body.innerHTML =
     '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
     '<input id="epTag" placeholder="Tag/ID" value="' + (p.tag||"").replace(/"/g,"&quot;") + '" style="flex:1;">' +
@@ -4409,14 +4412,20 @@ function saveAnimalProfile(name) {
   var p = animalProfiles[name] || {};
   var newGroup = document.getElementById("epGroup").value;
   var groupChanged = newGroup !== (p.group || "");
+  var newSex = document.getElementById("epSex").value;
+  var newDob = document.getElementById("epDob").value;
+  var newBreed = document.getElementById("epBreed").value;
+  var newTag = document.getElementById("epTag").value;
+  var newNotes = document.getElementById("epNotes").value;
+  var coreChanged = newSex !== (p.sex||"") || newDob !== (p.birthdate||"") || newBreed !== (p.breed||"") || newTag !== (p.tag||"") || newNotes !== (p.notes||"");
   animalProfiles[name] = {
-    sex:       document.getElementById("epSex").value,
-    birthdate: document.getElementById("epDob").value,
-    breed:     document.getElementById("epBreed").value,
+    sex:       newSex,
+    birthdate: newDob,
+    breed:     newBreed,
     type:      document.getElementById("epSpecies").value,
     group:     newGroup,
-    notes:     document.getElementById("epNotes").value,
-    tag:       document.getElementById("epTag").value,
+    notes:     newNotes,
+    tag:       newTag,
     flags:     p.flags || [],
     photo:     p.photo || null,
     photoId:   p.photoId || null,
@@ -4429,6 +4438,41 @@ function saveAnimalProfile(name) {
     pushGoatGroupAssign(name, newGroup).then(function(ok) {
       if (ok) showToast("✅ Group updated in farmOS");
     });
+  }
+  if (coreChanged) {
+    pushAnimalProfileCore(name, { sex: newSex, birthdate: newDob, breed: newBreed, tag: newTag, notes: newNotes }).then(function(ok) {
+      if (ok) showToast("✅ Profile synced to farmOS");
+    });
+  }
+}
+
+// Push core editable profile fields (sex, DOB, breed, tag, notes) to the
+// farmOS asset--animal record. Group and flags are pushed separately by
+// their own dedicated functions — this covers everything else in the Edit form.
+async function pushAnimalProfileCore(name, fields) {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
+  var uuid = animalUUIDs[name];
+  if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
+  try {
+    var token = await getToken(cfg);
+    var attrs = {};
+    if (fields.sex) attrs.sex = fields.sex.toLowerCase() === 'm' ? 'male' : fields.sex.toLowerCase() === 'f' ? 'female' : fields.sex.toLowerCase();
+    if (fields.birthdate) attrs.birthdate = fields.birthdate;
+    if (fields.breed) attrs.breed = fields.breed;
+    if (fields.tag) attrs.id_tag = [{ id: fields.tag, type: 'tag' }];
+    if (fields.notes) attrs.notes = { value: fields.notes, format: 'default' };
+    var payload = { data: { type: 'asset--animal', id: uuid, attributes: attrs } };
+    var res = await fetch(apiUrl('/api/asset/animal/' + uuid), {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
+    return true;
+  } catch(e) {
+    showToast('⚠️ Profile sync failed: ' + e.message);
+    return false;
   }
 }
 
@@ -4540,7 +4584,6 @@ async function addAnimalFromScreen() {
         type: 'asset--animal',
         attributes: {
           name: name,
-          status: 'active',
           ...(sex ? { sex: sex.toLowerCase() === 'm' ? 'male' : sex.toLowerCase() === 'f' ? 'female' : sex.toLowerCase() } : {}),
           ...(dob ? { birthdate: dob } : {}),
           ...(tag ? { id_tag: [{ id: tag, type: 'tag' }] } : {})
@@ -6283,7 +6326,6 @@ async function syncToFarmOS() {
                   type: 'asset--animal',
                   attributes: {
                     name: kid.name,
-                    status: 'active',
                     ...(kid.sex ? { sex: kid.sex.toLowerCase() === 'm' ? 'male' : kid.sex.toLowerCase() === 'f' ? 'female' : kid.sex.toLowerCase() } : {}),
                     ...(kid.tag ? { id_tag: [{ id: kid.tag, type: 'tag' }] } : {}),
                     birthdate: new Date(parseInt(birthTs) * 1000).toISOString().slice(0, 10)
@@ -8532,12 +8574,32 @@ async function bd_pushLog(log, token) {
 }
 
 async function bd_pushCreateBird(bird, token) {
-  var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), status: 'active', id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
+  var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
+  if (bird.sex) payload.data.attributes.sex = bird.sex;
+  if (bird.breed) payload.data.attributes.breed = bird.breed;
+  if (bird.notes) payload.data.attributes.notes = { value: bird.notes, format: 'default' };
+  if (bird.species) {
+    try {
+      var typeId = await ensureAnimalTypeUUID(bird.species, token);
+      if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
+    } catch(e) { /* species set is best-effort on create — core fields still save */ }
+  }
   var res = await fetch(bd_apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
   var data = await res.json();
   var lb = bd_birds.filter(function(b) { return b._localId === bird._localId; })[0];
-  if (lb && data.data && data.data.id) { lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); if (lb.flock) { try { await bd_pushGroupAssign(lb.uuid, lb.flock, token); } catch(e) { bd_pending.push({ action: 'group_assign', birdUUID: lb.uuid, flockName: lb.flock, id: 'ga_' + Date.now(), synced: false }); localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending)); } } }
+  if (lb && data.data && data.data.id) {
+    lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+    if (lb.flock) { try { await bd_pushGroupAssign(lb.uuid, lb.flock, token); } catch(e) { bd_pending.push({ action: 'group_assign', birdUUID: lb.uuid, flockName: lb.flock, id: 'ga_' + Date.now(), synced: false }); localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending)); } }
+    // Upload photo if present (two-step binary POST), same as update path
+    if (lb.photo && lb.photo.startsWith('data:')) {
+      try {
+        var blob = await (await fetch(lb.photo)).blob();
+        var fd = new FormData(); fd.append('file', blob, 'bird-' + lb.uuid + '.jpg');
+        await fetch(bd_apiUrl('/api/asset/animal/' + lb.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+      } catch(e) { /* photo upload non-fatal */ }
+    }
+  }
 }
 
 async function bd_pushUpdateBird(bird, token) {
