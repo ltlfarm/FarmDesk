@@ -373,6 +373,7 @@ header > div:last-child { min-width: 0; }
     <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
     <div style="display:flex;gap:6px;align-items:center;">
       <div class="module-switcher" id="moduleSwitcher"></div>
+      <button class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
       <button class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
     </div>
     <small id="syncStatus">Offline</small>
@@ -532,6 +533,7 @@ header > div:last-child { min-width: 0; }
 <div id="screen-animals" class="screen">
   <div class="box">
     <h3 style="margin:4px 0 6px;">🐐 Animals</h3>
+    <button onclick="openMoveScreen([])" class="secondary wide">📍 Move Animals</button>
   </div>
 
   <div class="box">
@@ -582,6 +584,15 @@ header > div:last-child { min-width: 0; }
 <!-- ===== APP-LEVEL SCREENS (Settings, Sync, Help, Standalone) ===== -->
 <!-- These live outside all module divs — reachable regardless of active module -->
 <div id="app-screens" style="display:none;">
+
+<!-- ===== DASHBOARD ===== -->
+<div id="screen-dashboard" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="settingsHome()">← Home</button>
+    <h3 style="margin:10px 0 6px;">🏠 Dashboard</h3>
+  </div>
+  <div id="dashboardContent"></div>
+</div>
 
 <!-- ===== SETTINGS ===== -->
 <div id="screen-settings" class="screen">
@@ -1314,6 +1325,8 @@ const LS = {
   animalUUIDs:    "farmdesk_animalUUIDs",
   goatTypeUUID:   "farmdesk_goatTypeUUID",
   flagSchema:     "farmdesk_flagSchema",
+  locations:      "farmdesk_locations",
+  animalLocations:"farmdesk_animalLocations",
   profiles:       "farmdesk_animal_profiles",
   configLogUUID:  "farmdesk_configLogUUID",
   lastSync:       "farmdesk_lastSync",
@@ -1326,7 +1339,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781805242"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781834744"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1361,6 +1374,8 @@ let excludedAnimals = JSON.parse(localStorage.getItem(LS.excluded) || "[]");
 let logs  = JSON.parse(localStorage.getItem(LS.logs)  || "[]");
 let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
 let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // keyed by animal name
+let locations = JSON.parse(localStorage.getItem(LS.locations) || "{}"); // keyed by farmOS UUID: {name, type, notes}
+let animalLocations = JSON.parse(localStorage.getItem(LS.animalLocations) || "{}"); // keyed by animal name: {locationUuid, locationName, timestamp}
 
 // ===== ONE-TIME: drop oversized cached profile photos that blew the quota =====
 // Full-res photos were cached in an earlier build; strip photos but keep the
@@ -1421,49 +1436,87 @@ let formulas = JSON.parse(localStorage.getItem(LS.formulas) || "null") || {
 // ===== SESSION =====
 let sessionDoseRate = null; // dose-unit per lb — persists through med flow, null = use formula default
 let _lastSavedEntry = null; // set by saveStep, read by saveAndHome/nextAction for med deduct prompt
-// Back button handled by the module-aware popstate listener at the bottom
-// of this script. Push an initial state so it fires.
-history.pushState({ page: "home" }, "");
 
-function show(id) {
-  // Settings, Sync, Help, Standalone are app-level — not inside module-goatdesk
-  const appScreenIds = ['settings','sync','standalone','help'];
-  if (appScreenIds.includes(id)) {
-    document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
-    document.getElementById('module-goatdesk').style.display = 'none';
-    document.getElementById('app-screens').style.display = '';
-    const screenEl = document.getElementById('screen-' + id);
-    if (screenEl) screenEl.classList.add('active');
-    if (id !== 'home') history.pushState({ page: id }, '');
-    if (id === 'settings') { renderSettings(); }
-    if (id === 'sync') {
-      if (localStorage.getItem(LS.standalone) === '1') { show('standalone'); return; }
-      // Highlight sync nav button before leaving module
-      document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
-      var sn = document.getElementById('gd-nav-sync'); if (sn) sn.classList.add('active');
-      renderSync();
-    }
-    if (id === 'standalone') { renderStandaloneScreen(); }
-    return;
+// ===== NAVIGATION STACK =====
+// Single source of truth for back-button behavior across all modules.
+// Each entry: { mod: 'goats'|'stock'|'birds'|'app', screen: 'home'|'history'|... }
+// Tab switch resets the stack to [home]. Screen navigation pushes. Back pops.
+// When the stack is down to one entry, back press exits the app (default browser/Android behavior).
+let navStack = [{ mod: localStorage.getItem('farmdesk_activeModule') || 'goats', screen: 'home' }];
+
+function pushNav(mod, screen) {
+  const top = navStack[navStack.length - 1];
+  if (top && top.mod === mod && top.screen === screen) return; // no duplicate pushes
+  navStack.push({ mod, screen });
+  history.pushState({ navIndex: navStack.length - 1 }, '');
+}
+
+function resetNavStack(mod, screen) {
+  navStack = [{ mod, screen: screen || 'home' }];
+  history.pushState({ navIndex: 0 }, '');
+}
+
+// Restore a screen by mod+screen without pushing (used when popping back)
+function restoreNavEntry(entry) {
+  if (entry.mod === 'app') {
+    showAppScreenInternal(entry.screen);
+  } else if (entry.mod === 'goats') {
+    showGoatScreenInternal(entry.screen);
+  } else if (entry.mod === 'stock') {
+    sd_showInternal(entry.screen);
+  } else if (entry.mod === 'birds') {
+    bd_showInternal(entry.screen);
   }
+}
+
+history.pushState({ navIndex: 0 }, '');
+
+// Internal: actually display an app-level screen (Settings/Sync/Standalone/Help). No stack push.
+function showAppScreenInternal(id) {
+  document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('module-goatdesk').style.display = 'none';
+  document.getElementById('app-screens').style.display = '';
+  const screenEl = document.getElementById('screen-' + id);
+  if (screenEl) screenEl.classList.add('active');
+  if (id === 'settings') { renderSettings(); }
+  if (id === 'sync') {
+    if (localStorage.getItem(LS.standalone) === '1') { showAppScreenInternal('standalone'); return; }
+    document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
+    var sn = document.getElementById('gd-nav-sync'); if (sn) sn.classList.add('active');
+    renderSync();
+  }
+  if (id === 'standalone') { renderStandaloneScreen(); }
+  if (id === 'dashboard') { renderDashboardScreen(); }
+}
+
+// Internal: actually display a goat module screen. No stack push.
+function showGoatScreenInternal(id) {
   document.querySelectorAll("#module-goatdesk .screen").forEach(s => s.classList.remove("active"));
   document.getElementById('app-screens').style.display = 'none';
   document.getElementById('module-goatdesk').style.display = '';
   const screenEl = document.getElementById("screen-"+id);
   if (screenEl) screenEl.classList.add("active");
-  if (id !== "home") history.pushState({ page: id }, "");
-  // Update bottom nav active state
   document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
   const navMap = { home: 'gd-nav-home', history: 'gd-nav-history', animals: 'gd-nav-animals', scheduler: 'gd-nav-scheduler' };
   const activeBtn = document.getElementById(navMap[id]);
   if (activeBtn) activeBtn.classList.add('active');
-  // Reset session dose rate when leaving entry screen
   if (id !== "entry") sessionDoseRate = null;
   if (id === "home") { renderRecent(); }
   if (id === "history") { renderHistory(); }
   if (id === "animals") { renderAnimalsScreen(); }
   if (id === "scheduler") { renderScheduler(); }
+}
+
+function show(id) {
+  const appScreenIds = ['settings','sync','standalone','help','dashboard'];
+  if (appScreenIds.includes(id)) {
+    showAppScreenInternal(id);
+    pushNav('app', id);
+    return;
+  }
+  showGoatScreenInternal(id);
+  pushNav('goats', id);
 }
 
 // ===== FLOW =====
@@ -3860,26 +3913,129 @@ function openAnimalProfile(name) {
     }
   }
 
+  // Location
+  var loc = animalLocations[name];
+  var locText = '';
+  if (loc && loc.locationName) {
+    var when = '';
+    try {
+      var d = new Date(loc.timestamp * 1000 || loc.timestamp);
+      if (!isNaN(d)) when = ' (' + d.toLocaleDateString() + ')';
+    } catch(e) {}
+    locText = '📍 ' + loc.locationName + when;
+  }
+
   body.innerHTML = img +
     row("Tag/ID", p.tag) + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
-    row("Species", p.type) + row("Breed", p.breed) + row("Group", p.group) + row("Notes", p.notes) +
+    row("Species", p.type) + row("Breed", p.breed) + row("Group", p.group) +
+    row("Location", locText) + row("Notes", p.notes) +
     flagsHTML +
     '<div style="display:flex;gap:8px;margin-top:12px;">' +
     '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="flex:1;margin:0;">Log for ' + name + '</button>' +
     '<button onclick="editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
-    '</div>';
+    '</div>' +
+    '<button onclick="closeEdit(); openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>';
   var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
   modal.style.display = "block";
   lazyLoadPhotos(body);
 }
 
+function openMoveScreen(animalNames) {
+  var modal = document.getElementById('moveModal');
+  var fields = document.getElementById('moveFields');
+  if (!modal || !fields) return;
+  var locArr = Object.entries(locations).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var animalChips = goats.map(function(g) {
+    var checked = animalNames && animalNames.includes(g) ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;"><input type="checkbox" value="' + g.replace(/"/g,'&quot;') + '" class="move-animal-cb"' + checked + ' style="width:18px;height:18px;">' + g + '</label>';
+  }).join('');
+  fields.innerHTML =
+    '<label>Animals</label>' +
+    '<div style="max-height:160px;overflow-y:auto;background:#222;border-radius:6px;padding:8px;">' + (animalChips || '<p style="color:#888;font-size:13px;">No animals available.</p>') + '</div>' +
+    '<label style="margin-top:10px;">Move to</label>' +
+    '<select id="moveLocationSelect">' +
+      '<option value="">— select location —</option>' +
+      locArr.map(function(l){ return '<option value="' + l.uuid + '">' + (l.type === 'structure' ? '🏚️ ' : '🌾 ') + l.name + '</option>'; }).join('') +
+    '</select>' +
+    (locArr.length ? '' : '<p style="color:#888;font-size:13px;margin-top:4px;">No locations found — add land/structure assets in farmOS, or sync first.</p>') +
+    '<label style="margin-top:10px;">Notes</label>' +
+    '<textarea id="moveNotes" rows="2" placeholder="Optional notes"></textarea>';
+  modal.style.display = 'block';
+}
+
+function closeMoveModal() {
+  var modal = document.getElementById('moveModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveMoveLog() {
+  var selectedAnimals = Array.from(document.querySelectorAll('.move-animal-cb:checked')).map(function(cb){ return cb.value; });
+  var locUuid = document.getElementById('moveLocationSelect').value;
+  var notes = document.getElementById('moveNotes').value || '';
+  if (!selectedAnimals.length) { showToast('⚠️ Select at least one animal'); return; }
+  if (!locUuid) { showToast('⚠️ Select a location'); return; }
+  var locName = locations[locUuid] ? locations[locUuid].name : '';
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return; }
+
+  var btn = document.getElementById('moveSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  try {
+    var token = await getToken(cfg);
+    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+    var ts = String(Math.floor(Date.now() / 1000));
+    var missingUUID = [];
+    var assetRelationships = selectedAnimals.map(function(name) {
+      var uuid = animalUUIDs[name];
+      if (!uuid) missingUUID.push(name);
+      return uuid ? { type: 'asset--animal', id: uuid } : null;
+    }).filter(Boolean);
+
+    if (!assetRelationships.length) {
+      showToast('⚠️ No synced animal UUIDs — sync first');
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
+      return;
+    }
+
+    var payload = { data: {
+      type: 'log--movement',
+      attributes: {
+        name: 'Move: ' + selectedAnimals.join(', ') + ' → ' + locName,
+        timestamp: ts,
+        status: 'done',
+        notes: { value: notes, format: 'default' }
+      },
+      relationships: {
+        asset: { data: assetRelationships },
+        location: { data: [{ type: locations[locUuid].type === 'structure' ? 'asset--structure' : 'asset--land', id: locUuid }] }
+      }
+    }};
+
+    var res = await fetch(apiUrl('/api/log/movement'), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    if (res.ok) {
+      selectedAnimals.forEach(function(name) {
+        animalLocations[name] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+      });
+      localStorage.setItem(LS.animalLocations, JSON.stringify(animalLocations));
+      var msg = '✅ Moved ' + selectedAnimals.length + ' animal(s) to ' + locName;
+      if (missingUUID.length) msg += ' (skipped: ' + missingUUID.join(', ') + ' — not synced)';
+      showToast(msg);
+      closeMoveModal();
+      if (document.getElementById('screen-animals') && document.getElementById('screen-animals').classList.contains('active')) renderAnimalsScreen();
+    } else {
+      var errText = await res.text();
+      showToast('⚠️ Move failed: ' + res.status);
+    }
+  } catch(e) {
+    showToast('⚠️ ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
+  }
+}
+
 function editAnimalProfile(name) {
   var p = animalProfiles[name] || {};
-  var modal = document.getElementById("editModal");
-  var body  = document.getElementById("editFields");
-  var title = document.getElementById("editTitle");
-  if (!modal || !body) return;
-  if (title) title.textContent = "Edit: " + name;
   body.innerHTML =
     '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
     '<input id="epTag" placeholder="Tag/ID" value="' + (p.tag||"").replace(/"/g,"&quot;") + '" style="flex:1;">' +
@@ -3942,6 +4098,14 @@ function renderAnimalsScreen() {
     var wrap = document.createElement("div");
     wrap.innerHTML = assetCardHTML(prof.photo || null, g, animalDetailLine(g), "", prof.photoId || null);
     var card = wrap.firstElementChild;
+    // Location line
+    var loc = animalLocations[g];
+    if (loc && loc.locationName) {
+      var locDiv = document.createElement('div');
+      locDiv.style.cssText = 'padding:0 10px 4px;color:#7ab;font-size:12px;';
+      locDiv.textContent = '📍 ' + loc.locationName;
+      card.appendChild(locDiv);
+    }
     // Flag badges
     if (prof.flags && prof.flags.length) {
       var flagDiv = document.createElement('div');
@@ -5141,6 +5305,75 @@ async function fetchAnimalUUIDs(silent = false) {
     saveProfilesSafely();
     populateGoatSelect();
 
+    // ===== STEP 4: Fetch locations (land + structure assets) and current animal positions =====
+    // Template pattern: any future module (birds, equipment, etc.) can reuse this exact
+    // fetch + cache pattern against the same farmOS land/structure assets.
+    if (!silent && el) el.textContent = "Fetching locations...";
+    try {
+      const [landRes, structRes] = await Promise.all([
+        fetch(apiUrl('/api/asset/land?page[limit]=100'), { headers: authHeaders }),
+        fetch(apiUrl('/api/asset/structure?page[limit]=100'), { headers: authHeaders })
+      ]);
+      const newLocations = {};
+      if (landRes.ok) {
+        const landData = await landRes.json();
+        (landData.data || []).forEach(function(l) {
+          if (l.attributes.status === 'archived') return;
+          newLocations[l.id] = {
+            name: l.attributes.name || '(unnamed)',
+            type: 'land',
+            notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim()
+          };
+        });
+      }
+      if (structRes.ok) {
+        const structData = await structRes.json();
+        (structData.data || []).forEach(function(s) {
+          if (s.attributes.status === 'archived') return;
+          newLocations[s.id] = {
+            name: s.attributes.name || '(unnamed)',
+            type: 'structure',
+            notes: ((s.attributes.notes && (s.attributes.notes.value || s.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim()
+          };
+        });
+      }
+      locations = newLocations;
+      localStorage.setItem(LS.locations, JSON.stringify(locations));
+
+      // Fetch recent movement logs to determine each animal's current location.
+      // Movements are sorted newest-first; first occurrence per animal wins.
+      const moveRes = await fetch(apiUrl('/api/log/movement?sort=-timestamp&page[limit]=100&include=asset,location'), { headers: authHeaders });
+      if (moveRes.ok) {
+        const moveData = await moveRes.json();
+        const assetNames = {}; // uuid -> name, from included asset--animal records
+        (moveData.included || []).forEach(function(inc) {
+          if (inc.type === 'asset--animal') assetNames[inc.id] = inc.attributes.name || '';
+        });
+        const newAnimalLocations = { ...animalLocations };
+        (moveData.data || []).forEach(function(log) {
+          const ts = log.attributes.timestamp;
+          const locRel = log.relationships && log.relationships.location && log.relationships.location.data;
+          const locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
+          if (!locArr.length) return;
+          const locUuid = locArr[0].id;
+          const locName = locations[locUuid] ? locations[locUuid].name : null;
+          if (!locName) return;
+          const assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+          const assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          assetArr.forEach(function(a) {
+            const animalName = assetNames[a.id];
+            if (!animalName) return;
+            const existing = newAnimalLocations[animalName];
+            if (!existing || new Date(ts) > new Date(existing.timestamp)) {
+              newAnimalLocations[animalName] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+            }
+          });
+        });
+        animalLocations = newAnimalLocations;
+        localStorage.setItem(LS.animalLocations, JSON.stringify(animalLocations));
+      }
+    } catch(le) { /* location fetch is best-effort — never blocks the rest of sync */ }
+
     // ===== STEP 3: Fetch recent logs =====
     if (!silent && el) el.textContent = "Fetching recent logs...";
 
@@ -6090,22 +6323,22 @@ let adjustAction = 'increment';
 let syringeMap = {};
 let needleMap  = {};
 
-// ===== SCREEN NAV =====
-function sd_show(id) {
-  // Settings is now app-level
-  if (id === 'settings') {
-    openSharedSettings();
-    return;
-  }
+// Internal: actually display a stock module screen. No stack push.
+function sd_showInternal(id) {
   document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
   const sdScreenEl = document.getElementById('sd-screen-' + id);
   if (sdScreenEl) sdScreenEl.classList.add('active');
   document.querySelectorAll('.sd-bottom-nav button').forEach(b => b.classList.remove('active'));
   const navBtn = document.getElementById('sd-nav-' + id);
   if (navBtn) navBtn.classList.add('active');
-  if (id !== 'dashboard') window.history.pushState({ page: id }, '');
   if (id === 'history') sd_renderHistory();
   if (id === 'sync') sd_renderSyncScreen();
+}
+
+function sd_show(id) {
+  if (id === 'settings') { openSharedSettings(); return; }
+  sd_showInternal(id);
+  pushNav('stock', id);
 }
 
 // showToast — shared, defined in GoatDesk module above
@@ -7412,9 +7645,8 @@ var bd_typeListGlobal = [];
 var bd_editingLogId = null;
 var _bd_useProxy = false;
 
-function bd_show(id) {
-  // Settings deferred to shared GD settings
-  if (id === 'settings') { openSharedSettings(); return; }
+// Internal: actually display a bird module screen. No stack push.
+function bd_showInternal(id) {
   document.querySelectorAll('#module-birddesk .screen').forEach(function(s) { s.classList.remove('active'); });
   var el = document.getElementById('bd-screen-' + id);
   if (el) el.classList.add('active');
@@ -7425,7 +7657,12 @@ function bd_show(id) {
   if (id === 'eggs')    bd_initEggs();
   if (id === 'history') bd_renderHistory();
   if (id === 'sync')    bd_renderSync();
-  if (id !== 'birds') window.history.pushState({ bdPage: id }, '');
+}
+
+function bd_show(id) {
+  if (id === 'settings') { openSharedSettings(); return; }
+  bd_showInternal(id);
+  pushNav('birds', id);
 }
 
 function bd_setLoading(on, msg) {
@@ -8558,13 +8795,132 @@ function switchModule(modId) {
 
 function goModule(id) {
   var cur = localStorage.getItem(MODULE_KEY);
-  if (id !== cur) history.pushState({ mod: id }, '');
   switchModule(id);
+  resetNavStack(id, 'home');
 }
 
 // ── SHARED SETTINGS ──
 // Settings/Sync physically live in the goatdesk container. These open them
 // from ANY module (even with Goats disabled) and return to the right home.
+function renderDashboardScreen() {
+  const box = document.getElementById('dashboardContent');
+  if (!box) return;
+  const enabled = enabledModules().map(m => m.id);
+  let html = '';
+
+  // ===== TASKS (Goats only — pending scheduled logs) =====
+  if (enabled.includes('goats')) {
+    const goatLogs = JSON.parse(localStorage.getItem(LS.logs) || '[]');
+    const tasks = goatLogs.filter(l => l.status === 'pending').sort((a,b) => new Date(a.time) - new Date(b.time));
+    html += '<div class="box"><strong>📅 Tasks' + (tasks.length ? ' (' + tasks.length + ')' : '') + '</strong>';
+    if (!tasks.length) {
+      html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No pending tasks.</p>';
+    } else {
+      html += tasks.slice(0,3).map(t => {
+        const d = new Date(t.time);
+        const dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + (t.animal || 'All') + ' — ' + (t.type||'') + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
+      }).join('');
+      if (tasks.length > 3) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (tasks.length - 3) + ' more</p>';
+    }
+    html += '<button onclick="goModule(\'goats\');show(\'scheduler\')" class="secondary wide" style="margin-top:8px;">View Scheduler</button></div>';
+  }
+
+  // ===== WARNING TAGS (flagged animals — Goats only, where flags exist) =====
+  if (enabled.includes('goats')) {
+    const flagged = Object.keys(animalProfiles).filter(name => animalProfiles[name].flags && animalProfiles[name].flags.length);
+    html += '<div class="box"><strong>🚩 Warning Tags' + (flagged.length ? ' (' + flagged.length + ')' : '') + '</strong>';
+    if (!flagged.length) {
+      html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No flagged animals.</p>';
+    } else {
+      html += flagged.slice(0,5).map(name => {
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + JSON.stringify(name) + ');},150);">' +
+          name + ' ' + flagBadgesHTML(animalProfiles[name].flags, false, null) + '</div>';
+      }).join('');
+      if (flagged.length > 5) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (flagged.length - 5) + ' more</p>';
+    }
+    html += '</div>';
+  }
+
+  // ===== RECENT LOGS (across enabled modules) =====
+  let recentItems = [];
+  if (enabled.includes('goats')) {
+    const goatLogs = JSON.parse(localStorage.getItem(LS.logs) || '[]').filter(l => l.status !== 'pending');
+    goatLogs.forEach(l => recentItems.push({ mod: 'goats', time: l.time, text: (l.animal||'Goat') + ' — ' + (l.type||'') }));
+  }
+  if (enabled.includes('birds')) {
+    const birdLogs = JSON.parse(localStorage.getItem(BD_LS.history) || '[]');
+    birdLogs.forEach(l => recentItems.push({ mod: 'birds', time: l.time || l.timestamp, text: (l.birdName || l.flockName || 'Bird') + ' — ' + (l.type||'') }));
+  }
+  recentItems.sort((a,b) => new Date(b.time) - new Date(a.time));
+  html += '<div class="box"><strong>🗒️ Recent Logs</strong>';
+  if (!recentItems.length) {
+    html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No logs yet.</p>';
+  } else {
+    html += recentItems.slice(0,5).map(it => {
+      const d = new Date(it.time);
+      const dateStr = isNaN(d) ? '' : d.toLocaleDateString();
+      const icon = it.mod === 'goats' ? '🐐' : '🐦';
+      return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + icon + ' ' + it.text + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
+    }).join('');
+  }
+  html += '</div>';
+
+  // ===== LOW INVENTORY (Stock only) =====
+  if (enabled.includes('stock')) {
+    const sdAssets = JSON.parse(localStorage.getItem(SD_LS.assets) || '[]');
+    const sdThresh = JSON.parse(localStorage.getItem(SD_LS.thresholds) || '{}');
+    const low = sdAssets.filter(a => {
+      const t = sdThresh[a.uuid] || 0;
+      return a.value <= 0 || (t > 0 && a.value <= t);
+    });
+    html += '<div class="box"><strong>📦 Low Inventory' + (low.length ? ' (' + low.length + ')' : '') + '</strong>';
+    if (!low.length) {
+      html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">All stock levels OK.</p>';
+    } else {
+      html += low.slice(0,5).map(a => {
+        const tag = a.value <= 0 ? '<span style="color:#e55;">EMPTY</span>' : '<span style="color:#fa3;">LOW</span>';
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + a.name + ' — ' + a.value + (a.units?' '+a.units:'') + ' ' + tag + '</div>';
+      }).join('');
+      if (low.length > 5) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (low.length - 5) + ' more</p>';
+    }
+    html += '<button onclick="goModule(\'stock\')" class="secondary wide" style="margin-top:8px;">View Stock</button></div>';
+  }
+
+  // ===== SYNC STATUS (per enabled module) =====
+  html += '<div class="box"><strong>🔄 Sync Status</strong>';
+  if (enabled.includes('goats')) {
+    const ls = localStorage.getItem(LS.lastSync);
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">🐐 Goats — ' + (ls ? ls : 'Never synced') + '</div>';
+  }
+  if (enabled.includes('stock')) {
+    const ls = localStorage.getItem(SD_LS.lastSync);
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">📦 Stock — ' + (ls ? ls : 'Never synced') + '</div>';
+  }
+  if (enabled.includes('birds')) {
+    const ls = localStorage.getItem(BD_LS.lastSync);
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">🐦 Birds — ' + (ls ? ls : 'Never synced') + '</div>';
+  }
+  html += '</div>';
+
+  box.innerHTML = html;
+}
+
+function openDashboard() {
+  MODULES.forEach(m => {
+    const el = document.getElementById(m.containerId);
+    if (el) el.style.display = 'none';
+  });
+  document.getElementById('app-screens').style.display = '';
+  document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
+  const dashEl = document.getElementById('screen-dashboard');
+  if (dashEl) dashEl.classList.add('active');
+  document.getElementById('headerTitle').textContent = '🏠 FarmDesk';
+  updateFarmNameSubtitle();
+  renderDashboardScreen();
+  pushNav('app', 'dashboard');
+}
+
 function openSharedSettings() {
   MODULES.forEach(m => {
     const el = document.getElementById(m.containerId);
@@ -8579,12 +8935,15 @@ function openSharedSettings() {
   if (typeof sd_renderSettings === 'function') sd_renderSettings();
   if (typeof bd_renderSettings === 'function') bd_renderSettings();
   renderSettings();
+  pushNav('app', 'settings');
 }
 
 function settingsHome() {
   document.getElementById('app-screens').style.display = 'none';
   const active = localStorage.getItem(MODULE_KEY) || enabledModules()[0].id;
-  switchModule(moduleEnabled(active) ? active : enabledModules()[0].id);
+  const modId = moduleEnabled(active) ? active : enabledModules()[0].id;
+  switchModule(modId);
+  resetNavStack(modId, 'home');
 }
 
 function updateFarmNameSubtitle() {
@@ -8600,6 +8959,9 @@ function updateFarmNameSubtitle() {
   if (typeof applyModuleOrder === 'function') applyModuleOrder();
   const saved = localStorage.getItem(MODULE_KEY) || 'goats';
   switchModule(saved);
+  // Sync nav stack to whatever module switchModule actually resolved to (handles fallback)
+  const resolved = localStorage.getItem(MODULE_KEY) || 'goats';
+  navStack = [{ mod: resolved, screen: 'home' }];
   updateFarmNameSubtitle();
 })();
 
@@ -8614,6 +8976,8 @@ function closeTopOverlay() {
   if (bdpv && bdpv.classList.contains('open')) { bdpv.classList.remove('open'); return true; }
   var em = document.getElementById('editModal');
   if (em && em.style.display === 'block') { closeEdit(); return true; }
+  var mm = document.getElementById('moveModal');
+  if (mm && mm.style.display === 'block') { closeMoveModal(); return true; }
   var sm = document.getElementById('sd-editModal');
   if (sm && sm.style.display === 'block') { sd_closeEdit(); return true; }
   var bdModals = ['bd-profile-modal','bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
@@ -8625,38 +8989,35 @@ function closeTopOverlay() {
 }
 
 window.addEventListener('popstate', function(e) {
-  history.pushState({ page: 'guard' }, ''); // re-arm: Android back moves up a level in-app, never exits unexpectedly
-  // Any open popup/modal closes first — universal across modules
-  if (closeTopOverlay()) { return; }
-  const mod = localStorage.getItem(MODULE_KEY) || 'goats';
-  // Back press while in app-level screens (Settings, Sync, Help, Standalone)
-  const appEl = document.getElementById('app-screens');
-  if (appEl && appEl.style.display !== 'none') { settingsHome(); return; }
-  if (mod === 'goats') {
-    const active = document.querySelector('#module-goatdesk .screen.active');
-    if (active && active.id !== 'screen-home') show('home');
-  } else if (mod === 'stock') {
-    const page = e.state?.page || 'dashboard';
-    document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
-    const target = document.getElementById('sd-screen-' + page);
-    if (target) target.classList.add('active');
-    document.querySelectorAll('.sd-bottom-nav button').forEach(b => b.classList.remove('active'));
-    const navBtn = document.getElementById('sd-nav-' + page);
-    if (navBtn) navBtn.classList.add('active');
-    if (page === 'history')  sd_renderHistory();
-    // settings handled by GD module
-    if (page === 'sync')     sd_renderSyncScreen();
-  } else if (mod === 'birds') {
-    const bdPage = e.state && e.state.bdPage ? e.state.bdPage : 'birds';
-    document.querySelectorAll('#module-birddesk .screen').forEach(s => s.classList.remove('active'));
-    const bdTarget = document.getElementById('bd-screen-' + bdPage);
-    if (bdTarget) bdTarget.classList.add('active');
-    document.querySelectorAll('.bd-bottom-nav button').forEach(b => b.classList.remove('active'));
-    const bdNavBtn = document.getElementById('bd-nav-' + bdPage);
-    if (bdNavBtn) bdNavBtn.classList.add('active');
-    if (bdPage === 'history') bd_renderHistory();
-    if (bdPage === 'sync')    bd_renderSync();
+  // Any open popup/modal closes first — universal across modules. This does NOT
+  // consume a nav stack entry; the screen underneath is unchanged.
+  if (closeTopOverlay()) {
+    history.pushState({ navIndex: navStack.length - 1 }, ''); // re-arm without popping stack
+    return;
   }
+  // If we're already at the bottom of the stack (just home), let this back
+  // press fall through to the browser/Android default (exits the app).
+  if (navStack.length <= 1) {
+    return;
+  }
+  // Pop one level and restore that screen
+  navStack.pop();
+  const entry = navStack[navStack.length - 1];
+  if (entry.mod !== 'app') {
+    localStorage.setItem(MODULE_KEY, entry.mod);
+    MODULES.forEach(m => {
+      const el = document.getElementById(m.containerId);
+      if (el) el.style.display = m.id === entry.mod ? '' : 'none';
+    });
+    const modDef = MODULES.find(m => m.id === entry.mod);
+    if (modDef) {
+      document.getElementById('headerTitle').textContent = modDef.title;
+      renderModuleBar();
+    }
+  }
+  restoreNavEntry(entry);
+  // Re-arm a state for this position so a subsequent back press fires popstate again
+  history.pushState({ navIndex: navStack.length - 1 }, '');
 });
 
 renderCatTabs();
@@ -9008,6 +9369,21 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button id="modalSaveBtn" onclick="saveEdit()" style="flex:1;margin:0;">💾 Save</button>
       <button onclick="closeEdit()" class="secondary" style="flex:1;margin:0;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MOVE LOCATION MODAL ===== -->
+<div id="moveModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">📍 Move Animals</strong>
+      <button onclick="closeMoveModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="moveFields"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button id="moveSaveBtn" onclick="saveMoveLog()" style="flex:1;margin:0;">💾 Save</button>
+      <button onclick="closeMoveModal()" class="secondary" style="flex:1;margin:0;">Cancel</button>
     </div>
   </div>
 </div>
