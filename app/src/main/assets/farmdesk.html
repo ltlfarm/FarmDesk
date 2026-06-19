@@ -1366,7 +1366,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781884513"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781892319"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4373,6 +4373,52 @@ async function saveMoveLog() {
   }
 }
 
+// ===== Profile photo editing state — separate from the entry-flow currentPhoto =====
+var epEditPhoto = null; // null = unchanged, false = explicitly cleared, dataURL = new photo
+
+function epTakeCameraBridge() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) {
+    window.AndroidBridge.takePhoto("onEpPhoto");
+  } else {
+    document.getElementById("epPhotoCamera").click();
+  }
+}
+
+window.onEpPhoto = function(dataUrl) {
+  if (!dataUrl) return;
+  epEditPhoto = dataUrl;
+  var prev = document.getElementById("epPhotoPreview");
+  if (prev) prev.innerHTML = '<img src="' + dataUrl + '" style="width:100%;border-radius:6px;">';
+};
+
+function epHandlePhoto(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement("canvas");
+      var maxDim = 1280;
+      var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      epEditPhoto = canvas.toDataURL("image/jpeg", 0.7);
+      var prev = document.getElementById("epPhotoPreview");
+      if (prev) prev.innerHTML = '<img src="' + epEditPhoto + '" style="width:100%;border-radius:6px;">';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function epClearPhoto() {
+  epEditPhoto = false;
+  var prev = document.getElementById("epPhotoPreview");
+  if (prev) prev.innerHTML = '';
+}
+
 function editAnimalProfile(name) {
   var p = animalProfiles[name] || {};
   var modal = document.getElementById("editModal");
@@ -4400,15 +4446,33 @@ function editAnimalProfile(name) {
     '</select>' +
     '<button type="button" onclick="openGroupModal()" class="secondary" style="width:100%;margin-bottom:8px;padding:8px;font-size:13px;">Manage Groups</button>' +
     '<input id="epNotes" placeholder="Notes" value="' + (p.notes||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:12px;box-sizing:border-box;">' +
+    '<label style="color:#888;font-size:13px;">Profile Photo</label>' +
+    '<div style="display:flex;gap:6px;margin:4px 0 8px;">' +
+    '<button type="button" onclick="epTakeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>' +
+    '<button type="button" onclick="document.getElementById(\'epPhotoGallery\').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>' +
+    (p.photoId || p.photoUrl ? '<button type="button" onclick="epClearPhoto()" style="flex:0 0 auto;margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>' : '') +
+    '</div>' +
+    '<input type="file" id="epPhotoCamera" accept="image/*" capture="environment" style="display:none;" onchange="epHandlePhoto(this)">' +
+    '<input type="file" id="epPhotoGallery" accept="image/*" style="display:none;" onchange="epHandlePhoto(this)">' +
+    '<div id="epPhotoPreview" style="margin-bottom:8px;"></div>' +
     '<div style="display:flex;gap:8px;">' +
     '<button onclick="saveAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;">💾 Save</button>' +
     '<button onclick="openAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">Cancel</button>' +
     '</div>';
+  epEditPhoto = null; // reset per-edit photo state; null = no change, false = explicit clear
+  if (p.photoId) {
+    Photos.load(p.photoId).then(function(data){
+      if (data) { var prev = document.getElementById('epPhotoPreview'); if (prev) prev.innerHTML = '<img src="' + data + '" style="width:100%;border-radius:6px;">'; }
+    });
+  } else if (p.photoUrl) {
+    var prev = document.getElementById('epPhotoPreview');
+    if (prev) prev.innerHTML = '<img src="' + p.photoUrl + '" style="width:100%;border-radius:6px;">';
+  }
   var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
   modal.style.display = "block";
 }
 
-function saveAnimalProfile(name) {
+async function saveAnimalProfile(name) {
   var p = animalProfiles[name] || {};
   var newGroup = document.getElementById("epGroup").value;
   var groupChanged = newGroup !== (p.group || "");
@@ -4418,6 +4482,25 @@ function saveAnimalProfile(name) {
   var newTag = document.getElementById("epTag").value;
   var newNotes = document.getElementById("epNotes").value;
   var coreChanged = newSex !== (p.sex||"") || newDob !== (p.birthdate||"") || newBreed !== (p.breed||"") || newTag !== (p.tag||"") || newNotes !== (p.notes||"");
+
+  // Resolve photo: null = unchanged, false = explicit clear, dataURL = new photo
+  var newPhotoId = p.photoId || null;
+  var newPhotoUrl = p.photoUrl || null;
+  var photoChanged = false;
+  var pendingPhotoUpload = null;
+  if (epEditPhoto === false) {
+    if (p.photoId) Photos.remove(p.photoId);
+    newPhotoId = null;
+    newPhotoUrl = null;
+    photoChanged = true;
+  } else if (typeof epEditPhoto === 'string') {
+    if (p.photoId) Photos.remove(p.photoId);
+    newPhotoId = await Photos.save(epEditPhoto);
+    newPhotoUrl = null;
+    photoChanged = true;
+    pendingPhotoUpload = epEditPhoto;
+  }
+
   animalProfiles[name] = {
     sex:       newSex,
     birthdate: newDob,
@@ -4428,10 +4511,11 @@ function saveAnimalProfile(name) {
     tag:       newTag,
     flags:     p.flags || [],
     photo:     p.photo || null,
-    photoId:   p.photoId || null,
-    photoUrl:  p.photoUrl || null
+    photoId:   newPhotoId,
+    photoUrl:  newPhotoUrl
   };
   saveProfilesSafely();
+  epEditPhoto = null;
   showToast("✅ " + name + " saved");
   openAnimalProfile(name);
   if (groupChanged) {
@@ -4443,6 +4527,39 @@ function saveAnimalProfile(name) {
     pushAnimalProfileCore(name, { sex: newSex, birthdate: newDob, breed: newBreed, tag: newTag, notes: newNotes }).then(function(ok) {
       if (ok) showToast("✅ Profile synced to farmOS");
     });
+  }
+  if (photoChanged) {
+    pushAnimalProfilePhoto(name, pendingPhotoUpload).then(function(ok) {
+      if (ok) showToast("✅ Photo synced to farmOS");
+    });
+  }
+}
+
+// Upload (or clear) the animal's profile photo in farmOS. dataUrl null means
+// the photo was removed locally — farmOS-side image deletion isn't attempted
+// here (would need the existing file UUID); the next fetch will simply stop
+// finding a local photoId and fall back to whatever farmOS still has.
+async function pushAnimalProfilePhoto(name, dataUrl) {
+  if (!dataUrl) return true; // local clear only — nothing to push
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
+  var uuid = animalUUIDs[name];
+  if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
+  try {
+    var token = await getToken(cfg);
+    var blob = await (await fetch(dataUrl)).blob();
+    var fd = new FormData();
+    fd.append('file', blob, 'goat-' + uuid + '.jpg');
+    var res = await fetch(apiUrl('/api/asset/animal/' + uuid + '/image'), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      body: fd
+    });
+    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
+    return true;
+  } catch(e) {
+    showToast('⚠️ Photo upload failed: ' + e.message);
+    return false;
   }
 }
 
