@@ -533,7 +533,10 @@ header > div:last-child { min-width: 0; }
 <div id="screen-animals" class="screen">
   <div class="box">
     <h3 style="margin:4px 0 6px;">🐐 Animals</h3>
-    <button onclick="openMoveScreen([])" class="secondary wide">📍 Move Animals</button>
+    <div style="display:flex;gap:8px;">
+      <button onclick="openMoveScreen([])" class="secondary" style="flex:1;">📍 Move Animals</button>
+      <button onclick="openGroupModal()" class="secondary" style="flex:1;">🐐 Groups</button>
+    </div>
   </div>
 
   <div class="box">
@@ -727,6 +730,7 @@ header > div:last-child { min-width: 0; }
       <div class="set-sub">
         <strong>Animal List</strong>
         <button onclick="show('animals')" class="wide secondary" style="margin-top:6px;">🐐 Manage Animals</button>
+        <button onclick="openGroupModal()" class="wide secondary" style="margin-top:6px;">🐐 Manage Herd Groups</button>
       </div>
 
       <div class="set-sub">
@@ -1328,6 +1332,7 @@ const LS = {
   flagSchema:     "farmdesk_flagSchema",
   locations:      "farmdesk_locations",
   animalLocations:"farmdesk_animalLocations",
+  goatGroups:     "farmdesk_goatGroups",
   profiles:       "farmdesk_animal_profiles",
   configLogUUID:  "farmdesk_configLogUUID",
   lastSync:       "farmdesk_lastSync",
@@ -1340,7 +1345,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781838452"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781842521"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1377,6 +1382,7 @@ let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
 let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // keyed by animal name
 let locations = JSON.parse(localStorage.getItem(LS.locations) || "{}"); // keyed by farmOS UUID: {name, type, notes}
 let animalLocations = JSON.parse(localStorage.getItem(LS.animalLocations) || "{}"); // keyed by animal name: {locationUuid, locationName, timestamp}
+let goatGroups = JSON.parse(localStorage.getItem(LS.goatGroups) || "[]"); // [{name, uuid}] — farmOS asset--group, same pattern as bird flocks
 
 // ===== ONE-TIME: drop oversized cached profile photos that blew the quota =====
 // Full-res photos were cached in an earlier build; strip photos but keep the
@@ -3841,7 +3847,8 @@ function animalAge(birthdate) {
 function animalDetailLine(name) {
   var p = animalProfiles[name] || {};
   var sex = p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : "";
-  return [sex, animalAge(p.birthdate), p.breed || p.type].filter(Boolean).join(" \u00B7 ") || "Tap to log";
+  var base = [sex, animalAge(p.birthdate), p.breed || p.type].filter(Boolean).join(" \u00B7 ") || "Tap to log";
+  return p.group ? base + " \u00B7 🐐 " + p.group : base;
 }
 
 function flagBadgesHTML(flags, clickable, animalName) {
@@ -3944,6 +3951,117 @@ function openAnimalProfile(name) {
   var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
   modal.style.display = "block";
   lazyLoadPhotos(body);
+}
+
+// ===== SHARED MODULE: Goat herd groups (farmOS asset--group) =====
+// Same pattern as Bird flocks — group membership assigned via log--activity
+// with is_group_assignment, not a direct attribute on the animal asset.
+function openGroupModal() {
+  var m = document.getElementById('groupModal');
+  if (!m) return;
+  renderGroupList();
+  m.style.display = 'block';
+}
+
+function closeGroupModal() {
+  var m = document.getElementById('groupModal');
+  if (m) m.style.display = 'none';
+}
+
+function renderGroupList() {
+  var list = document.getElementById('groupList');
+  if (!list) return;
+  if (!goatGroups.length) { list.innerHTML = "<div style='color:#888;font-size:14px;margin-bottom:10px;'>No groups yet.</div>"; return; }
+  list.innerHTML = goatGroups.map(function(g, gi) {
+    var memberCount = goats.filter(function(name) { return animalProfiles[name] && animalProfiles[name].group === g.name; }).length;
+    return "<div class='box' style='margin-bottom:8px;display:flex;align-items:center;gap:8px;'>" +
+      "<strong style='flex:1;'>" + g.name + "</strong>" +
+      "<span style='color:#888;font-size:13px;'>" + memberCount + " animal" + (memberCount === 1 ? '' : 's') + "</span>" +
+      "<button class='sm danger' onclick='deleteGoatGroup(" + gi + ")' style='margin:0;padding:8px 12px;'>Delete</button></div>";
+  }).join('');
+}
+
+function addGoatGroup() {
+  var input = document.getElementById('newGroupName');
+  var name = input.value.trim();
+  if (!name) { showToast('⚠️ Enter a group name'); return; }
+  if (goatGroups.some(function(g) { return g.name.toLowerCase() === name.toLowerCase(); })) { showToast('⚠️ Group already exists'); return; }
+  goatGroups.push({ name: name, uuid: null });
+  localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups));
+  input.value = '';
+  renderGroupList();
+  showToast('Group added');
+}
+
+function deleteGoatGroup(i) {
+  goatGroups.splice(i, 1);
+  localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups));
+  renderGroupList();
+}
+
+// Find-or-create the farmOS asset--group for a group name, caching its UUID locally.
+async function ensureGoatGroupUUID(groupName, token) {
+  if (!groupName) return null;
+  var grp = goatGroups.filter(function(g) { return g.name === groupName; })[0];
+  if (grp && grp.uuid) return grp.uuid;
+  var q = apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(groupName) + '&page[limit]=1');
+  var r = await fetch(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+  if (r.ok) {
+    var d = await r.json();
+    if (d.data && d.data[0]) {
+      var id = d.data[0].id;
+      if (grp) { grp.uuid = id; localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups)); }
+      return id;
+    }
+  }
+  var payload = { data: { type: 'asset--group', attributes: { name: groupName } } };
+  var res = await fetch(apiUrl('/api/asset/group'), {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  var jd = await res.json();
+  var nid = jd.data && jd.data.id;
+  if (grp && nid) { grp.uuid = nid; localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups)); }
+  if (!grp && nid) { goatGroups.push({ name: groupName, uuid: nid }); localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups)); }
+  return nid;
+}
+
+// Push a group assignment change to farmOS for one animal — creates the
+// log--activity that farmOS uses to track current group membership.
+async function pushGoatGroupAssign(animalName, groupName) {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
+  var animalUUID = animalUUIDs[animalName];
+  if (!animalUUID) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
+  try {
+    var token = await getToken(cfg);
+    var groupId = groupName ? await ensureGoatGroupUUID(groupName, token) : null;
+    var payload = { data: {
+      type: 'log--activity',
+      attributes: {
+        name: groupName ? ('Move to ' + groupName) : 'Remove from group',
+        status: 'done',
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        is_group_assignment: true
+      },
+      relationships: {
+        asset: { data: [{ type: 'asset--animal', id: animalUUID }] },
+        group: { data: groupId ? [{ type: 'asset--group', id: groupId }] : [] }
+      }
+    }};
+    var res = await fetch(apiUrl('/api/log/activity'), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
+    return true;
+  } catch(e) {
+    showToast('⚠️ Group assign failed: ' + e.message);
+    return false;
+  }
 }
 
 function openMoveScreen(animalNames) {
@@ -4057,7 +4175,12 @@ function editAnimalProfile(name) {
     '</select></div>' +
     '<label style="color:#888;font-size:13px;">Date of Birth</label>' +
     '<input id="epDob" type="date" value="' + (p.birthdate||"") + '" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' +
-    '<input id="epGroup" placeholder="Group" value="' + (p.group||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:8px;box-sizing:border-box;">' +
+    '<label style="color:#888;font-size:13px;">Group</label>' +
+    '<select id="epGroup" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' +
+    '<option value="">— No Group —</option>' +
+    goatGroups.map(function(g){ return '<option' + (g.name === p.group ? ' selected' : '') + '>' + g.name + '</option>'; }).join('') +
+    '</select>' +
+    '<button type="button" onclick="openGroupModal()" class="secondary" style="width:100%;margin-bottom:8px;padding:8px;font-size:13px;">Manage Groups</button>' +
     '<input id="epNotes" placeholder="Notes" value="' + (p.notes||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:12px;box-sizing:border-box;">' +
     '<div style="display:flex;gap:8px;">' +
     '<button onclick="saveAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;">💾 Save</button>' +
@@ -4069,12 +4192,14 @@ function editAnimalProfile(name) {
 
 function saveAnimalProfile(name) {
   var p = animalProfiles[name] || {};
+  var newGroup = document.getElementById("epGroup").value;
+  var groupChanged = newGroup !== (p.group || "");
   animalProfiles[name] = {
     sex:       document.getElementById("epSex").value,
     birthdate: document.getElementById("epDob").value,
     breed:     document.getElementById("epBreed").value,
     type:      document.getElementById("epSpecies").value,
-    group:     document.getElementById("epGroup").value,
+    group:     newGroup,
     notes:     document.getElementById("epNotes").value,
     tag:       document.getElementById("epTag").value,
     flags:     p.flags || [],
@@ -4085,6 +4210,11 @@ function saveAnimalProfile(name) {
   saveProfilesSafely();
   showToast("✅ " + name + " saved");
   openAnimalProfile(name);
+  if (groupChanged) {
+    pushGoatGroupAssign(name, newGroup).then(function(ok) {
+      if (ok) showToast("✅ Group updated in farmOS");
+    });
+  }
 }
 
 function startFlowForAnimal(name) {
@@ -5212,8 +5342,8 @@ async function fetchAnimalUUIDs(silent = false) {
     // someone's herd) — set types in farmOS to filter mixed farms cleanly.
     const MODULE_ANIMAL_TYPES = ["goat"]; // lowercase term names this module owns
     if (!silent && el) el.textContent = "Fetching animals...";
-    let animalRows = [], typeNames = {};
-    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image&page[limit]=100");
+    let animalRows = [], typeNames = {}, groupNames = {};
+    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image,group&page[limit]=100");
     while (aUrl) {
       const animalRes = await fetch(aUrl, { headers: authHeaders });
       if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
@@ -5222,9 +5352,19 @@ async function fetchAnimalUUIDs(silent = false) {
       (animalData.included || []).forEach(t => {
         if (t.type === "taxonomy_term--animal_type") typeNames[t.id] = (t.attributes.name || "").toLowerCase();
         if (t.type === "file--file") typeNames[t.id] = (t.attributes.uri && (t.attributes.uri.url || t.attributes.uri.value)) || null;
+        if (t.type === "asset--group") groupNames[t.id] = t.attributes.name || "";
       });
       aUrl = animalData.links?.next?.href || null;
     }
+
+    // Sync fetched groups into local goatGroups list (find-or-add by UUID/name)
+    Object.entries(groupNames).forEach(([uuid, name]) => {
+      if (!name) return;
+      const existing = goatGroups.find(g => g.uuid === uuid || g.name === name);
+      if (existing) { if (!existing.uuid) existing.uuid = uuid; }
+      else { goatGroups.push({ name, uuid }); }
+    });
+    localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups));
 
     animalUUIDs = {};
     const archivedNames = [];
@@ -5250,12 +5390,15 @@ async function fetchAnimalUUIDs(silent = false) {
       var imgRel  = a.relationships && a.relationships.image && a.relationships.image.data;
       var imgId   = Array.isArray(imgRel) ? (imgRel.length ? imgRel[imgRel.length-1].id : null) : (imgRel && imgRel.id);
       var prevPhoto = (animalProfiles[name] && animalProfiles[name].photo) || null;
+      var grpRel = a.relationships && a.relationships.group && a.relationships.group.data;
+      var grpId  = Array.isArray(grpRel) ? (grpRel.length ? grpRel[0].id : null) : (grpRel && grpRel.id);
+      var grpName = grpId ? (groupNames[grpId] || "") : "";
       animalProfiles[name] = {
         sex:       a.attributes.sex || "",
         birthdate: a.attributes.birthdate || "",
         breed:     "",
         type:      typeName ? (typeName.charAt(0).toUpperCase()+typeName.slice(1)) : "",
-        group:     a.attributes.group_name || "",
+        group:     grpName,
         notes:     ((a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || "").toString().replace(/<[^>]*>/g,"").trim(),
         flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
         photoUrl:  imgId ? (typeNames[imgId] || null) : null,
@@ -8990,6 +9133,8 @@ function closeTopOverlay() {
   if (em && em.style.display === 'block') { closeEdit(); return true; }
   var mm = document.getElementById('moveModal');
   if (mm && mm.style.display === 'block') { closeMoveModal(); return true; }
+  var gm = document.getElementById('groupModal');
+  if (gm && gm.style.display === 'block') { closeGroupModal(); return true; }
   var sm = document.getElementById('sd-editModal');
   if (sm && sm.style.display === 'block') { sd_closeEdit(); return true; }
   var bdModals = ['bd-profile-modal','bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
@@ -9399,6 +9544,24 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button id="moveSaveBtn" onclick="saveMoveLog()" style="flex:1;margin:0;">💾 Save</button>
       <button onclick="closeMoveModal()" class="secondary" style="flex:1;margin:0;">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- ===== GOAT GROUP MANAGER MODAL ===== -->
+<div id="groupModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">🐐 Herd Groups</strong>
+      <button onclick="closeGroupModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="groupList"></div>
+    <div class="box" style="margin-top:10px;">
+      <strong>Add Group</strong>
+      <label>Group Name</label>
+      <input id="newGroupName" placeholder="e.g. Milkers, Dry Does, Bucks">
+      <button onclick="addGoatGroup()" class="wide" style="margin-top:8px;">+ Add Group</button>
+    </div>
+    <button class="wide secondary" onclick="closeGroupModal()" style="margin-top:8px;">Close</button>
   </div>
 </div>
 
