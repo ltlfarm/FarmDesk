@@ -1366,7 +1366,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781907179"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781908142"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4165,6 +4165,33 @@ async function ensureAnimalTypeUUID(typeName, token) {
   return jd.data && jd.data.id;
 }
 
+// Resolves the "goat" animal_type taxonomy term UUID without depending on
+// an existing animal already having the relationship set (the LS.goatTypeUUID
+// cache only ever got populated that way, which fails on farmOS instances
+// where no goat asset has animal_type linked yet — causes 422s on kid/birth
+// asset creation since animal_type is a required field). Checks cache, then
+// scans all animal_type terms case-insensitively, then finds-or-creates.
+async function getOrCreateGoatTypeUUID(token) {
+  var cached = localStorage.getItem(LS.goatTypeUUID);
+  if (cached) return cached;
+  try {
+    var r = await fetch(apiUrl('/api/taxonomy_term/animal_type?page[limit]=100'), {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+    });
+    if (r.ok) {
+      var d = await r.json();
+      var match = (d.data || []).find(function(t) { return (t.attributes.name || '').toLowerCase() === 'goat'; });
+      if (match) { localStorage.setItem(LS.goatTypeUUID, match.id); return match.id; }
+    }
+  } catch(e) { /* fall through to find-or-create */ }
+  try {
+    var uuid = await ensureAnimalTypeUUID('Goat', token);
+    if (uuid) localStorage.setItem(LS.goatTypeUUID, uuid);
+    return uuid;
+  } catch(e) { return null; }
+}
+
+
 async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
   var cfg = JSON.parse(localStorage.getItem(cfgKey || 'farmdesk_cfg') || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
@@ -6456,7 +6483,7 @@ async function syncToFarmOS() {
 
           // ===== KID ASSET CREATION (birth logs only) =====
           if (l.type === 'birth' && logUUID && Array.isArray(l.data.kids)) {
-            const goatTypeUUID = localStorage.getItem(LS.goatTypeUUID);
+            const goatTypeUUID = await getOrCreateGoatTypeUUID(token);
             const birthTs = String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000));
             const kidUUIDs = [];
             let kidsChanged = false;
@@ -6491,7 +6518,7 @@ async function syncToFarmOS() {
                   }
                 } else {
                   const err = await kidRes.text();
-                  logEl.textContent += `  ⚠️ Kid asset failed (${kid.name}): ${kidRes.status} ${err.slice(0,60)}\n`;
+                  logEl.textContent += `  ⚠️ Kid asset failed (${kid.name}): ${kidRes.status} ${err.slice(0,250)}\n`;
                 }
               } catch(ke) {
                 logEl.textContent += `  ⚠️ Kid asset error (${kid.name}): ${ke.message}\n`;
