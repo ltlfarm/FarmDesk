@@ -1366,7 +1366,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781911515"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781912590"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2269,20 +2269,6 @@ function rotateAdjustPhoto() {
     if (el) el.src = d;
   });
 }
-function rotateEditModalPhoto() {
-  const l = logs.find(x => x.id === editingId);
-  if (!l || !l.data.photo) return;
-  rotateBase64CW(l.data.photo, d => {
-    l.data.photo = d;
-    // Re-push so farmOS gets the rotated version too
-    l.synced = false;
-    if (l.fromFarmOS) l.needsPatch = true;
-    localStorage.setItem(LS.logs, JSON.stringify(logs));
-    const el = document.getElementById('editModalPhotoImg');
-    if (el) el.src = d;
-    showToast('Rotated — will re-push on next sync');
-  });
-}
 function rotateEditItemPhoto(idx) {
   if (!window._editItemPhotos || !window._editItemPhotos[idx]) return;
   rotateBase64CW(window._editItemPhotos[idx], function(d) {
@@ -2300,6 +2286,10 @@ function rotateEditItemPhoto(idx) {
 // ===== PHOTO HANDLING =====
 var currentPhoto = null;
 var currentFileAttach = null; // { name, type, blob } for PDF/file attachments
+
+// ===== EDIT-MODE PHOTO HANDLING (Obs/Hoof/Proc/Birth edit modal) =====
+var editCurrentPhoto = null;
+var editCurrentFileAttach = null;
 
 function handlePhoto(input) {
   const file = input.files[0];
@@ -2334,6 +2324,118 @@ function clearPhoto() {
     if (input) input.value = "";
   });
   currentFileAttach = null;
+}
+
+// ===== EDIT-MODE PHOTO HANDLING =====
+// Mirrors the create-form photo flow (handlePhoto/clearPhoto/takeCameraBridge)
+// but stages into editCurrentPhoto/editCurrentFileAttach so changes only take
+// effect when Save is tapped in the edit modal — same as every other field.
+function editPhotoBlockHTML() {
+  const showClear = !!(editCurrentPhoto || editCurrentFileAttach);
+  return `
+    <label style="margin-top:10px;">Photo / File</label>
+    <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+      <button type="button" onclick="takeEditCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('ed_photogallery').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" onclick="document.getElementById('ed_photofile').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📎 File</button>
+      <button type="button" id="ed_clearPhotoBtn" onclick="clearEditPhoto()" style="display:${showClear ? "inline-block" : "none"};margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>
+    </div>
+    <input type="file" id="ed_photocamera" accept="image/*" capture="environment" style="display:none;" onchange="handleEditPhoto(this)">
+    <input type="file" id="ed_photogallery" accept="image/*" style="display:none;" onchange="handleEditPhoto(this)">
+    <input type="file" id="ed_photofile" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleEditFileAttach(this)">
+    <div id="ed_photoPreview" style="margin-top:8px;">${renderEditPhotoPreviewHTML()}</div>
+  `;
+}
+
+function renderEditPhotoPreviewHTML() {
+  if (editCurrentPhoto) {
+    return `<div style="position:relative;"><img id="editModalPhotoImg" src="${editCurrentPhoto}" style="width:100%;border-radius:6px;" onerror="loadPhotoWithAuth(this)"><button type="button" onclick="rotateEditPhoto()" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>`;
+  }
+  if (editCurrentFileAttach) {
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#2a2a2a;border-radius:6px;">
+      <span style="font-size:22px;">📎</span>
+      <span style="font-size:14px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${editCurrentFileAttach.name}</span>
+    </div>`;
+  }
+  return "";
+}
+
+function refreshEditPhotoUI() {
+  const preview = document.getElementById("ed_photoPreview");
+  if (preview) preview.innerHTML = renderEditPhotoPreviewHTML();
+  const clearBtn = document.getElementById("ed_clearPhotoBtn");
+  if (clearBtn) clearBtn.style.display = (editCurrentPhoto || editCurrentFileAttach) ? "inline-block" : "none";
+}
+
+function handleEditPhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      orientedCanvas(img, e.target.result, 800, canvas => {
+        editCurrentPhoto = canvas.toDataURL("image/jpeg", 0.7);
+        editCurrentFileAttach = null; // a photo replaces any pending file attach
+        refreshEditPhotoUI();
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleEditFileAttach(input) {
+  const file = input.files[0];
+  if (!file) return;
+  editCurrentFileAttach = { name: file.name, type: file.type, _blob: file };
+  editCurrentPhoto = null; // a file replaces any pending photo
+  refreshEditPhotoUI();
+}
+
+function clearEditPhoto() {
+  editCurrentPhoto = null;
+  editCurrentFileAttach = null;
+  ["ed_photocamera","ed_photogallery","ed_photofile"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  });
+  refreshEditPhotoUI();
+}
+
+function takeEditCameraBridge() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) {
+    window.AndroidBridge.takePhoto("onAndroidEditPhoto");
+  } else {
+    const el = document.getElementById("ed_photocamera");
+    if (el) el.click();
+  }
+}
+
+// Called by the Java bridge with base64 jpeg data URL — separate callback
+// name from onAndroidPhoto() so the native camera result lands in the edit
+// modal's staged state instead of the create-form's.
+function onAndroidEditPhoto(dataUrl) {
+  if (!dataUrl) return;
+  const full = dataUrl.startsWith("data:") ? dataUrl : "data:image/jpeg;base64," + dataUrl;
+  const img = new Image();
+  img.onload = () => {
+    orientedCanvas(img, full, 800, canvas => {
+      editCurrentPhoto = canvas.toDataURL("image/jpeg", 0.7);
+      editCurrentFileAttach = null;
+      refreshEditPhotoUI();
+    });
+  };
+  img.src = full;
+}
+
+function rotateEditPhoto() {
+  if (!editCurrentPhoto) return;
+  rotateBase64CW(editCurrentPhoto, d => {
+    editCurrentPhoto = d;
+    const el = document.getElementById('editModalPhotoImg');
+    if (el) el.src = d;
+  });
 }
 
 function toggleRateDrawer() {
@@ -6642,6 +6744,24 @@ async function syncToFarmOS() {
               logEl.textContent += `  ⚠️ Photo upload error: ${pe.message}\n`;
             }
           }
+          // Push a newly-attached file too (added/replaced via edit) — same as new logs
+          if (l.data?.fileAttach && l.data.fileAttach._blob) {
+            try {
+              const fileUpload = await fetch(apiUrl(`/api/log/${farmosType}/${l.id}/file`), {
+                method: "POST",
+                headers: {
+                  "Content-Type":        "application/octet-stream",
+                  "Content-Disposition": `attachment; filename="${l.data.fileAttach.name}"`,
+                  "Accept":              "application/vnd.api+json",
+                  "Authorization":       "Bearer " + token
+                },
+                body: l.data.fileAttach._blob
+              });
+              if (!fileUpload.ok) logEl.textContent += `  ⚠️ File upload failed: ${fileUpload.status}\n`;
+            } catch(fe) {
+              logEl.textContent += `  ⚠️ File upload error: ${fe.message}\n`;
+            }
+          }
           l.synced     = true;
           l.needsPatch = false;
           ok++;
@@ -6776,6 +6896,11 @@ function openEdit(id) {
   if (!l) return;
   editingId = id;
 
+  // Stage current photo/file as the working copy for the edit modal —
+  // Camera/Gallery/File/Clear all act on this, committed only on Save.
+  editCurrentPhoto      = l.data.photo || null;
+  editCurrentFileAttach = l.data.fileAttach || null;
+
   document.getElementById("editTitle").textContent =
     "Edit — " + l.goat + " " + (l.type);
 
@@ -6831,6 +6956,7 @@ function openEdit(id) {
         ${["Good","Trimmed","Overgrown","Rot","Crack","Injury"].map(s=>`<option${s===l.data.state?" selected":""}>${s}</option>`).join("")}
       </select>
       <label>Notes</label><textarea id="ed_hoofnotes" rows="3">${l.data.notes||""}</textarea>
+      ${editPhotoBlockHTML()}
     `;
   }
   if (l.type === "obs") {
@@ -6843,6 +6969,7 @@ function openEdit(id) {
       <select id="ed_sev">
         ${["Low","Moderate","High","Urgent"].map(s=>`<option${s===l.data.sev?" selected":""}>${s}</option>`).join("")}
       </select>
+      ${editPhotoBlockHTML()}
     `;
   }
   if (l.type === "birth") {
@@ -6860,6 +6987,7 @@ function openEdit(id) {
         ${["Natural","Assisted","C-section"].map(s=>`<option${s===l.data.type?" selected":""}>${s}</option>`).join("")}
       </select>
       <label>Notes</label><textarea id="ed_birthnotes" rows="2">${l.data.notes||""}</textarea>
+      ${editPhotoBlockHTML()}
     `;
     // Populate kid rows after render
     setTimeout(function() { editKids.forEach(function(k){ addBirthKidRow(k, true); }); if (!editKids.length) addBirthKidRow(null, true); }, 0);
@@ -6888,7 +7016,7 @@ function openEdit(id) {
       <input id="ed_procmethod" value="${l.data.method||""}">
       <label>Notes</label>
       <textarea id="ed_procnotes" rows="4">${l.data.notes||""}</textarea>
-      ${l.data.photo ? `<label>Photo</label><div style="position:relative;"><img id="editModalPhotoImg" src="${l.data.photo}" style="width:100%;border-radius:6px;margin-top:4px;" onerror="loadPhotoWithAuth(this)"><button type="button" onclick="rotateEditModalPhoto()" style="position:absolute;bottom:6px;right:6px;margin:0;padding:6px 10px;font-size:13px;background:rgba(0,0,0,0.7);">&#x1F504;</button></div>` : ""}
+      ${editPhotoBlockHTML()}
       <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(editing does not re-deduct inventory)</span></label>
       <div id="ed_procSuppliesList"></div>
       <button type="button" onclick="procAddSupplyRow(null, true)" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
@@ -7002,6 +7130,13 @@ function saveEdit() {
     }
   }
 
+  // Commit staged photo/file for the types that support it — applies whether
+  // the user added, replaced, rotated, or cleared it via the buttons above.
+  if (["hoof","obs","birth","proc"].includes(l.type)) {
+    l.data.photo      = editCurrentPhoto || null;
+    l.data.fileAttach = editCurrentFileAttach || null;
+  }
+
   localStorage.setItem(LS.logs, JSON.stringify(logs));
   closeEdit();
   renderHistory();
@@ -7016,6 +7151,8 @@ function closeEdit() {
   saveBtn.style.display = "";   // profile popup hides it; restore here
   saveBtn.onclick = saveEdit;
   editingId = null;
+  editCurrentPhoto = null;
+  editCurrentFileAttach = null;
 }
 
 // ===== INIT =====
