@@ -3549,6 +3549,7 @@ function moveModule(id, dir) {
   if (newIdx < 0 || newIdx >= MODULES.length) return;
   const tmp = MODULES[idx]; MODULES[idx] = MODULES[newIdx]; MODULES[newIdx] = tmp;
   localStorage.setItem(MODULE_ORDER_KEY, JSON.stringify(MODULES.map(m => m.id)));
+  localStorage.setItem('farmdesk_modules_touched', '1'); // manual change — stop applying remote config pulls
   renderModuleBar();
   renderModuleToggles();
 }
@@ -4001,8 +4002,9 @@ async function archiveAnimalWithLog(animalName, logBundle, details) {
     }};
     var res = await fetch(apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
     if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
-    // Archive the animal asset
-    var archivePayload = { data: { type: 'asset--animal', id: uuid, attributes: { status: 'archived' } } };
+    // Archive the animal asset — farmOS v4+ uses a boolean 'archived' attribute
+    // (status attribute was removed from assets entirely in v4)
+    var archivePayload = { data: { type: 'asset--animal', id: uuid, attributes: { archived: true } } };
     var archiveRes = await fetch(apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: headers, body: JSON.stringify(archivePayload) });
     if (!archiveRes.ok) { showToast('⚠️ Log saved but archive failed — remove manually in farmOS'); return false; }
     return true;
@@ -5510,7 +5512,10 @@ const CONFIG_LOG_NAME = "_goatdesk_config";
 let configLogUUID = localStorage.getItem(LS.configLogUUID) || null;
 
 function buildConfigPayload(existingUUID) {
-  // ===== SHARED MODULE: config sync blob — formulas, proc/method lists, app-wide setup =====
+  // ===== SHARED MODULE: config sync blob — app-wide setup =====
+  // Admin sets this up once (farm name, active modules, tab order, formulas,
+  // logo, bird species/exclusions) and pushes. Every other device just logs
+  // in and pulls — no per-device setup required.
   // NOTE: active animal list is NOT stored here — derived from farmOS asset list on fetch.
   // Animal exclusion is no longer tracked here either — Sell/Death/Retype write real
   // farmOS records (archived status, animal_type) so removal is correct for every device.
@@ -5518,7 +5523,12 @@ function buildConfigPayload(existingUUID) {
     formulas,
     customProcs:   [...new Set(logs.filter(l=>l.type==="proc"&&l.data.proc).map(l=>l.data.proc))],
     customMethods: [...new Set(logs.filter(l=>l.type==="proc"&&l.data.method).map(l=>l.data.method))],
-    logo: localStorage.getItem("farmdesk_logo") || null
+    logo: localStorage.getItem("farmdesk_logo") || null,
+    farmName: localStorage.getItem(LS.farmName) || null,
+    modulesEnabled: JSON.parse(localStorage.getItem(MODULES_CFG) || '{}'),
+    moduleOrder: JSON.parse(localStorage.getItem(MODULE_ORDER_KEY) || 'null'),
+    birdSpecies: JSON.parse(localStorage.getItem(BD_LS.species) || 'null'),
+    birdExcluded: JSON.parse(localStorage.getItem(BD_LS.excluded) || 'null')
   };
   const payload = {
     data: {
@@ -5612,6 +5622,36 @@ async function pullConfig(token) {
   if (config.logo && !localStorage.getItem("farmdesk_logo")) {
     localStorage.setItem("farmdesk_logo", config.logo);
     applyLogo();
+  }
+  // Farm name — only set if not already named locally (local override wins,
+  // same rule as logo, so a device that's already been configured isn't overwritten)
+  if (config.farmName && !localStorage.getItem(LS.farmName)) {
+    localStorage.setItem(LS.farmName, config.farmName);
+    updateFarmNameSubtitle();
+  }
+  // Module on/off + tab order — these define "what does this farm's app look
+  // like," so remote always wins here (this is the whole point of the
+  // admin-sets-up-once pattern). Only apply if this device hasn't been
+  // manually customized yet, tracked via a local "touched" flag.
+  if (!localStorage.getItem('farmdesk_modules_touched')) {
+    if (config.modulesEnabled && typeof config.modulesEnabled === 'object') {
+      localStorage.setItem(MODULES_CFG, JSON.stringify(config.modulesEnabled));
+    }
+    if (Array.isArray(config.moduleOrder)) {
+      localStorage.setItem(MODULE_ORDER_KEY, JSON.stringify(config.moduleOrder));
+    }
+    // Apply immediately so a first-login pull doesn't need an app restart to take effect
+    if (typeof applyModuleOrder === 'function') applyModuleOrder();
+    if (typeof renderModuleBar === 'function') renderModuleBar();
+  }
+  // Bird species/breed list and excluded species — same local-override rule
+  if (config.birdSpecies && typeof config.birdSpecies === 'object' && !localStorage.getItem(BD_LS.species)) {
+    localStorage.setItem(BD_LS.species, JSON.stringify(config.birdSpecies));
+    bd_speciesCfg = config.birdSpecies;
+  }
+  if (Array.isArray(config.birdExcluded) && !localStorage.getItem(BD_LS.excluded)) {
+    localStorage.setItem(BD_LS.excluded, JSON.stringify(config.birdExcluded));
+    bd_excluded = config.birdExcluded;
   }
 }
 
@@ -5708,7 +5748,7 @@ async function fetchAnimalUUIDs(silent = false) {
       const typeId = a.relationships?.animal_type?.data?.id;
       const typeName = typeId ? typeNames[typeId] : null;
       if (typeName && !MODULE_ANIMAL_TYPES.includes(typeName)) return; // other module's animal
-      if (a.attributes.status === "archived") {
+      if (a.attributes.archived) {
         archivedNames.push(name);
         return;
       }
@@ -5791,7 +5831,7 @@ async function fetchAnimalUUIDs(silent = false) {
       if (landRes.ok) {
         const landData = await landRes.json();
         (landData.data || []).forEach(function(l) {
-          if (l.attributes.status === 'archived') return;
+          if (l.attributes.archived) return;
           newLocations[l.id] = {
             name: l.attributes.name || '(unnamed)',
             type: 'land',
@@ -5802,7 +5842,7 @@ async function fetchAnimalUUIDs(silent = false) {
       if (structRes.ok) {
         const structData = await structRes.json();
         (structData.data || []).forEach(function(s) {
-          if (s.attributes.status === 'archived') return;
+          if (s.attributes.archived) return;
           newLocations[s.id] = {
             name: s.attributes.name || '(unnamed)',
             type: 'structure',
@@ -8507,8 +8547,17 @@ async function bd_pushUpdateBird(bird, token) {
     id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : []
   };
   if (bird.sex) attrs.sex = bird.sex;
+  if (bird.breed) attrs.breed = bird.breed;
   if (bird.notes) attrs.notes = { value: bird.notes, format: 'default' };
   var payload = { data: { type: 'asset--animal', id: bird.uuid, attributes: attrs } };
+  // Species change — set via the animal_type taxonomy relationship, same
+  // pattern as the goat retype flow (find-or-create the term, then link it)
+  if (bird.species) {
+    try {
+      var typeId = await ensureAnimalTypeUUID(bird.species, token);
+      if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
+    } catch(e) { /* species update is best-effort — core fields still save */ }
+  }
   var res = await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
   // Upload photo if present (two-step binary POST)
@@ -8523,7 +8572,8 @@ async function bd_pushUpdateBird(bird, token) {
 
 async function bd_pushArchiveBird(uuid, token) {
   if (!uuid) return;
-  var payload = { data: { type: 'asset--animal', id: uuid, attributes: { status: 'archived' } } };
+  // farmOS v4+ uses a boolean 'archived' attribute, not status:'archived'
+  var payload = { data: { type: 'asset--animal', id: uuid, attributes: { archived: true } } };
   var res = await fetch(bd_apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
 }
@@ -9253,6 +9303,7 @@ function setModuleEnabled(id, on) {
   }
   cfg[id] = !!on;
   localStorage.setItem(MODULES_CFG, JSON.stringify(cfg));
+  localStorage.setItem('farmdesk_modules_touched', '1'); // manual change — stop applying remote config pulls
   renderModuleBar();
   // If the active module was just turned off, fall back to the first enabled one
   const active = localStorage.getItem(MODULE_KEY) || 'goats';
