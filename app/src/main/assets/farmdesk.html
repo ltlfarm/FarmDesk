@@ -1366,7 +1366,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781912644"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781913277"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4293,6 +4293,81 @@ async function getOrCreateGoatTypeUUID(token) {
   } catch(e) { return null; }
 }
 
+// Creates any not-yet-synced kid assets from a birth log's kids array and
+// (re)links the full current kid set to the birth log's "asset" relationship.
+// Shared by both sync paths: the initial POST of a new birth log, and the
+// PATCH of an already-synced birth log that was edited to add a kid — that
+// second path previously had no kid-creation logic at all, so a kid added
+// via Edit got created locally but never reached farmOS.
+async function syncBirthKidAssets(l, logUUID, token, headers, logEl) {
+  if (!logUUID || !Array.isArray(l.data.kids)) return;
+  const goatTypeUUID = await getOrCreateGoatTypeUUID(token);
+  const birthTs = String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000));
+  const kidUUIDs = [];
+  let kidsChanged = false;
+  for (const kid of l.data.kids) {
+    if (!kid.name) continue;
+    // Already created in a previous sync attempt — reuse the UUID, don't duplicate the asset.
+    if (animalUUIDs[kid.name]) {
+      kidUUIDs.push(animalUUIDs[kid.name]);
+      continue;
+    }
+    try {
+      const kidPayload = { data: {
+        type: 'asset--animal',
+        attributes: {
+          name: kid.name,
+          ...(kid.sex ? { sex: kid.sex.toLowerCase() === 'm' ? 'male' : kid.sex.toLowerCase() === 'f' ? 'female' : kid.sex.toLowerCase() } : {}),
+          ...(kid.tag ? { id_tag: [{ id: kid.tag, type: 'tag' }] } : {}),
+          birthdate: new Date(parseInt(birthTs) * 1000).toISOString().slice(0, 10)
+        },
+        ...(goatTypeUUID ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeUUID } } } } : {})
+      }};
+      const kidRes = await fetch(apiUrl('/api/asset/animal'), { method: 'POST', headers, body: JSON.stringify(kidPayload) });
+      if (kidRes.ok) {
+        const kidData = await kidRes.json();
+        const kidUUID = kidData?.data?.id;
+        if (kidUUID) {
+          kidUUIDs.push(kidUUID);
+          animalUUIDs[kid.name] = kidUUID;
+          if (!goats.includes(kid.name)) goats.push(kid.name);
+          kidsChanged = true;
+          logEl.textContent += `  🐐 Created: ${kid.name}${kid.sex ? ' ('+kid.sex+')' : ''}${kid.tag ? ' #'+kid.tag : ''}\n`;
+        }
+      } else {
+        const err = await kidRes.text();
+        logEl.textContent += `  ⚠️ Kid asset failed (${kid.name}): ${kidRes.status} ${err.slice(0,250)}\n`;
+      }
+    } catch(ke) {
+      logEl.textContent += `  ⚠️ Kid asset error (${kid.name}): ${ke.message}\n`;
+    }
+  }
+  // Persist kid UUIDs/goat list right away — do not make this depend on the link PATCH below.
+  if (kidsChanged) {
+    localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
+    localStorage.setItem(LS.goats, JSON.stringify(goats));
+  }
+  // PATCH birth log to (re)link the full current kid set — this REPLACES the
+  // relationship, so it must include every kid, not just newly-created ones,
+  // or previously-linked kids would get unlinked.
+  if (kidUUIDs.length > 0) {
+    try {
+      const patchPayload = { data: {
+        type: 'log--birth',
+        id: logUUID,
+        relationships: {
+          asset: { data: kidUUIDs.map(id => ({ type: 'asset--animal', id })) }
+        }
+      }};
+      const patchRes = await fetch(apiUrl('/api/log/birth/' + logUUID), { method: 'PATCH', headers, body: JSON.stringify(patchPayload) });
+      if (!patchRes.ok) logEl.textContent += `  ⚠️ Birth log link failed: ${patchRes.status}\n`;
+    } catch(pe) {
+      logEl.textContent += `  ⚠️ Birth log link error: ${pe.message}\n`;
+    }
+  }
+}
+
+
 
 async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
   var cfg = JSON.parse(localStorage.getItem(cfgKey || 'farmdesk_cfg') || '{}');
@@ -6625,69 +6700,8 @@ async function syncToFarmOS() {
           }
 
           // ===== KID ASSET CREATION (birth logs only) =====
-          if (l.type === 'birth' && logUUID && Array.isArray(l.data.kids)) {
-            const goatTypeUUID = await getOrCreateGoatTypeUUID(token);
-            const birthTs = String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000));
-            const kidUUIDs = [];
-            let kidsChanged = false;
-            for (const kid of l.data.kids) {
-              if (!kid.name) continue;
-              // Already created in a previous sync attempt — reuse the UUID, don't duplicate the asset.
-              if (animalUUIDs[kid.name]) {
-                kidUUIDs.push(animalUUIDs[kid.name]);
-                continue;
-              }
-              try {
-                const kidPayload = { data: {
-                  type: 'asset--animal',
-                  attributes: {
-                    name: kid.name,
-                    ...(kid.sex ? { sex: kid.sex.toLowerCase() === 'm' ? 'male' : kid.sex.toLowerCase() === 'f' ? 'female' : kid.sex.toLowerCase() } : {}),
-                    ...(kid.tag ? { id_tag: [{ id: kid.tag, type: 'tag' }] } : {}),
-                    birthdate: new Date(parseInt(birthTs) * 1000).toISOString().slice(0, 10)
-                  },
-                  ...(goatTypeUUID ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeUUID } } } } : {})
-                }};
-                const kidRes = await fetch(apiUrl('/api/asset/animal'), { method: 'POST', headers, body: JSON.stringify(kidPayload) });
-                if (kidRes.ok) {
-                  const kidData = await kidRes.json();
-                  const kidUUID = kidData?.data?.id;
-                  if (kidUUID) {
-                    kidUUIDs.push(kidUUID);
-                    animalUUIDs[kid.name] = kidUUID;
-                    if (!goats.includes(kid.name)) goats.push(kid.name);
-                    kidsChanged = true;
-                    logEl.textContent += `  🐐 Created: ${kid.name}${kid.sex ? ' ('+kid.sex+')' : ''}${kid.tag ? ' #'+kid.tag : ''}\n`;
-                  }
-                } else {
-                  const err = await kidRes.text();
-                  logEl.textContent += `  ⚠️ Kid asset failed (${kid.name}): ${kidRes.status} ${err.slice(0,250)}\n`;
-                }
-              } catch(ke) {
-                logEl.textContent += `  ⚠️ Kid asset error (${kid.name}): ${ke.message}\n`;
-              }
-            }
-            // Persist kid UUIDs/goat list right away — do not make this depend on the link PATCH below.
-            if (kidsChanged) {
-              localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
-              localStorage.setItem(LS.goats, JSON.stringify(goats));
-            }
-            // PATCH birth log to link kid assets (best-effort — kids already exist either way)
-            if (kidUUIDs.length > 0) {
-              try {
-                const patchPayload = { data: {
-                  type: 'log--birth',
-                  id: logUUID,
-                  relationships: {
-                    asset: { data: kidUUIDs.map(id => ({ type: 'asset--animal', id })) }
-                  }
-                }};
-                const patchRes = await fetch(apiUrl('/api/log/birth/' + logUUID), { method: 'PATCH', headers, body: JSON.stringify(patchPayload) });
-                if (!patchRes.ok) logEl.textContent += `  ⚠️ Birth log link failed: ${patchRes.status}\n`;
-              } catch(pe) {
-                logEl.textContent += `  ⚠️ Birth log link error: ${pe.message}\n`;
-              }
-            }
+          if (l.type === 'birth' && logUUID) {
+            await syncBirthKidAssets(l, logUUID, token, headers, logEl);
           }
           // ===== END KID ASSET CREATION =====
           if (logUUID) { l.id = logUUID; l.fromFarmOS = true; l.farmosBundle = "log--" + farmosType; }
@@ -6761,6 +6775,10 @@ async function syncToFarmOS() {
             } catch(fe) {
               logEl.textContent += `  ⚠️ File upload error: ${fe.message}\n`;
             }
+          }
+          // Create/link any kids added via Edit — same logic as a new birth log
+          if (l.type === 'birth') {
+            await syncBirthKidAssets(l, l.id, token, headers, logEl);
           }
           l.synced     = true;
           l.needsPatch = false;
