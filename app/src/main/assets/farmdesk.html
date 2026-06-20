@@ -372,8 +372,8 @@ header > div:last-child { min-width: 0; }
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
     <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
     <div style="display:flex;gap:6px;align-items:center;">
-      <div class="module-switcher" id="moduleSwitcher"></div>
       <button class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
+      <div class="module-switcher" id="moduleSwitcher"></div>
       <button class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
     </div>
     <small id="syncStatus">Offline</small>
@@ -1417,7 +1417,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781934068"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781934733"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
