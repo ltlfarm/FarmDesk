@@ -524,9 +524,12 @@ header > div:last-child { min-width: 0; }
       </div>
       <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-        <input type="checkbox" id="animalsNewIsPurchase" style="width:18px;height:18px;">
+        <input type="checkbox" id="animalsNewIsPurchase" style="width:18px;height:18px;" onchange="document.getElementById('animalsNewPriceRow').style.display = this.checked ? '' : 'none';">
         📦 This animal was purchased (logs a Purchase record in farmOS)
       </label>
+      <div id="animalsNewPriceRow" style="display:none;margin-top:8px;">
+        <input id="animalsNewPrice" type="number" step="0.01" min="0" placeholder="Purchase price (optional)" style="width:100%;box-sizing:border-box;">
+      </div>
       <button onclick="addAnimalFromScreen()" style="width:100%;margin-top:8px;">+ Add Animal</button>
     </div>
   </div>
@@ -1417,7 +1420,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781962935"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781964650"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4133,6 +4136,58 @@ function openAnimalProfile(name) {
 // both archive the asset on success so it naturally drops out of fetch
 // results — no local-only exclusion list needed.
 
+// ===== UNIVERSAL: price quantity for Sale/Purchase logs =====
+// A quantity is a separate entity (confirmed by Stock's already-working
+// inventory adjustments) — value is a numerator/denominator fraction, and
+// referencing it from a log needs the quantity's target_revision_id in the
+// relationship meta. unit_price/total_price aren't guaranteed to exist on
+// every instance, so checked once via schema and cached, same pattern as
+// breedFieldSupported.
+const PRICE_FIELDS_KEY = 'farmdesk_price_fields_supported';
+async function priceFieldsSupported(token) {
+  const cached = localStorage.getItem(PRICE_FIELDS_KEY);
+  if (cached !== null) return cached === '1';
+  try {
+    const res = await fetch(apiUrl('/api/schema/quantity/standard'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+    if (res.ok) {
+      const schema = await res.json();
+      const supported = !!(schema && schema.properties && schema.properties.unit_price && schema.properties.total_price);
+      localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
+      return supported;
+    }
+  } catch(e) { /* best-effort */ }
+  return false;
+}
+
+// Builds a 1-head price quantity (with unit_price/total_price if this
+// instance supports them) and returns a relationship reference ready to
+// drop into a log payload's relationships.quantity — or null if no price
+// was entered, or quantity creation failed (price is a nice-to-have, never
+// blocks the sale/purchase log itself from saving).
+async function buildPriceQuantityRef(unitPrice, token) {
+  if (!unitPrice || unitPrice <= 0) return null;
+  try {
+    const supported = await priceFieldsSupported(token);
+    const priceCents = Math.round(unitPrice * 100);
+    const attrs = { measure: 'count', value: { numerator: '1', denominator: '1' } };
+    if (supported) {
+      attrs.unit_price  = { numerator: String(priceCents), denominator: '100' };
+      attrs.total_price = { numerator: String(priceCents), denominator: '100' };
+    }
+    const qRes = await fetch(apiUrl('/api/quantity/standard'), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
+      body: JSON.stringify({ data: { type: 'quantity--standard', attributes: attrs } })
+    });
+    if (!qRes.ok) return null;
+    const qData = await qRes.json();
+    const qUUID = qData?.data?.id;
+    const qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
+    if (!qUUID) return null;
+    return { type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } };
+  } catch(e) { return null; }
+}
+
 async function createPurchaseLog(animalName, details) {
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { return { ok: false, reason: 'offline' }; }
@@ -4140,6 +4195,9 @@ async function createPurchaseLog(animalName, details) {
   if (!uuid) { return { ok: false, reason: 'no-uuid' }; }
   try {
     var token = await getToken(cfg);
+    var relationships = { asset: { data: [{ type: 'asset--animal', id: uuid }] } };
+    var priceRef = await buildPriceQuantityRef(details && details.unitPrice, token);
+    if (priceRef) relationships.quantity = { data: [priceRef] };
     var payload = { data: {
       type: 'log--purchase',
       attributes: {
@@ -4148,7 +4206,7 @@ async function createPurchaseLog(animalName, details) {
         timestamp: String(Math.floor(Date.now() / 1000)),
         notes: { value: (details && details.notes) || '', format: 'default' }
       },
-      relationships: { asset: { data: [{ type: 'asset--animal', id: uuid }] } }
+      relationships: relationships
     }};
     var res = await fetch(apiUrl('/api/log/purchase'), {
       method: 'POST',
@@ -4176,10 +4234,15 @@ async function archiveAnimalWithLog(animalName, logBundle, details) {
       timestamp: String(Math.floor(Date.now() / 1000)),
       notes: { value: (details && details.notes) || '', format: 'default' }
     };
+    var relationships = { asset: { data: [{ type: 'asset--animal', id: uuid }] } };
+    if (logBundle === 'sale') {
+      var priceRef = await buildPriceQuantityRef(details && details.unitPrice, token);
+      if (priceRef) relationships.quantity = { data: [priceRef] };
+    }
     var payload = { data: {
       type: 'log--' + logBundle,
       attributes: attrs,
-      relationships: { asset: { data: [{ type: 'asset--animal', id: uuid }] } }
+      relationships: relationships
     }};
     var res = await fetch(apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
     if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
@@ -4203,7 +4266,9 @@ function openSellAnimalModal(name) {
   if (title) title.textContent = '🏷️ Sell ' + name;
   fields.innerHTML =
     '<p style="color:#888;font-size:13px;">Records a sale log in farmOS and archives this animal.</p>' +
-    '<label>Notes (buyer, price, etc.)</label>' +
+    '<label>Sale Price</label>' +
+    '<input id="lifecyclePrice" type="number" step="0.01" min="0" placeholder="Optional — $ per head">' +
+    '<label>Notes (buyer, etc.)</label>' +
     '<textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>';
   var sb = document.getElementById('modalSaveBtn');
   if (sb) {
@@ -4212,8 +4277,9 @@ function openSellAnimalModal(name) {
     sb.style.background = '#8b6500';
     sb.onclick = async function() {
       var notes = document.getElementById('lifecycleNotes').value || '';
+      var priceVal = parseFloat(document.getElementById('lifecyclePrice').value);
       sb.disabled = true; sb.textContent = 'Saving...';
-      var ok = await archiveAnimalWithLog(name, 'sale', { notes: notes });
+      var ok = await archiveAnimalWithLog(name, 'sale', { notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
       sb.disabled = false; sb.textContent = '🏷️ Confirm Sale';
       if (ok) {
         showToast('✅ ' + name + ' sold and archived');
@@ -4977,6 +5043,8 @@ async function addAnimalFromScreen() {
   var dob     = document.getElementById("animalsNewDob").value || "";
   var notes   = (document.getElementById("animalsNewNotes").value || "").trim();
   var isPurchase = document.getElementById("animalsNewIsPurchase").checked;
+  var purchasePriceVal = parseFloat(document.getElementById("animalsNewPrice").value);
+  var purchasePrice = isNaN(purchasePriceVal) ? null : purchasePriceVal;
 
   goats.push(name);
   localStorage.setItem(LS.goats, JSON.stringify(goats));
@@ -5000,6 +5068,8 @@ async function addAnimalFromScreen() {
   document.getElementById("animalsNewSex").value = "";
   document.getElementById("animalsNewDob").value = "";
   document.getElementById("animalsNewIsPurchase").checked = false;
+  document.getElementById("animalsNewPrice").value = "";
+  document.getElementById("animalsNewPriceRow").style.display = "none";
 
   populateGoatSelect();
   renderAnimalsScreen();
@@ -5036,7 +5106,7 @@ async function addAnimalFromScreen() {
       if (newUUID) {
         animalUUIDs[name] = newUUID;
         localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
-        var purchaseResult = await createPurchaseLog(name, { notes: notes });
+        var purchaseResult = await createPurchaseLog(name, { notes: notes, unitPrice: purchasePrice });
         if (purchaseResult.ok) showToast("✅ Purchase logged in farmOS");
         else showToast("⚠️ Animal created but purchase log failed: " + purchaseResult.reason);
       }
@@ -9720,12 +9790,63 @@ function bd_farmosLogType(t) {
   return 'activity';
 }
 
+// Finds or creates a shared "Eggs" Product asset — farmOS's documented
+// pattern for "one asset yields many harvests" (eggs, apples, etc.) is to
+// increment a Product asset's running inventory from each harvest, rather
+// than leaving every collection as a standalone, unsummed log. One shared
+// product for the whole farm for now, not per-flock.
+const BD_EGGS_PRODUCT_KEY = 'farmdesk_eggs_product_uuid';
+async function bd_getOrCreateEggsProductUUID(token) {
+  var cached = localStorage.getItem(BD_EGGS_PRODUCT_KEY);
+  if (cached) return cached;
+  try {
+    var q = bd_apiUrl('/api/asset/product?filter[name]=Eggs&page[limit]=1');
+    var r = await fetch(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+    if (r.ok) {
+      var d = await r.json();
+      if (d.data && d.data[0]) { localStorage.setItem(BD_EGGS_PRODUCT_KEY, d.data[0].id); return d.data[0].id; }
+    }
+  } catch(e) { /* fall through to create */ }
+  try {
+    var payload = { data: { type: 'asset--product', attributes: { name: 'Eggs' } } };
+    var res = await fetch(bd_apiUrl('/api/asset/product'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+    if (!res.ok) return null;
+    var data = await res.json();
+    var uuid = data && data.data && data.data.id;
+    if (uuid) localStorage.setItem(BD_EGGS_PRODUCT_KEY, uuid);
+    return uuid;
+  } catch(e) { return null; }
+}
+
 async function bd_pushLog(log, token) {
   var ftype = bd_farmosLogType(log.type);
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === log.birdId; })[0];
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
+
+  // Eggs increment the shared Eggs Product's inventory in farmOS, same
+  // documented pattern as Stock's inventory adjustments.
+  if (log.type === 'egg' && log.eggCount) {
+    try {
+      var eggsProductUUID = await bd_getOrCreateEggsProductUUID(token);
+      if (eggsProductUUID) {
+        var qPayload = { data: {
+          type: 'quantity--standard',
+          attributes: { measure: 'count', value: { numerator: String(log.eggCount), denominator: '1' }, inventory_adjustment: 'increment' },
+          relationships: { inventory_asset: { data: { type: 'asset--product', id: eggsProductUUID } } }
+        } };
+        var qRes = await fetch(bd_apiUrl('/api/quantity/standard'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(qPayload) });
+        if (qRes.ok) {
+          var qData = await qRes.json();
+          var qUUID = qData && qData.data && qData.data.id;
+          var qRevId = qData && qData.data && qData.data.attributes && qData.data.attributes.drupal_internal__revision_id;
+          if (qUUID) payload.data.relationships.quantity = { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] };
+        }
+      }
+    } catch(qe) { /* egg inventory tracking is a nice-to-have — log itself still saves below */ }
+  }
+
   var res = await fetch(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
