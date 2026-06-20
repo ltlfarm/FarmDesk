@@ -4294,6 +4294,29 @@ function openRetypeAnimalModal(name) {
 }
 
 
+// ===== UNIVERSAL: dynamic breed-field detection =====
+// Different farmOS instances may or may not expose a real "breed" attribute
+// on asset--animal — this one doesn't (confirmed via a 422). Rather than
+// hardcode that, check the instance's own JSON Schema and cache the result.
+// Shared by every module — Goats, Birds, and any future module (Horses,
+// Cattle, etc.) all get real breed support automatically if the instance
+// has it, or fall back to the universal notes-based approach if it doesn't.
+const BREED_FIELD_KEY = 'farmdesk_breed_field_supported';
+async function breedFieldSupported(token) {
+  const cached = localStorage.getItem(BREED_FIELD_KEY);
+  if (cached !== null) return cached === '1';
+  try {
+    const res = await fetch(apiUrl('/api/schema/asset/animal'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+    if (res.ok) {
+      const schema = await res.json();
+      const supported = !!(schema && schema.properties && schema.properties.breed);
+      localStorage.setItem(BREED_FIELD_KEY, supported ? '1' : '0');
+      return supported;
+    }
+  } catch(e) { /* best-effort */ }
+  return false; // unknown — safe default avoids a 422; re-checked next time the schema fetch above runs
+}
+
 // Used by the "Not a goat?" / "Not a bird?" flows in any module. Finds or
 // creates the taxonomy_term--animal_type term, then PATCHes the asset's
 // animal_type relationship. This is the real fix for untyped/mistyped
@@ -4855,16 +4878,19 @@ async function pushAnimalProfileCore(name, fields) {
     if (fields.sex) attrs.sex = fields.sex.toLowerCase() === 'm' ? 'male' : fields.sex.toLowerCase() === 'f' ? 'female' : fields.sex.toLowerCase();
     if (fields.birthdate) attrs.birthdate = fields.birthdate;
     if (fields.tag) attrs.id_tag = [{ id: fields.tag, type: 'tag' }];
-    // breed is NOT a valid attribute on this farmOS instance's asset--animal
-    // resource type (confirmed via a 422: "The attribute breed does not
-    // exist...") — folded into notes instead so it's not lost to farmOS.
-    // Strip any prior "Breed: ..." line first (e.g. pulled back in on a
-    // fetch) so repeated saves don't pile up duplicate lines.
-    var cleanNotes = (fields.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
-    var notesParts = [];
-    if (cleanNotes) notesParts.push(cleanNotes);
-    if (fields.breed) notesParts.push('Breed: ' + fields.breed);
-    if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
+    // breed: use the real attribute if this farmOS instance has one,
+    // otherwise fold into notes as a universal fallback (strip any prior
+    // "Breed: ..." line first so repeated saves don't pile up duplicates).
+    if (await breedFieldSupported(token)) {
+      if (fields.breed) attrs.breed = fields.breed;
+      if (fields.notes) attrs.notes = { value: fields.notes, format: 'default' };
+    } else {
+      var cleanNotes = (fields.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+      var notesParts = [];
+      if (cleanNotes) notesParts.push(cleanNotes);
+      if (fields.breed) notesParts.push('Breed: ' + fields.breed);
+      if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
+    }
     var payload = { data: { type: 'asset--animal', id: uuid, attributes: attrs } };
     var res = await fetch(apiUrl('/api/asset/animal/' + uuid), {
       method: 'PATCH',
@@ -6398,6 +6424,11 @@ async function fetchAnimalUUIDs(silent = false) {
           flagValues = (flagProp.items && flagProp.items.enum) || flagProp.enum || [];
         }
         if (flagValues.length) localStorage.setItem(LS.flagSchema, JSON.stringify(flagValues));
+        // Same response also tells us whether this instance has a real
+        // "breed" attribute — universal across every module (Goats, Birds,
+        // any future module), not just this one. Free to check here since
+        // the schema is already being fetched for flags.
+        localStorage.setItem(BREED_FIELD_KEY, schema?.properties?.breed ? '1' : '0');
       }
     } catch(fe) { /* schema fetch is best-effort */ }
 
@@ -6441,6 +6472,8 @@ async function fetchAnimalUUIDs(silent = false) {
       }
     });
 
+    const breedSupported = await breedFieldSupported(token);
+
     animalRows.forEach(a => {
       const name = (a.attributes.name || "").trim();
       if (!name) return;
@@ -6459,13 +6492,27 @@ async function fetchAnimalUUIDs(silent = false) {
       var grpRel = a.relationships && a.relationships.group && a.relationships.group.data;
       var grpId  = Array.isArray(grpRel) ? (grpRel.length ? grpRel[0].id : null) : (grpRel && grpRel.id);
       var grpName = grpId ? (groupNames[grpId] || "") : "";
+      var rawNotes = ((a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || "").toString().replace(/<[^>]*>/g,"").trim();
+      var fetchedBreed, fetchedNotes;
+      if (breedSupported) {
+        // Real attribute — notes stay exactly as written.
+        fetchedBreed = a.attributes.breed || "";
+        fetchedNotes = rawNotes;
+      } else {
+        // No real breed attribute on this instance — only exists folded
+        // into notes as "Breed: X" (see pushAnimalProfileCore). Parse it
+        // back out and strip it from the notes shown locally.
+        var breedMatch = rawNotes.match(/^Breed: (.+)$/m);
+        fetchedBreed = breedMatch ? breedMatch[1].trim() : "";
+        fetchedNotes = rawNotes.replace(/^Breed: .*$/m, "").replace(/\n{2,}/g, "\n").trim();
+      }
       animalProfiles[name] = {
         sex:       a.attributes.sex || "",
         birthdate: a.attributes.birthdate || "",
-        breed:     "",
+        breed:     fetchedBreed,
         type:      typeName ? (typeName.charAt(0).toUpperCase()+typeName.slice(1)) : "",
         group:     grpName,
-        notes:     ((a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || "").toString().replace(/<[^>]*>/g,"").trim(),
+        notes:     fetchedNotes,
         flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
         photoUrl:  imgId ? (typeNames[imgId] || null) : null,
         photo:     prevPhoto
@@ -9229,6 +9276,7 @@ async function bd_fetchAssets() {
     (data.included || []).forEach(function(inc) { if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || ''; else if (inc.type === 'asset--group') groupMap[inc.id] = inc.attributes.name || ''; });
     Object.keys(groupMap).forEach(function(gid) { var nm = groupMap[gid]; if (!bd_flocks.some(function(f) { return f.uuid === gid || f.name === nm; })) { bd_flocks.push({ name: nm, species: '', nestBoxes: [], uuid: gid }); } else { bd_flocks.forEach(function(f) { if (f.name === nm && !f.uuid) f.uuid = gid; }); } });
     localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks));
+    var breedSupported = await breedFieldSupported(token);
     // Only pull animals typed as a bird species this module owns. Untyped
     // animals (no animal_type set) still come through — never silently hide
     // someone's flock — but anything explicitly typed as another module's
@@ -9245,7 +9293,23 @@ async function bd_fetchAssets() {
       var grpRel = a.relationships && a.relationships.group && a.relationships.group.data;
       var grpId = (grpRel && grpRel.length) ? grpRel[0].id : ((grpRel && grpRel.id) ? grpRel.id : null);
       var grpFlock = grpId ? (groupMap[grpId] || '') : '';
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: a.attributes.breed || '', sex: a.attributes.sex || '', status: 'active', notes: (a.attributes.notes && a.attributes.notes.value) ? a.attributes.notes.value : '', flock: grpFlock, synced: true };
+      var rawNotes = (a.attributes.notes && a.attributes.notes.value) ? a.attributes.notes.value : '';
+      var fetchedBreed, fetchedNotes;
+      if (breedSupported) {
+        // Real attribute — notes stay exactly as the user wrote them.
+        fetchedBreed = a.attributes.breed || '';
+        fetchedNotes = rawNotes;
+      } else {
+        // No real breed attribute on this instance — it only exists folded
+        // into notes as "Breed: X". Parse it back out and strip it from the
+        // notes shown locally, or every fetch would leak "Breed: X" into
+        // the visible notes (and, before this fix, silently wipe the local
+        // breed field too, since a.attributes.breed is always undefined).
+        var breedMatch = rawNotes.match(/^Breed: (.+)$/m);
+        fetchedBreed = breedMatch ? breedMatch[1].trim() : '';
+        fetchedNotes = rawNotes.replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+      }
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, synced: true };
     });
     var resEq = await fetch(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
@@ -9256,6 +9320,14 @@ async function bd_fetchAssets() {
     var prevFlock = {};
     bd_birds.forEach(function(b) { if (b.uuid && b.flock) prevFlock[b.uuid] = b.flock; });
     fetched.forEach(function(b) { if (!b.flock && prevFlock[b.uuid]) b.flock = prevFlock[b.uuid]; });
+    // Preserve locally-stored photos — the rebuilt object above never had a
+    // photo field at all, so every fetch silently wiped every bird's photo
+    // back to nothing (same root cause as the breed bug above: fetch
+    // rebuilds the whole array and farmOS doesn't hand the photo back as
+    // part of this response).
+    var prevPhoto = {};
+    bd_birds.forEach(function(b) { if (b.uuid && b.photo) prevPhoto[b.uuid] = b.photo; });
+    fetched.forEach(function(b) { if (!b.photo && prevPhoto[b.uuid]) b.photo = prevPhoto[b.uuid]; });
     var localOnly = bd_birds.filter(function(b) { return !b.uuid && b.status !== 'archived' && b.type !== 'feeder'; });
     bd_birds = fetched.concat(feeders).concat(localOnly);
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
@@ -9409,14 +9481,19 @@ async function bd_patchLog(log, token) {
 async function bd_pushCreateBird(bird, token) {
   var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
   if (bird.sex) payload.data.attributes.sex = bird.sex;
-  // breed is NOT a valid attribute on this farmOS instance's asset--animal
-  // resource type — folded into notes instead so it's not lost to farmOS.
-  // Strip any prior "Breed: ..." line first so repeated saves don't pile up.
-  var bcCleanNotes = (bird.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
-  var bcNotesParts = [];
-  if (bcCleanNotes) bcNotesParts.push(bcCleanNotes);
-  if (bird.breed) bcNotesParts.push('Breed: ' + bird.breed);
-  if (bcNotesParts.length) payload.data.attributes.notes = { value: bcNotesParts.join('\n'), format: 'default' };
+  // breed: real attribute if this farmOS instance has one, otherwise fold
+  // into notes as a universal fallback (strip any prior "Breed: ..." line
+  // first so repeated saves don't pile up duplicates).
+  if (await breedFieldSupported(token)) {
+    if (bird.breed) payload.data.attributes.breed = bird.breed;
+    if (bird.notes) payload.data.attributes.notes = { value: bird.notes, format: 'default' };
+  } else {
+    var bcCleanNotes = (bird.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+    var bcNotesParts = [];
+    if (bcCleanNotes) bcNotesParts.push(bcCleanNotes);
+    if (bird.breed) bcNotesParts.push('Breed: ' + bird.breed);
+    if (bcNotesParts.length) payload.data.attributes.notes = { value: bcNotesParts.join('\n'), format: 'default' };
+  }
   if (bird.species) {
     try {
       var typeId = await ensureAnimalTypeUUID(bird.species, token);
@@ -9448,15 +9525,19 @@ async function bd_pushUpdateBird(bird, token) {
     id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : []
   };
   if (bird.sex) attrs.sex = bird.sex;
-  // breed is NOT a valid attribute on this farmOS instance's asset--animal
-  // resource type (confirmed via the 422 this exact line caused) — folded
-  // into notes instead so it's not lost to farmOS. Strip any prior
-  // "Breed: ..." line first so repeated saves don't pile up duplicates.
-  var buCleanNotes = (bird.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
-  var buNotesParts = [];
-  if (buCleanNotes) buNotesParts.push(buCleanNotes);
-  if (bird.breed) buNotesParts.push('Breed: ' + bird.breed);
-  if (buNotesParts.length) attrs.notes = { value: buNotesParts.join('\n'), format: 'default' };
+  // breed: real attribute if this farmOS instance has one, otherwise fold
+  // into notes as a universal fallback (strip any prior "Breed: ..." line
+  // first so repeated saves don't pile up duplicates).
+  if (await breedFieldSupported(token)) {
+    if (bird.breed) attrs.breed = bird.breed;
+    if (bird.notes) attrs.notes = { value: bird.notes, format: 'default' };
+  } else {
+    var buCleanNotes = (bird.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+    var buNotesParts = [];
+    if (buCleanNotes) buNotesParts.push(buCleanNotes);
+    if (bird.breed) buNotesParts.push('Breed: ' + bird.breed);
+    if (buNotesParts.length) attrs.notes = { value: buNotesParts.join('\n'), format: 'default' };
+  }
   var payload = { data: { type: 'asset--animal', id: bird.uuid, attributes: attrs } };
   // Species change — set via the animal_type taxonomy relationship, same
   // pattern as the goat retype flow (find-or-create the term, then link it)
