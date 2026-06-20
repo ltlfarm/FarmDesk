@@ -9295,11 +9295,15 @@ async function bd_fetchAssets() {
   try {
     var token = await bd_getToken(cfg);
     var h = bd_authHeaders(token);
-    var res = await fetch(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group'), { headers: h });
+    var res = await fetch(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
-    var typeMap = {}; var groupMap = {};
-    (data.included || []).forEach(function(inc) { if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || ''; else if (inc.type === 'asset--group') groupMap[inc.id] = inc.attributes.name || ''; });
+    var typeMap = {}; var groupMap = {}; var fileMap = {};
+    (data.included || []).forEach(function(inc) {
+      if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || '';
+      else if (inc.type === 'asset--group') groupMap[inc.id] = inc.attributes.name || '';
+      else if (inc.type === 'file--file') fileMap[inc.id] = (inc.attributes.uri && (inc.attributes.uri.url || inc.attributes.uri.value)) || null;
+    });
     Object.keys(groupMap).forEach(function(gid) { var nm = groupMap[gid]; if (!bd_flocks.some(function(f) { return f.uuid === gid || f.name === nm; })) { bd_flocks.push({ name: nm, species: '', nestBoxes: [], uuid: gid }); } else { bd_flocks.forEach(function(f) { if (f.name === nm && !f.uuid) f.uuid = gid; }); } });
     localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks));
     var breedSupported = await breedFieldSupported(token);
@@ -9319,6 +9323,9 @@ async function bd_fetchAssets() {
       var grpRel = a.relationships && a.relationships.group && a.relationships.group.data;
       var grpId = (grpRel && grpRel.length) ? grpRel[0].id : ((grpRel && grpRel.id) ? grpRel.id : null);
       var grpFlock = grpId ? (groupMap[grpId] || '') : '';
+      var imgRel = a.relationships && a.relationships.image && a.relationships.image.data;
+      var imgId = Array.isArray(imgRel) ? (imgRel.length ? imgRel[imgRel.length-1].id : null) : (imgRel && imgRel.id);
+      var photoUrl = imgId ? (fileMap[imgId] || null) : null;
       var rawNotes = (a.attributes.notes && a.attributes.notes.value) ? a.attributes.notes.value : '';
       var fetchedBreed, fetchedNotes;
       if (breedSupported) {
@@ -9335,7 +9342,7 @@ async function bd_fetchAssets() {
         fetchedBreed = breedMatch ? breedMatch[1].trim() : '';
         fetchedNotes = rawNotes.replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
       }
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, synced: true };
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, synced: true };
     });
     var resEq = await fetch(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
@@ -9346,20 +9353,38 @@ async function bd_fetchAssets() {
     var prevFlock = {};
     bd_birds.forEach(function(b) { if (b.uuid && b.flock) prevFlock[b.uuid] = b.flock; });
     fetched.forEach(function(b) { if (!b.flock && prevFlock[b.uuid]) b.flock = prevFlock[b.uuid]; });
-    // Preserve locally-stored photos — the rebuilt object above never had a
-    // photo field at all, so every fetch silently wiped every bird's photo
-    // back to nothing (same root cause as the breed bug above: fetch
-    // rebuilds the whole array and farmOS doesn't hand the photo back as
-    // part of this response).
+    // Preserve locally-stored photos that haven't been synced to farmOS yet
+    // (no photoUrl from farmOS means nothing to download below — keep
+    // whatever local copy already exists rather than losing it).
     var prevPhoto = {};
     bd_birds.forEach(function(b) { if (b.uuid && b.photoId) prevPhoto[b.uuid] = b.photoId; });
-    fetched.forEach(function(b) { if (!b.photoId && prevPhoto[b.uuid]) b.photoId = prevPhoto[b.uuid]; });
+    fetched.forEach(function(b) { if (!b.photoUrl && !b.photoId && prevPhoto[b.uuid]) b.photoId = prevPhoto[b.uuid]; });
     var localOnly = bd_birds.filter(function(b) { return !b.uuid && b.status !== 'archived' && b.type !== 'feeder'; });
     bd_birds = fetched.concat(feeders).concat(localOnly);
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
     if (el) { el.textContent = 'Fetched ' + fetched.length + ' birds, ' + feeders.length + ' feeders'; el.style.color = '#3a7'; }
     bd_toast('Fetched ' + fetched.length + ' birds');
     bd_renderBirds();
+    // Download any farmOS-hosted photo not yet cached locally (parallel),
+    // same pattern as GoatDesk's animal photo download.
+    try {
+      var downloaded = false;
+      await Promise.all(bd_birds.map(async function(b) {
+        if (b.photoUrl && !b.photoId) {
+          try {
+            var u = b.photoUrl.indexOf('http') === 0 ? b.photoUrl : (cfg.url + b.photoUrl);
+            var r = await fetch(u, { headers: { 'Authorization': 'Bearer ' + token } });
+            if (r.ok) {
+              var blob = await r.blob();
+              var full = await new Promise(function(res) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.readAsDataURL(blob); });
+              b.photoId = await Photos.save(full);
+              downloaded = true;
+            }
+          } catch(e) { /* offline-safe */ }
+        }
+      }));
+      if (downloaded) { localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); bd_renderBirds(); }
+    } catch(e) { /* photo download is best-effort */ }
   } catch(e) {
     if (el) { el.textContent = e.message; el.style.color = '#c00'; }
     bd_toast('Fetch failed: ' + e.message);
@@ -9504,28 +9529,18 @@ async function bd_patchLog(log, token) {
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
-// Photos attach to logs in farmOS, not assets directly — pushing straight
-// to an asset's image field wasn't reliably working. This creates a small
-// log--activity entry carrying the photo instead, using the same two-step
-// binary upload pattern already proven for every other photo in the app.
-async function bd_pushProfilePhotoAsLog(birdUUID, photoId, token) {
+// Uploads a bird's profile photo to its own asset--animal record — the
+// "Images" section shown on an animal's page in farmOS itself confirms this
+// is the correct, working mechanism (same pattern GoatDesk's animal photos
+// already use successfully). Two-step binary upload to the asset's image field.
+async function bd_pushProfilePhoto(birdUUID, photoId, token) {
   if (!birdUUID || !photoId) return;
   var photoData = await Photos.load(photoId);
   if (!photoData) return;
   try {
-    var logPayload = { data: {
-      type: 'log--activity',
-      attributes: { name: 'Profile Photo', status: 'done', timestamp: String(Math.floor(Date.now() / 1000)) },
-      relationships: { asset: { data: [{ type: 'asset--animal', id: birdUUID }] } }
-    } };
-    var logRes = await fetch(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(logPayload) });
-    if (!logRes.ok) return;
-    var logData = await logRes.json();
-    var logUUID = logData && logData.data && logData.data.id;
-    if (!logUUID) return;
     var blob = await (await fetch(photoData)).blob();
     var fd = new FormData(); fd.append('file', blob, 'bird-' + birdUUID + '.jpg');
-    await fetch(bd_apiUrl('/api/log/activity/' + logUUID + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+    await fetch(bd_apiUrl('/api/asset/animal/' + birdUUID + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
   } catch(e) { /* photo upload non-fatal — local copy is unaffected either way */ }
 }
 
@@ -9560,7 +9575,7 @@ async function bd_pushCreateBird(bird, token) {
     if (lb.flock) { try { await bd_pushGroupAssign(lb.uuid, lb.flock, token); } catch(e) { bd_pending.push({ action: 'group_assign', birdUUID: lb.uuid, flockName: lb.flock, id: 'ga_' + Date.now(), synced: false }); localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending)); } }
     // Photos attach to logs, not assets — pushing straight to the bird's
     // image field wasn't reliable. Attach via a log instead.
-    await bd_pushProfilePhotoAsLog(lb.uuid, lb.photoId, token);
+    await bd_pushProfilePhoto(lb.uuid, lb.photoId, token);
   }
 }
 
@@ -9597,7 +9612,7 @@ async function bd_pushUpdateBird(bird, token) {
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Photos attach to logs, not assets — pushing straight to the bird's
   // image field wasn't reliable. Attach via a log instead.
-  await bd_pushProfilePhotoAsLog(bird.uuid, bird.photoId, token);
+  await bd_pushProfilePhoto(bird.uuid, bird.photoId, token);
 }
 
 async function bd_pushArchiveBird(uuid, token) {
