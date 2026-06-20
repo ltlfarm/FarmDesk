@@ -9504,6 +9504,31 @@ async function bd_patchLog(log, token) {
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
+// Photos attach to logs in farmOS, not assets directly — pushing straight
+// to an asset's image field wasn't reliably working. This creates a small
+// log--activity entry carrying the photo instead, using the same two-step
+// binary upload pattern already proven for every other photo in the app.
+async function bd_pushProfilePhotoAsLog(birdUUID, photoId, token) {
+  if (!birdUUID || !photoId) return;
+  var photoData = await Photos.load(photoId);
+  if (!photoData) return;
+  try {
+    var logPayload = { data: {
+      type: 'log--activity',
+      attributes: { name: 'Profile Photo', status: 'done', timestamp: String(Math.floor(Date.now() / 1000)) },
+      relationships: { asset: { data: [{ type: 'asset--animal', id: birdUUID }] } }
+    } };
+    var logRes = await fetch(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(logPayload) });
+    if (!logRes.ok) return;
+    var logData = await logRes.json();
+    var logUUID = logData && logData.data && logData.data.id;
+    if (!logUUID) return;
+    var blob = await (await fetch(photoData)).blob();
+    var fd = new FormData(); fd.append('file', blob, 'bird-' + birdUUID + '.jpg');
+    await fetch(bd_apiUrl('/api/log/activity/' + logUUID + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+  } catch(e) { /* photo upload non-fatal — local copy is unaffected either way */ }
+}
+
 async function bd_pushCreateBird(bird, token) {
   var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
   if (bird.sex) payload.data.attributes.sex = bird.sex;
@@ -9533,17 +9558,9 @@ async function bd_pushCreateBird(bird, token) {
   if (lb && data.data && data.data.id) {
     lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
     if (lb.flock) { try { await bd_pushGroupAssign(lb.uuid, lb.flock, token); } catch(e) { bd_pending.push({ action: 'group_assign', birdUUID: lb.uuid, flockName: lb.flock, id: 'ga_' + Date.now(), synced: false }); localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending)); } }
-    // Upload photo if present (two-step binary POST), same as update path
-    if (lb.photoId) {
-      try {
-        var photoData = await Photos.load(lb.photoId);
-        if (photoData) {
-          var blob = await (await fetch(photoData)).blob();
-          var fd = new FormData(); fd.append('file', blob, 'bird-' + lb.uuid + '.jpg');
-          await fetch(bd_apiUrl('/api/asset/animal/' + lb.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
-        }
-      } catch(e) { /* photo upload non-fatal */ }
-    }
+    // Photos attach to logs, not assets — pushing straight to the bird's
+    // image field wasn't reliable. Attach via a log instead.
+    await bd_pushProfilePhotoAsLog(lb.uuid, lb.photoId, token);
   }
 }
 
@@ -9578,17 +9595,9 @@ async function bd_pushUpdateBird(bird, token) {
   }
   var res = await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
-  // Upload photo if present (two-step binary POST)
-  if (bird.photoId) {
-    try {
-      var photoData = await Photos.load(bird.photoId);
-      if (photoData) {
-        var blob = await (await fetch(photoData)).blob();
-        var fd = new FormData(); fd.append('file', blob, 'bird-' + bird.uuid + '.jpg');
-        await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
-      }
-    } catch(e) { /* photo upload non-fatal */ }
-  }
+  // Photos attach to logs, not assets — pushing straight to the bird's
+  // image field wasn't reliable. Attach via a log instead.
+  await bd_pushProfilePhotoAsLog(bird.uuid, bird.photoId, token);
 }
 
 async function bd_pushArchiveBird(uuid, token) {
