@@ -7527,7 +7527,8 @@ const SD_LS = {
   lastSync:   'farmdesk_stock_lastsync',
   thresholds: 'farmdesk_stock_thresholds',
   pending:    'farmdesk_stock_pending',  // local-first queue
-  photos:     'farmdesk_stock_photos',   // base64 photos keyed by asset UUID
+  photos:     'farmdesk_stock_photos',   // LEGACY — raw base64 keyed by asset UUID, migrated to photoIds below
+  photoIds:   'farmdesk_stock_photoids', // {uuid: [photoId,...]} — actual bytes live in the Photos store, not localStorage
   categories: 'farmdesk_stock_categories',
   tasks:      'farmdesk_stock_tasks'     // local-only reminders — no farmOS log type fits "intend to restock later"
 };
@@ -7569,8 +7570,9 @@ let thresholds  = JSON.parse(localStorage.getItem(SD_LS.thresholds) || '{}');
 let stockTasks  = JSON.parse(localStorage.getItem(SD_LS.tasks) || '[]'); // local-only reminders, never synced
 let sdCategories = JSON.parse(localStorage.getItem(SD_LS.categories) || 'null') || ['Feed','Medical','Lab'];
 let pending    = JSON.parse(localStorage.getItem(SD_LS.pending)    || '[]');
-let photos     = JSON.parse(localStorage.getItem(SD_LS.photos)     || '{}');
+let photoIds   = JSON.parse(localStorage.getItem(SD_LS.photoIds)   || '{}'); // {uuid: [photoId,...]} — survives refreshAssets() rebuilding the assets array from farmOS
 currentPhoto = null; // declared once in the Goats section; reset here for Stock asset photos
+var adjustOriginalPhoto = null; // resolved photo at openAdjust() time, to detect whether the user actually changed it
 let currentTab   = 'Feed';
 let adjustAsset  = null;
 let adjustAction = 'increment';
@@ -7578,6 +7580,43 @@ let adjustAction = 'increment';
 // Syringe / needle asset key → UUID (populated after asset fetch)
 let syringeMap = {};
 let needleMap  = {};
+
+// ===== ONE-TIME MIGRATION: raw base64 photos -> Photos store (IDs only) =====
+// Stock used to embed full base64 directly in localStorage — one giant blob
+// per save (a.photos array, max 3 photos/item) plus a separate raw-base64
+// `photos` map. Same quota risk the Photos store (used elsewhere for animal
+// photos) already avoids: individually-keyed entries, thumbnail-sized. This
+// moves any existing Stock photo data over once, then never runs again.
+(async function migrateStockPhotosToPhotoStore() {
+  if (localStorage.getItem('farmdesk_stock_photo_migration_done')) return;
+  try {
+    const legacyMap = JSON.parse(localStorage.getItem(SD_LS.photos) || '{}');
+    let changed = false;
+    for (const a of assets) {
+      const legacySrcs = (a.photos && a.photos.length) ? a.photos.slice()
+        : (a.photo ? [a.photo] : (legacyMap[a.uuid] ? [legacyMap[a.uuid]] : []));
+      if (legacySrcs.length) {
+        const ids = [];
+        for (const src of legacySrcs) {
+          const id = await Photos.save(src);
+          if (id) ids.push(id);
+        }
+        a.photoIds = ids;
+        photoIds[a.uuid] = ids;
+        changed = true;
+      }
+      delete a.photos;
+      delete a.photo;
+    }
+    if (changed) {
+      localStorage.setItem(SD_LS.assets, JSON.stringify(assets));
+      localStorage.setItem(SD_LS.photoIds, JSON.stringify(photoIds));
+      renderDashboard();
+    }
+    localStorage.removeItem(SD_LS.photos);
+    localStorage.setItem('farmdesk_stock_photo_migration_done', '1');
+  } catch(e) { /* best-effort — done-flag stays unset so it retries next load */ }
+})();
 
 // Internal: actually display a stock module screen. No stack push.
 function sd_showInternal(id) {
@@ -7701,8 +7740,8 @@ async function refreshAssets(silent) {
       const name   = a.attributes.name || '';
       const measure = inv.measure || guessMeasure(name);
       const notesVal = a.attributes.notes?.value || '';
-      // Preserve locally-stored photo — never overwrite with fetch
-      const existingPhoto = photos[a.id] || null;
+      // Preserve locally-stored photo IDs — never overwrite with fetch (farmOS material assets don't carry photo data back)
+      const existingPhotoIds = photoIds[a.id] || [];
       return {
         uuid:      a.id,
         name,
@@ -7713,7 +7752,7 @@ async function refreshAssets(silent) {
         units:     inv.units || unitLabel_(name, measure),
         unitId:    guessUnitId(name, measure),
         notes:     notesVal,
-        photo:     existingPhoto
+        photoIds:  existingPhotoIds
       };
     });
     // Keep items created locally via ➕ that haven't been pushed yet —
@@ -7953,7 +7992,8 @@ function renderDashboard() {
     const ul       = a.units;
     // Subtitle = first line of notes
     const subtitle = a.notes ? a.notes.split('\n')[0] : '';
-    const thumb    = a.photo ? `<img src="${a.photo}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;cursor:zoom-in;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : '';
+    const primaryId = a.photoIds && a.photoIds[0];
+    const thumb    = primaryId ? `<img data-photoid="${primaryId}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;cursor:zoom-in;background:#333;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : '';
     return `<div class="stock-card ${cls}" onclick="toggleCardDrawer(this)">
       <div class="card-top">
         ${thumb}
@@ -7966,7 +8006,7 @@ function renderDashboard() {
         <button class="adj-btn"           onclick="event.stopPropagation();quickAdj('${a.uuid}', 1)">+</button>
       </div>
       <div class="card-drawer" id="drawer-${a.uuid}">
-        ${a.photo ? `<img src="${a.photo}" style="width:100%;border-radius:6px;object-fit:contain;cursor:zoom-in;margin-bottom:8px;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : ''}
+        ${primaryId ? `<img data-photoid="${primaryId}" style="width:100%;min-height:120px;border-radius:6px;object-fit:contain;cursor:zoom-in;margin-bottom:8px;background:#333;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : ''}
         ${a.notes ? `<div style="color:#aaa;font-size:13px;margin-bottom:8px;">${a.notes.replace(/\n/g,'<br>')}</div>` : ''}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button onclick="event.stopPropagation();openAdjust('${a.uuid}')" style="flex:1;margin:0;padding:12px;font-size:14px;">📝 Adjust</button>
@@ -7975,6 +8015,7 @@ function renderDashboard() {
       </div>
     </div>`;
   }).join('');
+  lazyLoadPhotos(list); // fill in <img data-photoid> from the Photos store
 }
 
 function toggleCardDrawer(card) {
@@ -7996,7 +8037,7 @@ function quickAdj(uuid, delta) {
 }
 
 // ===== OPEN ADJUST SCREEN =====
-function openAdjust(uuid) {
+async function openAdjust(uuid) {
   adjustAsset = assets.find(a => a.uuid === uuid);
   if (!adjustAsset) return;
   document.getElementById('adjustTitle').textContent = adjustAsset.name;
@@ -8021,7 +8062,9 @@ function openAdjust(uuid) {
   document.getElementById('restockLot').value = '';
   setPriceType('each');
   // Photo — load existing asset photo if present
-  currentPhoto = adjustAsset.photo || null;
+  const primaryId = adjustAsset.photoIds && adjustAsset.photoIds[0];
+  currentPhoto = primaryId ? await Photos.load(primaryId) : null;
+  adjustOriginalPhoto = currentPhoto; // baseline to detect a real change on save
   const preview = document.getElementById('adjustPhotoPreview');
   const clearBtn = document.getElementById('clearAssetPhotoBtn');
   if (currentPhoto) {
@@ -8201,15 +8244,17 @@ function clearAssetPhoto() {
 }
 
 // ===== PHOTO VIEWER =====
-function sd_openPhotoViewer(uuid) {
+async function sd_openPhotoViewer(uuid) {
   const a = assets.find(x => x.uuid === uuid);
-  if (!a || !a.photo) return;
-  openPhotoViewer(a.photo); // shared viewer — pan, zoom, and correct close handling
+  const id = a && a.photoIds && a.photoIds[0];
+  if (!id) return;
+  const data = await Photos.load(id);
+  if (data) openPhotoViewer(data); // shared viewer — pan, zoom, and correct close handling
 }
 // closePhotoViewer — uses GoatDesk shared version
 
 // ===== EDIT ITEM =====
-function openEditItem(uuid) {
+async function openEditItem(uuid) {
   const a = assets.find(x => x.uuid === uuid);
   if (!a) return;
   const modal   = document.getElementById('sd-editModal');
@@ -8217,8 +8262,12 @@ function openEditItem(uuid) {
   const saveBtn = document.getElementById('sd-modalSaveBtn');
   document.getElementById('sd-editTitle').textContent = '✏️ Edit Item';
 
-  // Get existing photos — support single photo (legacy) or array
-  const existingPhotos = a.photos ? [...a.photos] : (a.photo ? [a.photo] : []);
+  // Resolve existing photo IDs to actual image data for the editing session.
+  // The session itself still works in raw base64 in memory (rotate/remove/
+  // add) — only the persistence boundary (load here, save below) talks to
+  // the Photos store instead of embedding bytes directly in localStorage.
+  const existingIds = a.photoIds || [];
+  const existingPhotos = (await Promise.all(existingIds.map(id => Photos.load(id)))).filter(Boolean);
 
   function renderEditItemPhotos() {
     const container = document.getElementById('editItemPhotoStrip');
@@ -8265,19 +8314,27 @@ function openEditItem(uuid) {
 
   saveBtn.textContent  = '💾 Save';
   saveBtn.style.background = '#3a7';
-  saveBtn.onclick = () => {
+  saveBtn.onclick = async () => {
     const newName      = document.getElementById('editItemName').value.trim();
     const newNotes     = document.getElementById('editItemNotes').value.trim();
     const newThreshold = parseFloat(document.getElementById('editItemThreshold').value) || 0;
     if (!newName) { showToast('Name required'); return; }
     a.name   = newName;
     a.notes  = newNotes;
-    a.photos = window._editItemPhotos || [];
-    a.photo  = a.photos[0] || null; // keep legacy field for compat
-    // Keep the photos map in step — refreshAssets rebuilds dashboard photos
-    // from this map, so a stale entry here resurrects the old (unrotated) image
-    photos[a.uuid] = a.photo;
-    localStorage.setItem(SD_LS.photos,     JSON.stringify(photos));
+
+    // Re-save the current photo set through the Photos store and release the
+    // old IDs — simpler and safer than trying to diff which ones changed.
+    const oldIds = (a.photoIds || []).slice();
+    const newIds = [];
+    for (const src of (window._editItemPhotos || [])) {
+      const id = await Photos.save(src);
+      if (id) newIds.push(id);
+    }
+    a.photoIds = newIds;
+    oldIds.forEach(id => Photos.remove(id));
+    photoIds[a.uuid] = newIds;
+    localStorage.setItem(SD_LS.photoIds, JSON.stringify(photoIds));
+
     thresholds[a.uuid] = newThreshold;
     localStorage.setItem(SD_LS.assets,     JSON.stringify(assets));
     localStorage.setItem(SD_LS.thresholds, JSON.stringify(thresholds));
@@ -8289,9 +8346,9 @@ function openEditItem(uuid) {
       updateSyncBadge();
     }
     // Queue photo sync for first photo if changed
-    if (a.photos[0] && !a.uuid.startsWith('local_')) {
+    if (newIds[0] && !a.uuid.startsWith('local_')) {
       pending = pending.filter(p => !(p.type === 'photo' && p.uuid === a.uuid));
-      pending.push({ id: 'photo_' + a.uuid, type: 'photo', uuid: a.uuid, name: a.name, photo: a.photos[0], synced: false });
+      pending.push({ id: 'photo_' + a.uuid, type: 'photo', uuid: a.uuid, name: a.name, photoId: newIds[0], synced: false });
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
     }
     window._editItemPhotos = null;
@@ -8353,7 +8410,7 @@ function handleEditItemPhoto(input) {
 }
 
 // ===== CONFIRM ADJUST — saves locally, no network =====
-function confirmAdjust() {
+async function confirmAdjust() {
   const amount = parseFloat(document.getElementById('adjustAmount').value);
   if (isNaN(amount) || (amount <= 0 && adjustAction !== 'reset')) {
     showToast('Enter a valid amount'); return;
@@ -8382,20 +8439,25 @@ function confirmAdjust() {
   for (const adj of adjustments) {
     doAdjust(adj.asset, adj.action, adj.amount, notes, seller, lot, ts);
   }
-  // Save photo to asset locally and queue photo upload if UUID is real
-  if (currentPhoto !== adjustAsset.photo) {
-    adjustAsset.photo = currentPhoto;
-    photos[adjustAsset.uuid] = currentPhoto;
-    localStorage.setItem(SD_LS.photos, JSON.stringify(photos));
+  // Save photo to asset locally (replacing just the primary slot) and queue
+  // photo upload if UUID is real — only if the user actually changed it.
+  if (currentPhoto !== adjustOriginalPhoto) {
+    const oldId = (adjustAsset.photoIds && adjustAsset.photoIds[0]) || null;
+    const newId = currentPhoto ? await Photos.save(currentPhoto) : null;
+    if (oldId) Photos.remove(oldId);
+    const rest = (adjustAsset.photoIds || []).slice(1);
+    adjustAsset.photoIds = newId ? [newId, ...rest] : rest;
+    photoIds[adjustAsset.uuid] = adjustAsset.photoIds;
+    localStorage.setItem(SD_LS.photoIds, JSON.stringify(photoIds));
     localStorage.setItem(SD_LS.assets, JSON.stringify(assets));
     // Queue photo sync if asset has a real UUID (not local_xxxx)
-    if (currentPhoto && adjustAsset.uuid && !adjustAsset.uuid.startsWith('local_')) {
+    if (newId && adjustAsset.uuid && !adjustAsset.uuid.startsWith('local_')) {
       const photoEntry = {
         id:      'photo_' + adjustAsset.uuid,
         type:    'photo',
         uuid:    adjustAsset.uuid,
         name:    adjustAsset.name,
-        photo:   currentPhoto,
+        photoId: newId,
         synced:  false
       };
       // Replace any existing queued photo for this asset
@@ -8579,11 +8641,11 @@ async function sd_syncToFarmOS() {
         }
         // Also update any queued adjustments or photos for this tempId
         pending.forEach(p => { if (p.uuid === item.tempId) p.uuid = realUUID; });
-        // Update photos map key
-        if (photos[item.tempId]) {
-          photos[realUUID] = photos[item.tempId];
-          delete photos[item.tempId];
-          localStorage.setItem(SD_LS.photos, JSON.stringify(photos));
+        // Update photoIds map key
+        if (photoIds[item.tempId]) {
+          photoIds[realUUID] = photoIds[item.tempId];
+          delete photoIds[item.tempId];
+          localStorage.setItem(SD_LS.photoIds, JSON.stringify(photoIds));
         }
         item.synced = true;
         ok++;
@@ -8593,7 +8655,9 @@ async function sd_syncToFarmOS() {
         // POST binary image to asset image field
         // endpoint: /api/asset/material/{uuid}/image
         try {
-          const photoRes  = await fetch(item.photo);
+          const photoData = await Photos.load(item.photoId);
+          if (!photoData) throw new Error('photo not found in local store');
+          const photoRes  = await fetch(photoData);
           const blob      = await photoRes.blob();
           const uploadRes = await fetch(apiUrl(`/api/asset/material/${item.uuid}/image`), {
             method:  'POST',
