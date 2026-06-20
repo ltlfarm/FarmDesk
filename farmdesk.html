@@ -1518,6 +1518,7 @@ let formulas = JSON.parse(localStorage.getItem(LS.formulas) || "null") || {
 // ===== SESSION =====
 let sessionDoseRate = null; // dose-unit per lb — persists through med flow, null = use formula default
 let _lastSavedEntry = null; // set by saveStep, read by saveAndHome/nextAction for med deduct prompt
+let lastMed = localStorage.getItem(LS.lastMed) || ""; // last medication picked — was referenced in renderStep() but never declared, throwing ReferenceError on the first Med form render of a fresh session and silently blanking the whole form
 
 // ===== NAVIGATION STACK =====
 // Single source of truth for back-button behavior across all modules.
