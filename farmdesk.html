@@ -4644,11 +4644,12 @@ async function saveMoveLog() {
     }
 
     var payload = { data: {
-      type: 'log--movement',
+      type: 'log--activity',
       attributes: {
         name: 'Move: ' + selectedAnimals.join(', ') + ' → ' + locName,
         timestamp: ts,
         status: 'done',
+        is_movement: true,
         notes: { value: notes, format: 'default' }
       },
       relationships: {
@@ -4657,7 +4658,7 @@ async function saveMoveLog() {
       }
     }};
 
-    var res = await fetch(apiUrl('/api/log/movement'), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    var res = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
     if (res.ok) {
       selectedAnimals.forEach(function(name) {
         animalLocations[name] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
@@ -6604,9 +6605,12 @@ async function fetchAnimalUUIDs(silent = false) {
       locations = newLocations;
       localStorage.setItem(LS.locations, JSON.stringify(locations));
 
-      // Fetch recent movement logs to determine each animal's current location.
-      // Movements are sorted newest-first; first occurrence per animal wins.
-      const moveRes = await fetch(apiUrl('/api/log/movement?sort=-timestamp&page[limit]=100&include=asset,location'), { headers: authHeaders });
+      // Fetch recent movement-flagged activity logs to determine each
+      // animal's current location. "log--movement" is not a real farmOS
+      // bundle — movement is a behavior (is_movement:true) on a regular
+      // log, same as group assignment uses log--activity + a boolean flag.
+      // Sorted newest-first; first occurrence per animal wins.
+      const moveRes = await fetch(apiUrl('/api/log/activity?filter[is_movement]=1&sort=-timestamp&page[limit]=100&include=asset,location'), { headers: authHeaders });
       if (moveRes.ok) {
         const moveData = await moveRes.json();
         const assetNames = {}; // uuid -> name, from included asset--animal records
@@ -7055,7 +7059,7 @@ async function syncToFarmOS() {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
-                  "Content-Disposition": 'attachment; filename="farmdesk-photo.jpg"',
+                  "Content-Disposition": 'file; filename="farmdesk-photo.jpg"',
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
@@ -7075,7 +7079,7 @@ async function syncToFarmOS() {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
-                  "Content-Disposition": `attachment; filename="${l.data.fileAttach.name}"`,
+                  "Content-Disposition": `file; filename="${l.data.fileAttach.name}"`,
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
@@ -7132,7 +7136,7 @@ async function syncToFarmOS() {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
-                  "Content-Disposition": 'attachment; filename="farmdesk-photo.jpg"',
+                  "Content-Disposition": 'file; filename="farmdesk-photo.jpg"',
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
@@ -7155,7 +7159,7 @@ async function syncToFarmOS() {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
-                  "Content-Disposition": `attachment; filename="${l.data.fileAttach.name}"`,
+                  "Content-Disposition": `file; filename="${l.data.fileAttach.name}"`,
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
@@ -8760,7 +8764,7 @@ async function sd_syncToFarmOS() {
             method:  'POST',
             headers: {
               'Content-Type':        'application/octet-stream',
-              'Content-Disposition': 'attachment; filename="stockdesk-photo.jpg"',
+              'Content-Disposition': 'file; filename="stockdesk-photo.jpg"',
               'Accept':              'application/vnd.api+json',
               'Authorization':       'Bearer ' + token
             },
@@ -9707,7 +9711,7 @@ async function bd_pushLog(log, token) {
         var blob = await (await fetch(photoData)).blob();
         await fetch(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: blob
         });
       }
@@ -9736,7 +9740,7 @@ async function bd_patchLog(log, token) {
         var blob = await (await fetch(photoData)).blob();
         await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: blob
         });
       }
