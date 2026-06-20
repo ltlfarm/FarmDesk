@@ -7201,6 +7201,14 @@ async function syncToFarmOS() {
     }
   }
 
+  // Update last sync time here too — previously only the fetch path did
+  // this, so a push-only sync (no fetch in between) left the Dashboard
+  // showing a stale or missing "last synced" time despite real activity.
+  const pushNow = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem(LS.lastSync, pushNow);
+  const pushStatusEl = document.getElementById("syncStatus");
+  if (pushStatusEl) pushStatusEl.textContent = "Synced " + pushNow;
+
   logEl.scrollTop = logEl.scrollHeight;
 
   // ===== STEP 4: Also sync StockDesk pending queue =====
@@ -9446,6 +9454,13 @@ async function bd_fetchAssets() {
     try {
       await bd_fetchLogs(token, cfg);
     } catch(e) { /* log fetch is best-effort — birds already fetched successfully above */ }
+
+    // Update last sync time here too — previously only the push path did
+    // this, so a fetch-only sync left the Dashboard showing "Never synced"
+    // despite real, successful activity.
+    var fetchNow = new Date().toLocaleString();
+    localStorage.setItem(BD_LS.lastSync, fetchNow);
+    var bdLastSyncEl = document.getElementById('bd-last-sync'); if (bdLastSyncEl) bdLastSyncEl.textContent = fetchNow;
   } catch(e) {
     if (el) { el.textContent = e.message; el.style.color = '#c00'; }
     bd_toast('Fetch failed: ' + e.message);
