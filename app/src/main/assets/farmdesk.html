@@ -1417,7 +1417,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781921416"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781922370"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9018,6 +9018,31 @@ let bd_excluded = JSON.parse(localStorage.getItem(BD_LS.excluded) || "[]");
 let bd_currentBirdId = null;
 var bd_activeTaskId = null; // set while completing a scheduled task via bd_openTaskForm
 let bd_editBirdId = null;
+
+// ===== ONE-TIME MIGRATION: bird profile photos -> Photos store (IDs only) =====
+// bd_birds stored each bird's profile photo as raw base64 directly in the
+// array — same quota risk Stock had (and the existing "storage full" toast
+// in bd_saveBird below was already anticipating). Moves any existing data
+// over once, then never runs again.
+(async function migrateBirdPhotosToPhotoStore() {
+  if (localStorage.getItem('farmdesk_bird_photo_migration_done')) return;
+  try {
+    let changed = false;
+    for (const b of bd_birds) {
+      if (b.photo && b.photo.startsWith('data:')) {
+        const id = await Photos.save(b.photo);
+        if (id) { b.photoId = id; changed = true; }
+      }
+      delete b.photo;
+    }
+    if (changed) {
+      localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+      if (typeof bd_renderBirds === 'function') bd_renderBirds();
+    }
+    localStorage.setItem('farmdesk_bird_photo_migration_done', '1');
+  } catch(e) { /* best-effort — done-flag stays unset so it retries next load */ }
+})();
+
 let bd_histFilter = "all";
 let bd_speciesFilterActive = "";
 var bd_currentPhoto = null;
@@ -9137,12 +9162,13 @@ function bd_birdClearPhoto() {
   var cb = document.getElementById('bd-bird-clear-photo'); if (cb) cb.style.display = 'none';
   ['bd-bird-gallery','bd-bird-camera'].forEach(function(id){ var el = document.getElementById(id); if (el) el.value = ''; });
 }
-function bd_birdShowPhoto(bird) {
+async function bd_birdShowPhoto(bird) {
   var p = document.getElementById('bd-bird-photo-preview');
   var cb = document.getElementById('bd-bird-clear-photo');
-  if (bird && bird.photo) {
-    bd_currentBirdPhoto = bird.photo;
-    if (p) p.innerHTML = "<img src='" + bird.photo + "' style='width:100%;border-radius:6px;margin-top:4px;'>";
+  var data = bird && bird.photoId ? await Photos.load(bird.photoId) : null;
+  if (data) {
+    bd_currentBirdPhoto = data;
+    if (p) p.innerHTML = "<img src='" + data + "' style='width:100%;border-radius:6px;margin-top:4px;'>";
     if (cb) cb.style.display = 'inline-block';
   } else {
     bd_currentBirdPhoto = null;
@@ -9326,8 +9352,8 @@ async function bd_fetchAssets() {
     // rebuilds the whole array and farmOS doesn't hand the photo back as
     // part of this response).
     var prevPhoto = {};
-    bd_birds.forEach(function(b) { if (b.uuid && b.photo) prevPhoto[b.uuid] = b.photo; });
-    fetched.forEach(function(b) { if (!b.photo && prevPhoto[b.uuid]) b.photo = prevPhoto[b.uuid]; });
+    bd_birds.forEach(function(b) { if (b.uuid && b.photoId) prevPhoto[b.uuid] = b.photoId; });
+    fetched.forEach(function(b) { if (!b.photoId && prevPhoto[b.uuid]) b.photoId = prevPhoto[b.uuid]; });
     var localOnly = bd_birds.filter(function(b) { return !b.uuid && b.status !== 'archived' && b.type !== 'feeder'; });
     bd_birds = fetched.concat(feeders).concat(localOnly);
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
@@ -9508,11 +9534,14 @@ async function bd_pushCreateBird(bird, token) {
     lb.uuid = data.data.id; lb.synced = true; localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
     if (lb.flock) { try { await bd_pushGroupAssign(lb.uuid, lb.flock, token); } catch(e) { bd_pending.push({ action: 'group_assign', birdUUID: lb.uuid, flockName: lb.flock, id: 'ga_' + Date.now(), synced: false }); localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending)); } }
     // Upload photo if present (two-step binary POST), same as update path
-    if (lb.photo && lb.photo.startsWith('data:')) {
+    if (lb.photoId) {
       try {
-        var blob = await (await fetch(lb.photo)).blob();
-        var fd = new FormData(); fd.append('file', blob, 'bird-' + lb.uuid + '.jpg');
-        await fetch(bd_apiUrl('/api/asset/animal/' + lb.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+        var photoData = await Photos.load(lb.photoId);
+        if (photoData) {
+          var blob = await (await fetch(photoData)).blob();
+          var fd = new FormData(); fd.append('file', blob, 'bird-' + lb.uuid + '.jpg');
+          await fetch(bd_apiUrl('/api/asset/animal/' + lb.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+        }
       } catch(e) { /* photo upload non-fatal */ }
     }
   }
@@ -9550,11 +9579,14 @@ async function bd_pushUpdateBird(bird, token) {
   var res = await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Upload photo if present (two-step binary POST)
-  if (bird.photo && bird.photo.startsWith('data:')) {
+  if (bird.photoId) {
     try {
-      var blob = await (await fetch(bird.photo)).blob();
-      var fd = new FormData(); fd.append('file', blob, 'bird-' + bird.uuid + '.jpg');
-      await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+      var photoData = await Photos.load(bird.photoId);
+      if (photoData) {
+        var blob = await (await fetch(photoData)).blob();
+        var fd = new FormData(); fd.append('file', blob, 'bird-' + bird.uuid + '.jpg');
+        await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+      }
     } catch(e) { /* photo upload non-fatal */ }
   }
 }
@@ -9605,8 +9637,8 @@ function bd_renderBirds() {
       groups[s].map(function(b) {
         var id = b.uuid || b._localId;
         var meta = [b.breed, b.sex === 'F' ? 'Female' : b.sex === 'M' ? 'Male' : '', b.flock ? b.flock : ''].filter(function(x) { return x; }).join(' - ');
-        var thumb = b.photo
-          ? '<img src="' + b.photo + '" class="bird-thumb" onclick="bd_openPhotoViewer(this.src)">'
+        var thumb = b.photoId
+          ? '<img data-photoid="' + b.photoId + '" class="bird-thumb" style="background:#333;" onclick="bd_openPhotoViewer(this.src)">'
           : '<div class="bird-icon">' + bd_speciesIcon(b.species) + '</div>';
         return '<div class="bird-card">' +
           thumb +
@@ -9615,6 +9647,7 @@ function bd_renderBirds() {
           '</div>';
       }).join('');
   }).join('');
+  lazyLoadPhotos(list); // fill in <img data-photoid> from the Photos store
 }
 
 // ===== BIRD PROFILE =====
@@ -9625,11 +9658,12 @@ function bd_openBirdProfile(id) {
   var modal = document.getElementById('bd-profile-modal');
   if (!modal) return;
   var sexLabel = bird.sex === 'F' ? 'Female' : bird.sex === 'M' ? 'Male' : '';
-  var photoHTML = bird.photo
-    ? '<img src="' + bird.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:12px;cursor:zoom-in;" onclick="bd_openPhotoViewer(this.src)">'
+  var photoHTML = bird.photoId
+    ? '<img data-photoid="' + bird.photoId + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:12px;cursor:zoom-in;background:#333;" onclick="bd_openPhotoViewer(this.src)">'
     : '<div style="width:100%;height:80px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:12px;">' + bd_speciesIcon(bird.species) + '</div>';
   function row(k,v){ return v ? '<div style="margin:5px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
-  document.getElementById('bd-profile-modal-content').innerHTML =
+  var contentEl = document.getElementById('bd-profile-modal-content');
+  contentEl.innerHTML =
     '<h3 style="margin:0 0 10px;color:#3a7;">' + (bird.name || bird.tag || 'Bird') + '</h3>' +
     photoHTML +
     row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
@@ -9638,6 +9672,7 @@ function bd_openBirdProfile(id) {
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openLogSheet(b);" style="flex:1;margin:0;">&#x1F4CB; Log</button>' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openEditBird(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">&#x270F;&#xFE0F; Edit</button>' +
     '</div>';
+  lazyLoadPhotos(contentEl); // fill in <img data-photoid> from the Photos store
   modal.style.display = 'flex';
 }
 
@@ -9816,16 +9851,16 @@ function bd_stockDeductFeed(feedName, amount, unit, feederName, ts) {
 }
 
 // ===== ADD / EDIT BIRD =====
-function bd_openAddBird() {
+async function bd_openAddBird() {
   bd_editBirdId = null;
   document.getElementById('bd-bird-modal-title').textContent = 'Add Bird';
   ['bd-bird-tag','bd-bird-name','bd-bird-species-custom','bd-bird-breed-custom','bd-bird-notes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('bd-bird-species').value = 'Chicken';
   document.getElementById('bd-bird-sex').value = '';
-  bd_updateBreedList(); bd_populateFlock('bd-bird-flock'); bd_birdShowPhoto(null);
+  bd_updateBreedList(); bd_populateFlock('bd-bird-flock'); await bd_birdShowPhoto(null);
   document.getElementById('bd-bird-modal').style.display = 'block';
 }
-function bd_openEditBird(id) {
+async function bd_openEditBird(id) {
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0]; if (!bird) return;
   bd_editBirdId = id;
   document.getElementById('bd-bird-modal-title').textContent = 'Edit Bird';
@@ -9837,7 +9872,7 @@ function bd_openEditBird(id) {
   document.getElementById('bd-bird-sex').value   = bird.sex   || '';
   document.getElementById('bd-bird-notes').value = bird.notes || '';
   document.getElementById('bd-bird-breed-custom').value = bird.breed || '';
-  bd_updateBreedList(); bd_populateFlock('bd-bird-flock', bird.flock); bd_birdShowPhoto(bird);
+  bd_updateBreedList(); bd_populateFlock('bd-bird-flock', bird.flock); await bd_birdShowPhoto(bird);
   document.getElementById('bd-bird-modal').style.display = 'block';
 }
 function bd_closeBirdModal(e) { if (!e || e.target === document.getElementById('bd-bird-modal')) document.getElementById('bd-bird-modal').style.display = 'none'; }
@@ -9847,7 +9882,7 @@ function bd_updateBreedList() {
   var sel = document.getElementById('bd-bird-breed'); if (!sel) return;
   sel.innerHTML = "<option value=''>-- select or type below --</option>" + breeds.map(function(b) { return "<option>" + b + "</option>"; }).join('');
 }
-function bd_saveBird() {
+async function bd_saveBird() {
   var tag     = document.getElementById('bd-bird-tag').value.trim();
   var name    = document.getElementById('bd-bird-name').value.trim();
   var sp      = document.getElementById('bd-bird-species').value;
@@ -9862,9 +9897,17 @@ function bd_saveBird() {
   if (!tag && !name) { bd_toast('Enter a tag or name'); return; }
   if (bd_editBirdId) {
     var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_editBirdId; })[0];
-    if (bird) { var _oldFlock = bird.flock || ''; bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.photo = bd_currentBirdPhoto || null; bird.synced = false; if (bird.uuid) { bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); if ((flock || '') !== _oldFlock) bd_pending.push({ action: 'group_assign', birdUUID: bird.uuid, flockName: flock, id: 'ga_' + Date.now(), synced: false }); } }
+    if (bird) {
+      var _oldFlock = bird.flock || '';
+      var _oldPhotoId = bird.photoId || null;
+      var _newPhotoId = bd_currentBirdPhoto ? await Photos.save(bd_currentBirdPhoto) : null;
+      if (_oldPhotoId && _oldPhotoId !== _newPhotoId) Photos.remove(_oldPhotoId);
+      bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.photoId = _newPhotoId; bird.synced = false;
+      if (bird.uuid) { bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); if ((flock || '') !== _oldFlock) bd_pending.push({ action: 'group_assign', birdUUID: bird.uuid, flockName: flock, id: 'ga_' + Date.now(), synced: false }); }
+    }
   } else {
-    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, photo: bd_currentBirdPhoto || null, status: 'active', synced: false };
+    var newPhotoId = bd_currentBirdPhoto ? await Photos.save(bd_currentBirdPhoto) : null;
+    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, photoId: newPhotoId, status: 'active', synced: false };
     bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
   }
   document.getElementById('bd-bird-modal').style.display = 'none';
@@ -9872,7 +9915,7 @@ function bd_saveBird() {
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
     localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
   } catch(e) {
-    bd_toast('⚠️ Saved locally but storage full — photo may not persist');
+    bd_toast('⚠️ Saved locally but storage full');
   }
   bd_updateSyncBadge();
   bd_toast('Bird saved'); bd_renderBirds();
