@@ -5101,9 +5101,10 @@ function renderScheduler() {
   if (!modSel) return;
   const enabled = enabledModules();
   modSel.innerHTML = enabled.map(m => `<option value="${m.id}">${m.label}</option>`).join("");
-  // Keep previous selection if still valid, else default to first enabled
-  const prevSel = modSel.dataset.lastValue;
-  if (prevSel && enabled.some(m => m.id === prevSel)) modSel.value = prevSel;
+  // Open to whichever module the user was on when they tapped Scheduler —
+  // not whatever was last picked inside this screen on a previous visit.
+  const activeModId = localStorage.getItem(MODULE_KEY) || 'goats';
+  if (enabled.some(m => m.id === activeModId)) modSel.value = activeModId;
   renderSchedulerModule();
   renderAllPendingTasks();
 }
@@ -5111,7 +5112,6 @@ function renderScheduler() {
 function renderSchedulerModule() {
   const modSel = document.getElementById("sch_module");
   const modId = modSel ? modSel.value : 'goats';
-  if (modSel) modSel.dataset.lastValue = modId;
   const goatsPanel = document.getElementById("sch_goats_panel");
   const birdsPanel = document.getElementById("sch_birds_panel");
   const stockPanel = document.getElementById("sch_stock_panel");
