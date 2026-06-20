@@ -1417,7 +1417,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781917638"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781917892"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -10312,6 +10312,11 @@ function goModule(id) {
 // ── SHARED SETTINGS ──
 // Settings/Sync physically live in the goatdesk container. These open them
 // from ANY module (even with Goats disabled) and return to the right home.
+let _dashTasksExpanded = false;
+let _dashRecentExpanded = false;
+function toggleDashTasks()  { _dashTasksExpanded  = !_dashTasksExpanded;  renderDashboardScreen(); }
+function toggleDashRecent() { _dashRecentExpanded = !_dashRecentExpanded; renderDashboardScreen(); }
+
 function renderDashboardScreen() {
   const box = document.getElementById('dashboardContent');
   if (!box) return;
@@ -10326,12 +10331,15 @@ function renderDashboardScreen() {
     if (!tasks.length) {
       html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No pending tasks.</p>';
     } else {
-      html += tasks.slice(0,3).map(t => {
+      const shownTasks = _dashTasksExpanded ? tasks : tasks.slice(0,3);
+      html += shownTasks.map(t => {
         const d = new Date(t.time);
         const dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
         return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + (t.animal || 'All') + ' — ' + (t.type||'') + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
       }).join('');
-      if (tasks.length > 3) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (tasks.length - 3) + ' more</p>';
+      if (tasks.length > 3) {
+        html += '<p style="color:#3a7;font-size:12px;margin:6px 0 0;cursor:pointer;" onclick="toggleDashTasks()">' + (_dashTasksExpanded ? '▲ Show less' : '▼ See all ' + tasks.length) + '</p>';
+      }
     }
     html += '<button onclick="show(\'scheduler\')" class="secondary wide" style="margin-top:8px;">View Scheduler</button></div>';
   }
@@ -10367,12 +10375,16 @@ function renderDashboardScreen() {
   if (!recentItems.length) {
     html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No logs yet.</p>';
   } else {
-    html += recentItems.slice(0,5).map(it => {
+    const shownRecent = _dashRecentExpanded ? recentItems : recentItems.slice(0,5);
+    html += shownRecent.map(it => {
       const d = new Date(it.time);
       const dateStr = isNaN(d) ? '' : d.toLocaleDateString();
       const icon = it.mod === 'goats' ? '🐐' : '🐦';
       return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + icon + ' ' + it.text + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
     }).join('');
+    if (recentItems.length > 5) {
+      html += '<p style="color:#3a7;font-size:12px;margin:6px 0 0;cursor:pointer;" onclick="toggleDashRecent()">' + (_dashRecentExpanded ? '▲ Show less' : '▼ See all ' + recentItems.length) + '</p>';
+    }
   }
   html += '</div>';
 
