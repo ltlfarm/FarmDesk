@@ -2934,7 +2934,7 @@ function saveAndHome() {
   if (!saveStep()) return;
   if (_lastSavedEntry && _lastSavedEntry.type === 'med') {
     const e = _lastSavedEntry;
-    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat), 100);
+    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat'), 100);
   }
   show("home");
 }
@@ -2943,7 +2943,7 @@ function nextAction() {
   if (!saveStep()) return;
   if (_lastSavedEntry && _lastSavedEntry.type === 'med') {
     const e = _lastSavedEntry;
-    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat), 100);
+    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat'), 100);
   }
 
   step++;
@@ -8929,15 +8929,19 @@ async function sd_syncToFarmOS() {
         const qUUID  = qData.data.id;
         const qRevId = qData.data.attributes?.drupal_internal__revision_id;
         const logBundle = 'activity'; // log--activity works on all farmOS instances; input/output may not be enabled
-        // Cross-module link: if this deduction came from a goat's med log,
-        // include the animal in the log's asset relationship too — so the
-        // farmOS record connects the item used to the animal it was used
-        // on, instead of leaving Stock and Goats as two disconnected logs.
+        // Cross-module link: if this deduction came from a goat or bird med
+        // log, include that animal in the log's asset relationship too —
+        // so the farmOS record connects the item used to the animal it was
+        // used on, instead of leaving Stock and Goats/Birds disconnected.
         const assetRefs = [{ type: 'asset--material', id: item.uuid }];
-        if (item.linkedAnimal) {
+        if (item.linkedAssetType === 'goat' && item.linkedAssetName) {
           const goatUUIDs = JSON.parse(localStorage.getItem('farmdesk_animalUUIDs') || '{}');
-          const linkedUUID = goatUUIDs[item.linkedAnimal];
+          const linkedUUID = goatUUIDs[item.linkedAssetName];
           if (linkedUUID) assetRefs.push({ type: 'asset--animal', id: linkedUUID });
+        } else if (item.linkedAssetType === 'bird' && item.linkedAssetName) {
+          const birdAssets = JSON.parse(localStorage.getItem('farmdesk_bird_assets') || '[]');
+          const bMatch = birdAssets.find(b => (b.name === item.linkedAssetName || b.tag === item.linkedAssetName) && b.uuid);
+          if (bMatch) assetRefs.push({ type: 'asset--animal', id: bMatch.uuid });
         }
         const lBody = {
           data: {
@@ -10234,19 +10238,42 @@ async function bd_saveLog() {
   bd_updateSyncBadge();
   document.getElementById('bd-log-modal').style.display = 'none';
   bd_toast(existingTask ? '✅ Task completed' : 'Log saved'); bd_renderBirds();
+  if (logData.type === 'med' && logData.med) {
+    var medDeductBirdLabel = logData.birdTag || logData.birdName || 'Bird';
+    setTimeout(function() { medDeductPrompt(logData.med, logData.dose, logData.doseUnit || 'ml', medDeductBirdLabel, 'bird'); }, 100);
+  }
 }
 
 // ===== STOCK DEDUCT BRIDGE =====
 function bd_stockDeductFeed(feedName, amount, unit, feederName, ts) {
   try {
+    if (!feedName || !amount) return;
     var stockAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
     var match = null;
     for (var i = 0; i < stockAssets.length; i++) { if (stockAssets[i].name && stockAssets[i].name.toLowerCase().indexOf(feedName.toLowerCase()) >= 0) { match = stockAssets[i]; break; } }
     if (!match) return;
-    var entry = { id: Date.now() + '_' + Math.random().toString(36).slice(2), assetUUID: match.uuid || null, assetName: match.name, action: 'decrement', qty: amount, unit: unit, note: 'Feed log: ' + feederName, timestamp: ts, synced: false };
+    var cached = stockAssets.find(function(a) { return a.uuid === match.uuid; });
+    if (cached) cached.value = Math.max(0, (cached.value || 0) - amount);
+    var entryId = Date.now() + '_' + Math.random().toString(36).slice(2);
+    var deductNotes = 'Auto-deducted: feed log (' + feederName + ')';
+    // Same entry shape sd_syncToFarmOS's "adjust" handler actually expects
+    // (id/type/uuid/name/measure/unitId/action/amount/notes/seller/lot) —
+    // the previous shape here (assetUUID/qty/note, no type field at all)
+    // matched none of the sync loop's dispatch branches, so feed
+    // deductions never reached farmOS at all despite looking saved locally.
+    var entry = {
+      id: entryId, type: 'adjust', uuid: match.uuid, name: match.name,
+      measure: match.measure || 'count', unitId: match.unitId,
+      action: 'decrement', amount: amount, notes: deductNotes,
+      seller: '', lot: '', timestamp: ts, synced: false,
+      linkedAssetType: feederName ? 'bird' : null,
+      linkedAssetName: feederName || null
+    };
     var sh = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
     var sp = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
-    sh.unshift(entry); sp.push(entry);
+    sh.unshift({ id: entryId, name: match.name, action: 'decrement', amount: amount, notes: deductNotes, seller: '', lot: '', time: new Date().toISOString(), synced: false });
+    sp.push(entry);
+    localStorage.setItem('farmdesk_stock_assets', JSON.stringify(stockAssets));
     localStorage.setItem('farmdesk_stock_history', JSON.stringify(sh));
     localStorage.setItem('farmdesk_stock_pending', JSON.stringify(sp));
   } catch(e) {}
@@ -11285,13 +11312,13 @@ function sd_clearHistory() {
 // Called after a med log is saved in GoatDesk saveAndHome / nextAction
 let _medDeductPending = null; // { medName, dose, unit } set before opening modal
 
-function medDeductPrompt(medName, dose, unit, goatName) {
+function medDeductPrompt(medName, dose, unit, linkedName, linkedType) {
   // Load SD assets from localStorage
   const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
   const medAssets = sdAssets.filter(a => a.category === 'Medical');
   if (!medAssets.length) return; // no inventory tracked, skip silently
 
-  _medDeductPending = { medName, dose, unit, sdAssets, goatName };
+  _medDeductPending = { medName, dose, unit, sdAssets, linkedName, linkedType: linkedType || 'goat' };
 
   // Build asset dropdown — pre-select best name match
   const sel = document.getElementById('medDeductAssetSelect');
@@ -11413,7 +11440,7 @@ function medDeductConfirm() {
   const asset = sdAssets.find(a => a.uuid === uuid);
   if (!asset) { medDeductClose(); return; }
 
-  const { dose, unit, goatName } = _medDeductPending;
+  const { dose, unit, linkedName, linkedType } = _medDeductPending;
   const sdPending = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
   const sdHistory = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
   const ts = String(Math.floor(Date.now() / 1000));
@@ -11440,11 +11467,12 @@ function medDeductConfirm() {
       lot:       '',
       timestamp: ts,
       synced:    false,
-      // Cross-module link: which animal this stock item was used on, so
-      // the farmOS log connects to the animal too, not just the item.
-      // Resolved to a UUID at sync time (the animal may not be synced yet
-      // when this deduction happens).
-      linkedAnimal: goatName || null
+      // Cross-module link: which animal (goat or bird) this stock item was
+      // used on, so the farmOS log connects to the animal too, not just
+      // the item. Resolved to a UUID at sync time (the animal may not be
+      // synced yet when this deduction happens).
+      linkedAssetType: linkedName ? linkedType : null,
+      linkedAssetName: linkedName || null
     };
     sdPending.push(entry);
     sdHistory.unshift({ id: entry.id, name: a.name, action: 'decrement', amount: amt, notes: note, seller: '', lot: '', time: isoTime, synced: false });
