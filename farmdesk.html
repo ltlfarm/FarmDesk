@@ -4854,9 +4854,17 @@ async function pushAnimalProfileCore(name, fields) {
     var attrs = {};
     if (fields.sex) attrs.sex = fields.sex.toLowerCase() === 'm' ? 'male' : fields.sex.toLowerCase() === 'f' ? 'female' : fields.sex.toLowerCase();
     if (fields.birthdate) attrs.birthdate = fields.birthdate;
-    if (fields.breed) attrs.breed = fields.breed;
     if (fields.tag) attrs.id_tag = [{ id: fields.tag, type: 'tag' }];
-    if (fields.notes) attrs.notes = { value: fields.notes, format: 'default' };
+    // breed is NOT a valid attribute on this farmOS instance's asset--animal
+    // resource type (confirmed via a 422: "The attribute breed does not
+    // exist...") — folded into notes instead so it's not lost to farmOS.
+    // Strip any prior "Breed: ..." line first (e.g. pulled back in on a
+    // fetch) so repeated saves don't pile up duplicate lines.
+    var cleanNotes = (fields.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+    var notesParts = [];
+    if (cleanNotes) notesParts.push(cleanNotes);
+    if (fields.breed) notesParts.push('Breed: ' + fields.breed);
+    if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
     var payload = { data: { type: 'asset--animal', id: uuid, attributes: attrs } };
     var res = await fetch(apiUrl('/api/asset/animal/' + uuid), {
       method: 'PATCH',
@@ -9401,8 +9409,14 @@ async function bd_patchLog(log, token) {
 async function bd_pushCreateBird(bird, token) {
   var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
   if (bird.sex) payload.data.attributes.sex = bird.sex;
-  if (bird.breed) payload.data.attributes.breed = bird.breed;
-  if (bird.notes) payload.data.attributes.notes = { value: bird.notes, format: 'default' };
+  // breed is NOT a valid attribute on this farmOS instance's asset--animal
+  // resource type — folded into notes instead so it's not lost to farmOS.
+  // Strip any prior "Breed: ..." line first so repeated saves don't pile up.
+  var bcCleanNotes = (bird.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+  var bcNotesParts = [];
+  if (bcCleanNotes) bcNotesParts.push(bcCleanNotes);
+  if (bird.breed) bcNotesParts.push('Breed: ' + bird.breed);
+  if (bcNotesParts.length) payload.data.attributes.notes = { value: bcNotesParts.join('\n'), format: 'default' };
   if (bird.species) {
     try {
       var typeId = await ensureAnimalTypeUUID(bird.species, token);
@@ -9434,8 +9448,15 @@ async function bd_pushUpdateBird(bird, token) {
     id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : []
   };
   if (bird.sex) attrs.sex = bird.sex;
-  if (bird.breed) attrs.breed = bird.breed;
-  if (bird.notes) attrs.notes = { value: bird.notes, format: 'default' };
+  // breed is NOT a valid attribute on this farmOS instance's asset--animal
+  // resource type (confirmed via the 422 this exact line caused) — folded
+  // into notes instead so it's not lost to farmOS. Strip any prior
+  // "Breed: ..." line first so repeated saves don't pile up duplicates.
+  var buCleanNotes = (bird.notes || '').replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
+  var buNotesParts = [];
+  if (buCleanNotes) buNotesParts.push(buCleanNotes);
+  if (bird.breed) buNotesParts.push('Breed: ' + bird.breed);
+  if (buNotesParts.length) attrs.notes = { value: buNotesParts.join('\n'), format: 'default' };
   var payload = { data: { type: 'asset--animal', id: bird.uuid, attributes: attrs } };
   // Species change — set via the animal_type taxonomy relationship, same
   // pattern as the goat retype flow (find-or-create the term, then link it)
