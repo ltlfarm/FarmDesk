@@ -2776,9 +2776,10 @@ function saveStep() {
     entry.data = {
       state: document.getElementById("f_hoof")?.value || "Good",
       notes: document.getElementById("f_hoofnotes")?.value || "",
-      photo: currentPhoto || null,
+      photoId: null,
       fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
     currentFileAttach = null;
     saveFollowup(g, "hoof", { state: entry.data.state, notes: entry.data.notes });
@@ -2789,9 +2790,10 @@ function saveStep() {
       title: document.getElementById("f_obstitle")?.value || "",
       note:  document.getElementById("f_obs")?.value || "",
       sev:   document.getElementById("f_sev")?.value || "Low",
-      photo: currentPhoto || null,
+      photoId: null,
       fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
     currentFileAttach = null;
     saveFollowup(g, "obs", { title: entry.data.title, note: entry.data.note, sev: entry.data.sev });
@@ -2804,9 +2806,10 @@ function saveStep() {
       dam:   document.getElementById("f_dam")?.value || "",
       type:  document.getElementById("f_birthtype")?.value || "Natural",
       notes: document.getElementById("f_birthnotes")?.value || "",
-      photo: currentPhoto || null,
+      photoId: null,
       fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
     currentFileAttach = null;
 
@@ -2852,9 +2855,10 @@ function saveStep() {
       method:   document.getElementById("f_procmethod")?.value || "",
       notes:    fullNotes,
       supplies: procSupplies,
-      photo:    currentPhoto || null,
+      photoId:  null,
       fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
     currentFileAttach = null;
     // Queue inventory decrements for supplies
@@ -3044,9 +3048,10 @@ function makeLogEl(l, showActions = false) {
     ${detail ? `<div class="log-detail log-preview">${detail}</div>` : ""}
     <div class="log-time">${t}${l.loggedBy ? " \u00B7 " + l.loggedBy : ""}${statusTag}</div>
     <div class="log-drawer" style="display:none;">
-      ${l.data && l.data.photo ? `<img src="${l.data.photo}" data-photo-src="${l.data.photo}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;" onclick="openPhotoViewer(this.src||this.dataset.photoSrc)" onerror="loadPhotoWithAuth(this)">` : ""}
+      ${l.data && l.data.photoId ? `<img data-photoid="${l.data.photoId}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;background:#333;" onclick="openPhotoViewer(this.src)">` : ""}
     </div>
   `;
+  lazyLoadPhotos(d); // fill in <img data-photoid> from the Photos store
 
   if (showActions) {
     const drawer = d.querySelector(".log-drawer");
@@ -5117,8 +5122,8 @@ function cloneLog(id) {
   clone.time = new Date().toISOString();
   clone.synced = false;
   clone.status = "done";
-  // Don't clone photo URLs from farmOS — they'd be stale on the new log
-  if (clone.data && clone.data.photo && clone.fromFarmOS) clone.data.photo = null;
+  // Don't clone the photo from farmOS — it'd represent a stale, specific moment
+  if (clone.data && clone.data.photoId && clone.fromFarmOS) { clone.data.photoId = null; clone.data.photoUrl = null; }
   clone.fromFarmOS = false;
   clone.needsPatch = false; // a clone is always a NEW log — POST, never PATCH
   logs.push(clone);
@@ -6752,7 +6757,7 @@ async function fetchAnimalUUIDs(silent = false) {
                     };
                     const imageRel = log.relationships?.image?.data;
                     const imageArr = Array.isArray(imageRel) ? imageRel : (imageRel ? [imageRel] : []);
-                    if (imageArr.length > 0 && imageUrlMap[imageArr[0].id]) parsed.photo = imageUrlMap[imageArr[0].id];
+                    if (imageArr.length > 0 && imageUrlMap[imageArr[0].id]) parsed.photoUrl = imageUrlMap[imageArr[0].id];
                     return parsed;
                   }
                   const parsed = parseFarmOSNotes(log.type, attrs.name, attrs.notes?.value || "", attrs.quantity || []);
@@ -6760,7 +6765,7 @@ async function fetchAnimalUUIDs(silent = false) {
                   const imageRel = log.relationships?.image?.data;
                   const imageArr = Array.isArray(imageRel) ? imageRel : (imageRel ? [imageRel] : []);
                   if (imageArr.length > 0 && imageUrlMap[imageArr[0].id]) {
-                    parsed.photo = imageUrlMap[imageArr[0].id];
+                    parsed.photoUrl = imageUrlMap[imageArr[0].id];
                   }
                   return parsed;
                 })(),
@@ -6826,6 +6831,28 @@ async function fetchAnimalUUIDs(silent = false) {
       if (!silent && el) { el.textContent = '⚠️ Storage full — kept 50 most recent logs. Clear old data to free space.'; el.style.color = '#c90'; }
     }
     localStorage.setItem(LS.weights, JSON.stringify(weights));
+
+    // Download any farmOS-hosted log photo not yet cached locally (parallel).
+    // Same pattern as the animal profile photo download above — keeps only
+    // the Photos-store id in the log so localStorage stays small.
+    try {
+      let logPhotosDownloaded = false;
+      await Promise.all(logs.map(async l => {
+        if (l.data?.photoUrl && !l.data.photoId) {
+          try {
+            const u = l.data.photoUrl.indexOf("http") === 0 ? l.data.photoUrl : (cfgSaved.url + l.data.photoUrl);
+            const r = await fetch(u, { headers: { "Authorization": "Bearer " + token } });
+            if (r.ok) {
+              const blob = await r.blob();
+              const full = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+              l.data.photoId = await Photos.save(full);
+              logPhotosDownloaded = true;
+            }
+          } catch(e) { /* offline-safe */ }
+        }
+      }));
+      if (logPhotosDownloaded) localStorage.setItem(LS.logs, JSON.stringify(logs));
+    } catch(e) { /* log photo download is best-effort */ }
 
     // Update last sync time
     const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
@@ -7017,9 +7044,11 @@ async function syncToFarmOS() {
           const logUUID = resData?.data?.id;
 
           // ===== PHOTO UPLOAD =====
-          if (l.data?.photo && logUUID) {
+          if (l.data?.photoId && logUUID) {
             try {
-              const photoRes = await fetch(l.data.photo);
+              const photoData = await Photos.load(l.data.photoId);
+              if (!photoData) throw new Error("photo not found in local store");
+              const photoRes = await fetch(photoData);
               const blob = await photoRes.blob();
               const photoUrl = apiUrl(`/api/log/${farmosType}/${logUUID}/image`);
               const photoUpload = await fetch(photoUrl, {
@@ -7066,7 +7095,7 @@ async function syncToFarmOS() {
           if (logUUID) { l.id = logUUID; l.fromFarmOS = true; l.farmosBundle = "log--" + farmosType; }
           l.synced = true;
           ok++;
-          logEl.textContent += `✅ ${l.goat} | ${farmosLogName(l)}${l.data?.photo ? " 📷" : ""}${l.data?.fileAttach ? " 📎" : ""}\n`;
+          logEl.textContent += `✅ ${l.goat} | ${farmosLogName(l)}${l.data?.photoId ? " 📷" : ""}${l.data?.fileAttach ? " 📎" : ""}\n`;
         } else {
           const txt = await res.text();
           fail++;
@@ -7093,9 +7122,11 @@ async function syncToFarmOS() {
         const res = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(payload) });
         if (res.ok) {
           // Push the photo too (e.g. after a rotate) — same endpoint as new logs
-          if (l.data?.photo && l.data.photo.startsWith("data:")) {
+          if (l.data?.photoId) {
             try {
-              const photoRes = await fetch(l.data.photo);
+              const photoData = await Photos.load(l.data.photoId);
+              if (!photoData) throw new Error("photo not found in local store");
+              const photoRes = await fetch(photoData);
               const blob = await photoRes.blob();
               const photoUpload = await fetch(apiUrl(`/api/log/${farmosType}/${l.id}/image`), {
                 method: "POST",
@@ -7268,14 +7299,14 @@ function deleteLog(id) {
   modal.style.display = "block";
 }
 
-function openEdit(id) {
+async function openEdit(id) {
   const l = logs.find(l => l.id === id);
   if (!l) return;
   editingId = id;
 
   // Stage current photo/file as the working copy for the edit modal —
   // Camera/Gallery/File/Clear all act on this, committed only on Save.
-  editCurrentPhoto      = l.data.photo || null;
+  editCurrentPhoto      = l.data.photoId ? await Photos.load(l.data.photoId) : null;
   editCurrentFileAttach = l.data.fileAttach || null;
 
   document.getElementById("editTitle").textContent =
@@ -7408,7 +7439,7 @@ function openEdit(id) {
   document.getElementById("editModal").style.display = "block";
 }
 
-function saveEdit() {
+async function saveEdit() {
   const l = logs.find(l => l.id === editingId);
   if (!l) return;
 
@@ -7510,7 +7541,10 @@ function saveEdit() {
   // Commit staged photo/file for the types that support it — applies whether
   // the user added, replaced, rotated, or cleared it via the buttons above.
   if (["hoof","obs","birth","proc"].includes(l.type)) {
-    l.data.photo      = editCurrentPhoto || null;
+    const _oldPhotoId = l.data.photoId || null;
+    const _newPhotoId = editCurrentPhoto ? await Photos.save(editCurrentPhoto) : null;
+    if (_oldPhotoId && _oldPhotoId !== _newPhotoId) Photos.remove(_oldPhotoId);
+    l.data.photoId    = _newPhotoId;
     l.data.fileAttach = editCurrentFileAttach || null;
   }
 
@@ -9006,6 +9040,27 @@ const BD_LS = {
 
 let bd_birds   = JSON.parse(localStorage.getItem(BD_LS.assets)  || "[]");
 let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
+
+// ===== ONE-TIME MIGRATION: bird log photos -> Photos store (IDs only) =====
+// Same raw-base64-in-array risk bird profile photos and Stock items had —
+// log entries (Med/Obs/Proc/Weight with a photo) embedded full base64
+// directly in bd_history. Moves any existing data over once.
+(async function migrateBirdLogPhotosToPhotoStore() {
+  if (localStorage.getItem('farmdesk_bird_log_photo_migration_done')) return;
+  try {
+    let changed = false;
+    for (const l of bd_history) {
+      if (l.photo && l.photo.startsWith('data:')) {
+        const id = await Photos.save(l.photo);
+        if (id) { l.photoId = id; changed = true; }
+      }
+      delete l.photo;
+    }
+    if (changed) localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+    localStorage.setItem('farmdesk_bird_log_photo_migration_done', '1');
+  } catch(e) { /* best-effort — done-flag stays unset so it retries next load */ }
+})();
+
 let bd_pending = JSON.parse(localStorage.getItem(BD_LS.pending) || "[]");
 let bd_flocks  = JSON.parse(localStorage.getItem(BD_LS.flocks)  || "[]");
 let bd_speciesCfg = JSON.parse(localStorage.getItem(BD_LS.species) || JSON.stringify({
@@ -9385,6 +9440,12 @@ async function bd_fetchAssets() {
       }));
       if (downloaded) { localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds)); bd_renderBirds(); }
     } catch(e) { /* photo download is best-effort */ }
+
+    // Pull logs back too — was push-only before, so anything entered
+    // directly in farmOS (or by another device) never showed up here.
+    try {
+      await bd_fetchLogs(token, cfg);
+    } catch(e) { /* log fetch is best-effort — birds already fetched successfully above */ }
   } catch(e) {
     if (el) { el.textContent = e.message; el.style.color = '#c00'; }
     bd_toast('Fetch failed: ' + e.message);
@@ -9392,7 +9453,116 @@ async function bd_fetchAssets() {
   bd_setLoading(false);
 }
 
-// ===== SYNC TO FARMOS =====
+// Pulls Weight/Med/Obs/Proc/Mortality logs back from farmOS — these all tie
+// to a single bird via a simple asset relationship, same shape GoatDesk's
+// log fetch already handles. Hatch/Egg/Feed logs are NOT fetched here: they
+// don't have a clean one-bird relationship to round-trip (hatch links to
+// multiple new assets + a mother, egg has no asset at all, feed links to a
+// feeder) — the birds/chicks they produce still come through bd_fetchAssets,
+// just not the log entry itself.
+function bd_mapFarmOSTypeToLocal(farmosType, logName) {
+  var n = (logName || '').trim();
+  if (farmosType === 'log--observation') {
+    if (n.indexOf('Weight - ') === 0) return 'weight';
+    if (n.indexOf('Death - ') === 0) return 'mortality';
+    return 'obs';
+  }
+  if (farmosType === 'log--medical') {
+    if (n.indexOf('Proc - ') === 0) return 'proc';
+    return 'med';
+  }
+  return null; // unrecognized bundle/name combo — skip rather than guess
+}
+
+async function bd_fetchLogs(token, cfg) {
+  var h = bd_authHeaders(token);
+  var bundles = ['observation', 'medical'];
+  var responses = await Promise.all(bundles.map(function(b) {
+    return fetch(bd_apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: h });
+  }));
+  var imageUrlMap = {};
+  var rawLogs = [];
+  for (var i = 0; i < responses.length; i++) {
+    var res = responses[i];
+    if (!res.ok) continue;
+    var d = await res.json();
+    (d.included || []).forEach(function(inc) {
+      if (inc.type === 'file--file') imageUrlMap[inc.id] = (inc.attributes.uri && (inc.attributes.uri.url || inc.attributes.uri.value)) || null;
+    });
+    (d.data || []).forEach(function(x) { rawLogs.push(x); });
+  }
+
+  var fetchedLogs = [];
+  rawLogs.forEach(function(log) {
+    var localType = bd_mapFarmOSTypeToLocal(log.type, log.attributes.name);
+    if (!localType) return; // unrecognized — skip rather than import garbage
+
+    var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+    var assetId = Array.isArray(assetRel) ? (assetRel.length ? assetRel[0].id : null) : (assetRel && assetRel.id);
+    var bird = assetId ? bd_birds.filter(function(b) { return b.uuid === assetId; })[0] : null;
+    if (!bird) return; // bird not in our local list (other module's animal, or not yet fetched) — skip
+
+    var imageRel = log.relationships && log.relationships.image && log.relationships.image.data;
+    var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length-1].id : null) : (imageRel && imageRel.id);
+    var photoUrl = imageId ? (imageUrlMap[imageId] || null) : null;
+
+    var ts = log.attributes.timestamp;
+    var timeISO = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
+    var notesText = (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '';
+
+    fetchedLogs.push({
+      id: log.id,
+      type: localType,
+      birdId: bird.uuid,
+      birdTag: bird.tag || '',
+      birdName: bird.name || '',
+      timestamp: ts || String(Math.floor(Date.now()/1000)),
+      timeISO: timeISO,
+      notes: notesText,
+      status: log.attributes.status === 'pending' ? 'pending' : 'done',
+      logName: log.attributes.name || '',
+      photoUrl: photoUrl,
+      synced: true,
+      farmosUUID: log.id,
+      farmosBundle: log.type
+    });
+  });
+
+  // Merge — farmOS is the source of truth for its own logs. A local copy
+  // with unsynced changes wins until it has been pushed (same rule GoatDesk uses).
+  var localByFarmOSId = {};
+  bd_history.forEach(function(l, i) { if (l.farmosUUID) localByFarmOSId[l.farmosUUID] = i; });
+  var added = 0, updated = 0;
+  fetchedLogs.forEach(function(l) {
+    var idx = localByFarmOSId[l.farmosUUID];
+    if (idx === undefined) { bd_history.unshift(l); added++; }
+    else if (bd_history[idx].synced) { bd_history[idx] = l; updated++; }
+  });
+  if (added || updated) {
+    localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+    bd_renderHistory();
+  }
+
+  // Download any farmOS-hosted log photo not yet cached locally
+  try {
+    var photosChanged = false;
+    await Promise.all(bd_history.map(async function(l) {
+      if (l.photoUrl && !l.photoId) {
+        try {
+          var u = l.photoUrl.indexOf('http') === 0 ? l.photoUrl : (cfg.url + l.photoUrl);
+          var r = await fetch(u, { headers: { 'Authorization': 'Bearer ' + token } });
+          if (r.ok) {
+            var blob = await r.blob();
+            var full = await new Promise(function(res) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.readAsDataURL(blob); });
+            l.photoId = await Photos.save(full);
+            photosChanged = true;
+          }
+        } catch(e) { /* offline-safe */ }
+      }
+    }));
+    if (photosChanged) { localStorage.setItem(BD_LS.history, JSON.stringify(bd_history)); bd_renderHistory(); }
+  } catch(e) { /* log photo download is best-effort */ }
+}
 async function bd_syncToFarmOS() {
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
   if (!cfg.url || !cfg.user) { bd_toast('No connection saved'); return; }
@@ -9515,14 +9685,17 @@ async function bd_pushLog(log, token) {
   var logUUID = data && data.data && data.data.id;
   // Photo was being saved locally but never actually reached farmOS — same
   // two-step upload pattern GoatDesk logs already use successfully.
-  if (log.photo && logUUID) {
+  if (log.photoId && logUUID) {
     try {
-      var blob = await (await fetch(log.photo)).blob();
-      await fetch(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
-        body: blob
-      });
+      var photoData = await Photos.load(log.photoId);
+      if (photoData) {
+        var blob = await (await fetch(photoData)).blob();
+        await fetch(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+          body: blob
+        });
+      }
     } catch(pe) { /* photo upload non-fatal — log itself already saved */ }
   }
   return { uuid: logUUID, bundle: ftype };
@@ -9540,16 +9713,18 @@ async function bd_patchLog(log, token) {
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
   var res = await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
-  // Re-upload the photo if it's a fresh local capture (data: URL) — same
-  // gap as the POST path above, now closed on edit too.
-  if (log.photo && log.photo.startsWith('data:')) {
+  // Re-upload the photo if present — same gap as the POST path above, now closed on edit too.
+  if (log.photoId) {
     try {
-      var blob = await (await fetch(log.photo)).blob();
-      await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
-        body: blob
-      });
+      var photoData = await Photos.load(log.photoId);
+      if (photoData) {
+        var blob = await (await fetch(photoData)).blob();
+        await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+          body: blob
+        });
+      }
     } catch(pe) { /* photo upload non-fatal — log itself already saved */ }
   }
 }
@@ -9802,7 +9977,7 @@ function bd_renderLogFields() {
   }
 }
 
-function bd_saveLog() {
+async function bd_saveLog() {
   var t = document.getElementById('bd-log-type').value;
   var timeVal = document.getElementById('bd-log-time').value;
   if (!timeVal) { bd_toast('Set a time'); return; }
@@ -9865,7 +10040,7 @@ function bd_saveLog() {
     logData.logName    = 'Feed - ' + logData.feederName + ' - ' + dateStr;
     bd_stockDeductFeed(logData.feedType, parseFloat(logData.feedAmount), logData.feedUnit, logData.feederName, ts);
   }
-  if (bd_currentPhoto) { logData.photo = bd_currentPhoto; bd_currentPhoto = null; }
+  if (bd_currentPhoto) { logData.photoId = await Photos.save(bd_currentPhoto); bd_currentPhoto = null; }
   if (existingTask) {
     Object.assign(existingTask, logData);
     var pTask = bd_pending.filter(function(x) { return x.id === existingTask.id; })[0];
@@ -10076,9 +10251,10 @@ function bd_makeLogEl(l) {
     "<div class='log-detail' style='margin-top:3px;'>" + summary + "</div>" +
     "<div class='log-time'>" + timeStr + "</div>" +
     "<div class='log-drawer'>" +
-      (l.photo ? "<img src='" + l.photo + "' style='width:100%;border-radius:6px;margin-top:6px;max-height:200px;object-fit:cover;cursor:zoom-in;' onclick='bd_openPhotoViewer(this.src)'>" : '') +
+      (l.photoId ? "<img data-photoid='" + l.photoId + "' style='width:100%;border-radius:6px;margin-top:6px;max-height:200px;object-fit:cover;cursor:zoom-in;background:#333;' onclick='bd_openPhotoViewer(this.src)'>" : '') +
       "<div style='display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;' id='bd-log-actions-" + l.id + "'></div>" +
     "</div>";
+  lazyLoadPhotos(d); // fill in <img data-photoid> from the Photos store
   d.onclick = function(e) { if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'IMG') return; bd_toggleLogDrawer(d); };
   var actDiv = d.querySelector('#bd-log-actions-' + l.id);
   if (actDiv) {
@@ -10129,12 +10305,14 @@ function bd_cloneLog(id) {
   var clone = JSON.parse(JSON.stringify(orig));
   clone.id = Date.now() + 'c' + Math.random().toString(36).slice(2,7);
   clone.timeISO = new Date().toISOString(); clone.timestamp = String(Math.floor(Date.now()/1000)); clone.synced = false;
+  clone.photoId = null; // don't carry forward a photo specific to the original occasion
+  clone.farmosUUID = null; clone.farmosBundle = null; // a clone is always a NEW log
   bd_history.unshift(clone); bd_pending.push({ action: 'log', log: clone, id: clone.id, synced: false });
   localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
   localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
   bd_updateSyncBadge(); bd_renderHistory(); bd_toast('Cloned - edit if needed, then sync');
 }
-function bd_editLog(id) {
+async function bd_editLog(id) {
   var l = bd_history.filter(function(x) { return x.id === id; })[0]; if (!l) return;
   bd_editingLogId = id;
   var birdLabel = l.type === 'egg' ? l.flock : (l.birdTag || l.birdName || '?');
@@ -10144,7 +10322,7 @@ function bd_editLog(id) {
 
   // Stage current photo as the working copy — same pattern as GoatDesk's
   // edit modal. Bird logs don't have a separate file-attach concept.
-  editCurrentPhoto      = l.photo || null;
+  editCurrentPhoto      = l.photoId ? await Photos.load(l.photoId) : null;
   editCurrentFileAttach = null;
 
   var timeField = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'>";
@@ -10202,7 +10380,7 @@ function bd_editLog(id) {
   document.getElementById('bd-edit-fields').innerHTML = html;
   document.getElementById('bd-edit-modal').style.display = 'block';
 }
-function bd_saveEdit() {
+async function bd_saveEdit() {
   var l = bd_history.filter(function(x) { return x.id === bd_editingLogId; })[0]; if (!l) return;
   var timeVal = document.getElementById('bd-ed-time') ? document.getElementById('bd-ed-time').value : null;
   if (timeVal) { l.timeISO = new Date(timeVal).toISOString(); l.timestamp = String(Math.floor(new Date(timeVal).getTime()/1000)); }
@@ -10238,7 +10416,12 @@ function bd_saveEdit() {
   }
 
   // Commit staged photo (added, replaced, rotated, or cleared via the buttons)
-  if (l.type !== 'egg') l.photo = editCurrentPhoto || null;
+  if (l.type !== 'egg') {
+    var _oldBdPhotoId = l.photoId || null;
+    var _newBdPhotoId = editCurrentPhoto ? await Photos.save(editCurrentPhoto) : null;
+    if (_oldBdPhotoId && _oldBdPhotoId !== _newBdPhotoId) Photos.remove(_oldBdPhotoId);
+    l.photoId = _newBdPhotoId;
+  }
 
   l.synced = false;
   var p = bd_pending.filter(function(x) { return x.id === l.id; })[0];
