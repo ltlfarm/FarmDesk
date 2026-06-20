@@ -597,6 +597,56 @@ header > div:last-child { min-width: 0; }
     <div id="sch_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
   </div>
 
+  <div id="sch_birds_panel" class="box" style="display:none;">
+    <label>Log Type</label>
+    <select id="sch_b_type" onchange="renderSchedulerBirdsTypeFields()">
+      <option value="weight">Weight</option>
+      <option value="med">💉 Med / Treatment</option>
+      <option value="obs">👁️ Observation</option>
+      <option value="proc">✂️ Procedure</option>
+      <option value="feed">🌾 Feed</option>
+    </select>
+
+    <label>Flocks <span style="color:#888;font-size:12px;">(tap to select members)</span></label>
+    <div id="sch_b_flocks" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+
+    <label style="margin-top:8px;">Birds <span style="color:#888;font-size:12px;">(tap to select multiple)</span></label>
+    <div id="sch_b_birds" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button type="button" onclick="schBSelectAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Select All</button>
+      <button type="button" onclick="schBClearAll()" style="flex:1;margin:0;padding:8px;font-size:13px;background:#333;">Clear</button>
+    </div>
+
+    <label>Date &amp; Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="sch_b_time" style="flex:1;">
+      <button onclick="schBSetNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+
+    <div id="sch_b_type_fields" style="margin-top:4px;"></div>
+
+    <label>Notes</label>
+    <textarea id="sch_b_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
+
+    <button onclick="saveScheduledBirdTasks()" style="width:100%;margin-top:12px;">📅 Schedule Tasks</button>
+    <div id="sch_b_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
+  </div>
+
+  <div id="sch_stock_panel" class="box" style="display:none;">
+    <p style="color:#888;font-size:13px;margin:0 0 8px;">Stock reminders are local-only — there's no farmOS event for "intend to restock later." They'll show on the Stock Dashboard and here until you adjust the item or dismiss them.</p>
+    <label>Item</label>
+    <select id="sch_s_item"></select>
+
+    <label>Due Date</label>
+    <input type="date" id="sch_s_date">
+
+    <label>Note</label>
+    <textarea id="sch_s_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
+
+    <button onclick="saveScheduledStockTask()" style="width:100%;margin-top:12px;">📅 Schedule Reminder</button>
+    <div id="sch_s_result" style="font-size:13px;color:#888;margin-top:8px;"></div>
+  </div>
+
   <div id="sch_other_panel" class="box" style="display:none;">
     <p style="color:#888;font-size:14px;text-align:center;padding:20px 0;">📅 Scheduling for this module is coming soon.</p>
   </div>
@@ -1140,6 +1190,7 @@ header > div:last-child { min-width: 0; }
       <button class="chip" onclick="bd_setHistFilter('health',this)">Health</button>
       <button class="chip" onclick="bd_setHistFilter('feed',this)">Feed</button>
       <button class="chip" onclick="bd_setHistFilter('mortality',this)">Death</button>
+      <button class="chip" onclick="bd_setHistFilter('scheduled',this)">📅 Scheduled</button>
     </div>
   </div>
   <div class="box" style="display:flex;gap:8px;align-items:center;">
@@ -1366,7 +1417,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781916424"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781917275"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -5062,15 +5113,17 @@ function renderSchedulerModule() {
   const modId = modSel ? modSel.value : 'goats';
   if (modSel) modSel.dataset.lastValue = modId;
   const goatsPanel = document.getElementById("sch_goats_panel");
+  const birdsPanel = document.getElementById("sch_birds_panel");
+  const stockPanel = document.getElementById("sch_stock_panel");
   const otherPanel = document.getElementById("sch_other_panel");
-  if (modId === 'goats') {
-    if (goatsPanel) goatsPanel.style.display = '';
-    if (otherPanel) otherPanel.style.display = 'none';
-    renderSchedulerGoatsPanel();
-  } else {
-    if (goatsPanel) goatsPanel.style.display = 'none';
-    if (otherPanel) otherPanel.style.display = '';
-  }
+  const known = ['goats', 'birds', 'stock'];
+  if (goatsPanel) goatsPanel.style.display = modId === 'goats' ? '' : 'none';
+  if (birdsPanel) birdsPanel.style.display = modId === 'birds' ? '' : 'none';
+  if (stockPanel) stockPanel.style.display = modId === 'stock' ? '' : 'none';
+  if (otherPanel) otherPanel.style.display = known.includes(modId) ? 'none' : '';
+  if (modId === 'goats') renderSchedulerGoatsPanel();
+  if (modId === 'birds') renderSchedulerBirdsPanel();
+  if (modId === 'stock') renderSchedulerStockPanel();
 }
 
 function renderSchedulerGoatsPanel() {
@@ -5134,9 +5187,248 @@ function renderSchedulerGoatsPanel() {
   if (notesEl) notesEl.value = "";
 }
 
-// Combined pending-task list across all enabled modules. Goats are fully
-// wired; Stock/Birds show a "coming soon" placeholder until their own
-// scheduling data model is built (Step B).
+// ===== BIRDS SCHEDULER (mirrors the Goats panel above) =====
+function renderSchedulerBirdsPanel() {
+  // Flock chips — tapping one toggles all its current member birds' chips
+  const flockContainer = document.getElementById("sch_b_flocks");
+  if (flockContainer) {
+    if (!bd_flocks.length) {
+      flockContainer.innerHTML = '<p style="color:#888;font-size:13px;margin:0;">No flocks yet — manage in Sync screen.</p>';
+    } else {
+      flockContainer.innerHTML = "";
+      bd_flocks.forEach(f => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.textContent = "🐦 " + f.name;
+        chip.dataset.flock = f.name;
+        chip.style.cssText = "padding:6px 10px;font-size:13px;margin:0;background:#333;border-radius:16px;";
+        chip.onclick = () => {
+          const memberIds = bd_birds.filter(b => b.flock === f.name).map(b => b.uuid || b._localId);
+          const turningOn = chip.style.background !== "rgb(26, 93, 26)";
+          chip.style.background = turningOn ? "rgb(26, 93, 26)" : "#333";
+          document.querySelectorAll("#sch_b_birds button").forEach(b => {
+            if (memberIds.includes(b.dataset.bird)) {
+              b.style.background = turningOn ? "rgb(26, 93, 26)" : "#333";
+            }
+          });
+        };
+        flockContainer.appendChild(chip);
+      });
+    }
+  }
+
+  // Bird chips
+  const container = document.getElementById("sch_b_birds");
+  if (!container) return;
+  container.innerHTML = "";
+  bd_birds.filter(b => b.status !== 'archived' && b.type !== 'feeder').forEach(b => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.textContent = b.tag || b.name || "Bird";
+    chip.dataset.bird = b.uuid || b._localId;
+    chip.style.cssText = "padding:6px 10px;font-size:13px;margin:0;background:#333;border-radius:16px;";
+    chip.onclick = () => {
+      chip.style.background = chip.style.background === "rgb(26, 93, 26)" ? "#333" : "rgb(26, 93, 26)";
+    };
+    container.appendChild(chip);
+  });
+
+  // Default time: tomorrow 8am
+  const tom = new Date();
+  tom.setDate(tom.getDate() + 1);
+  tom.setHours(8, 0, 0, 0);
+  const local = new Date(tom.getTime() - tom.getTimezoneOffset() * 60000);
+  const timeEl = document.getElementById("sch_b_time");
+  if (timeEl) timeEl.value = local.toISOString().slice(0, 16);
+
+  renderSchedulerBirdsTypeFields();
+  const resultEl = document.getElementById("sch_b_result");
+  if (resultEl) resultEl.textContent = "";
+  const notesEl = document.getElementById("sch_b_notes");
+  if (notesEl) notesEl.value = "";
+}
+
+function schBSetNow() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  const timeEl = document.getElementById("sch_b_time");
+  if (timeEl) timeEl.value = local.toISOString().slice(0, 16);
+}
+
+function schBSelectAll() {
+  document.querySelectorAll("#sch_b_birds button").forEach(b => { b.style.background = "rgb(26, 93, 26)"; });
+}
+
+function schBClearAll() {
+  document.querySelectorAll("#sch_b_birds button").forEach(b => { b.style.background = "#333"; });
+}
+
+function renderSchedulerBirdsTypeFields() {
+  const type = document.getElementById("sch_b_type")?.value;
+  const fields = document.getElementById("sch_b_type_fields");
+  if (!fields) return;
+  fields.innerHTML = "";
+
+  if (type === "weight") {
+    fields.innerHTML = `<label>Weight unit</label>
+      <select id="sch_b_wunit"><option>lbs</option><option>g</option><option>kg</option></select>`;
+  }
+  if (type === "med") {
+    fields.innerHTML = `<label>Medication</label><input id="sch_b_med" placeholder="Med name">
+      <label>Route</label>
+      <select id="sch_b_route">${["Oral","SQ","IM","Topical"].map(r => `<option>${r}</option>`).join("")}</select>`;
+  }
+  if (type === "obs") {
+    fields.innerHTML = `<label>Title</label><input id="sch_b_obs_title" placeholder="Brief observation title">`;
+  }
+  if (type === "proc") {
+    fields.innerHTML = `<label>Procedure</label><input id="sch_b_proc" placeholder="e.g. Banding">`;
+  }
+  if (type === "feed") {
+    const feeders = bd_birds.filter(b => b.type === 'feeder');
+    const feederOpts = feeders.length
+      ? feeders.map(f => `<option value="${f.uuid||f._localId}">${f.name}</option>`).join("")
+      : `<option value="">No feeders — fetch from farmOS</option>`;
+    fields.innerHTML = `<label>Feeder</label><select id="sch_b_feeder">${feederOpts}</select>
+      <label>Feed Type</label><input id="sch_b_feedtype" placeholder="e.g. Layer Pellets">`;
+  }
+}
+
+function saveScheduledBirdTasks() {
+  const type    = document.getElementById("sch_b_type")?.value;
+  const timeVal = document.getElementById("sch_b_time")?.value;
+  const notes   = document.getElementById("sch_b_notes")?.value || "";
+  const result  = document.getElementById("sch_b_result");
+
+  if (!timeVal) { result.textContent = "⚠️ Please set a date and time."; return; }
+
+  const selected = [...document.querySelectorAll("#sch_b_birds button")]
+    .filter(b => b.style.background === "rgb(26, 93, 26)")
+    .map(b => b.dataset.bird);
+
+  if (!selected.length) { result.textContent = "⚠️ Select at least one bird."; return; }
+
+  const timeISO = new Date(timeVal).toISOString();
+  const ts = String(Math.floor(new Date(timeVal).getTime() / 1000));
+
+  let taskExtra = {};
+  if (type === "weight") {
+    taskExtra.weightUnit = document.getElementById("sch_b_wunit")?.value || "lbs";
+  }
+  if (type === "med") {
+    const med = document.getElementById("sch_b_med")?.value.trim() || "";
+    if (!med) { result.textContent = "⚠️ Enter a medication name."; return; }
+    taskExtra.med = med;
+    taskExtra.route = document.getElementById("sch_b_route")?.value || "Oral";
+  }
+  if (type === "obs") {
+    taskExtra.title = document.getElementById("sch_b_obs_title")?.value.trim() || "";
+  }
+  if (type === "proc") {
+    taskExtra.proc = document.getElementById("sch_b_proc")?.value.trim() || "";
+  }
+  if (type === "feed") {
+    const feederVal = document.getElementById("sch_b_feeder")?.value || "";
+    if (!feederVal) { result.textContent = "⚠️ No feeder selected."; return; }
+    const feeder = bd_birds.filter(b => (b.uuid||b._localId) === feederVal)[0];
+    taskExtra.feederId = feederVal;
+    taskExtra.feederName = feeder ? feeder.name : '';
+    taskExtra.feedType = document.getElementById("sch_b_feedtype")?.value.trim() || "";
+  }
+
+  let count = 0;
+  selected.forEach(birdId => {
+    const bird = bd_birds.filter(b => (b.uuid||b._localId) === birdId)[0];
+    const logData = Object.assign({
+      id: Date.now() + 's' + Math.random().toString(36).slice(2,7),
+      type: type,
+      birdId: birdId,
+      birdTag: bird ? (bird.tag||'') : '',
+      birdName: bird ? (bird.name||'') : '',
+      timestamp: ts,
+      timeISO: timeISO,
+      notes: notes,
+      status: 'pending',
+      synced: false,
+      logName: (type.charAt(0).toUpperCase()+type.slice(1)) + ' - ' + (bird ? (bird.tag||bird.name) : 'Bird') + ' - scheduled'
+    }, taskExtra);
+    bd_history.unshift(logData);
+    bd_pending.push({ action: 'log', log: logData, id: logData.id, synced: false });
+    count++;
+  });
+
+  localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+  bd_updateSyncBadge();
+  renderAllPendingTasks();
+
+  result.textContent = `✅ ${count} task${count > 1 ? "s" : ""} scheduled for ${new Date(timeISO).toLocaleDateString()}.`;
+  result.style.color = "#3a7";
+  schBClearAll();
+  document.getElementById("sch_b_notes").value = "";
+}
+
+// ===== STOCK SCHEDULER (local-only reminders — see SD_LS.tasks) =====
+function renderSchedulerStockPanel() {
+  const itemSel = document.getElementById("sch_s_item");
+  if (itemSel) {
+    itemSel.innerHTML = assets.length
+      ? assets.map(a => `<option value="${a.uuid}">${a.name}</option>`).join("")
+      : '<option value="">No items yet</option>';
+  }
+  const dateEl = document.getElementById("sch_s_date");
+  if (dateEl) {
+    const tom = new Date(); tom.setDate(tom.getDate() + 7); // default a week out — reminders aren't urgent same-day
+    dateEl.value = tom.toISOString().slice(0, 10);
+  }
+  const resultEl = document.getElementById("sch_s_result");
+  if (resultEl) resultEl.textContent = "";
+  const notesEl = document.getElementById("sch_s_notes");
+  if (notesEl) notesEl.value = "";
+}
+
+function saveScheduledStockTask() {
+  const itemUUID = document.getElementById("sch_s_item")?.value;
+  const dateVal  = document.getElementById("sch_s_date")?.value;
+  const notes    = document.getElementById("sch_s_notes")?.value || "";
+  const result   = document.getElementById("sch_s_result");
+
+  if (!itemUUID) { result.textContent = "⚠️ No item selected — add a stock item first."; return; }
+  if (!dateVal)  { result.textContent = "⚠️ Please set a due date."; return; }
+
+  const item = assets.find(a => a.uuid === itemUUID);
+  const task = {
+    id: Date.now() + 's' + Math.random().toString(36).slice(2,7),
+    itemUUID: itemUUID,
+    itemName: item ? item.name : 'Item',
+    dueDate: dateVal,
+    notes: notes,
+    done: false
+  };
+  stockTasks.push(task);
+  localStorage.setItem(SD_LS.tasks, JSON.stringify(stockTasks));
+  renderAllPendingTasks();
+  if (typeof renderDashboardScreen === 'function') renderDashboardScreen();
+
+  result.textContent = `✅ Reminder set for ${item ? item.name : 'item'} — ${new Date(dateVal).toLocaleDateString()}.`;
+  result.style.color = "#3a7";
+  document.getElementById("sch_s_notes").value = "";
+}
+
+// Dismiss (no adjustment made) or complete-and-adjust a stock reminder.
+function completeStockTask(id, andAdjust) {
+  const task = stockTasks.find(t => t.id === id);
+  if (!task) return;
+  task.done = true;
+  localStorage.setItem(SD_LS.tasks, JSON.stringify(stockTasks));
+  renderAllPendingTasks();
+  if (typeof renderDashboardScreen === 'function') renderDashboardScreen();
+  if (andAdjust) openAdjust(task.itemUUID);
+}
+
+
+// Combined pending-task list across all enabled modules. Goats, Birds, and
+// Stock are all wired now — Stock reminders are local-only (no farmOS sync).
 function renderAllPendingTasks() {
   const box = document.getElementById("sch_taskList");
   if (!box) return;
@@ -5146,6 +5438,18 @@ function renderAllPendingTasks() {
     const goatLogs = JSON.parse(localStorage.getItem(LS.logs) || '[]');
     goatLogs.filter(l => l.status === 'pending').forEach(t => {
       tasks.push({ mod: 'goats', icon: '🐐', target: t.goat || 'All', type: t.type, time: t.time, id: t.id });
+    });
+  }
+  if (enabled.includes('birds')) {
+    const birdLogs = JSON.parse(localStorage.getItem(BD_LS.history) || '[]');
+    birdLogs.filter(l => l.status === 'pending').forEach(t => {
+      tasks.push({ mod: 'birds', icon: '🐦', target: t.birdTag || t.birdName || 'Bird', type: t.type, time: t.timeISO, id: t.id });
+    });
+  }
+  if (enabled.includes('stock')) {
+    const sTasks = JSON.parse(localStorage.getItem(SD_LS.tasks) || '[]');
+    sTasks.filter(t => !t.done).forEach(t => {
+      tasks.push({ mod: 'stock', icon: '📦', target: t.itemName || 'Item', type: 'reminder', time: t.dueDate, id: t.id });
     });
   }
   tasks.sort((a,b) => new Date(a.time) - new Date(b.time));
@@ -7224,7 +7528,8 @@ const SD_LS = {
   thresholds: 'farmdesk_stock_thresholds',
   pending:    'farmdesk_stock_pending',  // local-first queue
   photos:     'farmdesk_stock_photos',   // base64 photos keyed by asset UUID
-  categories: 'farmdesk_stock_categories'
+  categories: 'farmdesk_stock_categories',
+  tasks:      'farmdesk_stock_tasks'     // local-only reminders — no farmOS log type fits "intend to restock later"
 };
 
 // ===== SHARED MODULE: farmOS taxonomy UUIDs =====
@@ -7261,6 +7566,7 @@ const INJECTABLE_KEYWORDS = ['super b', 'cdt', 'ivermectin', 'bactrim', 'penicil
 let assets     = JSON.parse(localStorage.getItem(SD_LS.assets)     || '[]');
 let adjHistory    = JSON.parse(localStorage.getItem(SD_LS.history)    || '[]');
 let thresholds  = JSON.parse(localStorage.getItem(SD_LS.thresholds) || '{}');
+let stockTasks  = JSON.parse(localStorage.getItem(SD_LS.tasks) || '[]'); // local-only reminders, never synced
 let sdCategories = JSON.parse(localStorage.getItem(SD_LS.categories) || 'null') || ['Feed','Medical','Lab'];
 let pending    = JSON.parse(localStorage.getItem(SD_LS.pending)    || '[]');
 let photos     = JSON.parse(localStorage.getItem(SD_LS.photos)     || '{}');
@@ -8591,6 +8897,7 @@ let bd_speciesCfg = JSON.parse(localStorage.getItem(BD_LS.species) || JSON.strin
 }));
 let bd_excluded = JSON.parse(localStorage.getItem(BD_LS.excluded) || "[]");
 let bd_currentBirdId = null;
+var bd_activeTaskId = null; // set while completing a scheduled task via bd_openTaskForm
 let bd_editBirdId = null;
 let bd_histFilter = "all";
 let bd_speciesFilterActive = "";
@@ -8904,7 +9211,14 @@ async function bd_syncToFarmOS() {
     for (var i = 0; i < unsynced.length; i++) {
       var item = unsynced[i];
       try {
-        if      (item.action === 'log')          await bd_pushLog(item.log, token);
+        if (item.action === 'log') {
+          if (item.log.farmosUUID) {
+            await bd_patchLog(item.log, token);
+          } else {
+            var created = await bd_pushLog(item.log, token);
+            if (created && created.uuid) { item.log.farmosUUID = created.uuid; item.log.farmosBundle = created.bundle; }
+          }
+        }
         else if (item.action === 'create_bird')  await bd_pushCreateBird(item.bird, token);
         else if (item.action === 'update_bird')  await bd_pushUpdateBird(item.bird, token);
         else if (item.action === 'archive_bird') await bd_pushArchiveBird(item.birdUUID, token);
@@ -8918,8 +9232,44 @@ async function bd_syncToFarmOS() {
       }
     }
     localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
-    bd_history.forEach(function(l) { var p = bd_pending.filter(function(p) { return p.id === l.id; })[0]; if (p && p.synced) l.synced = true; });
+    // Propagate sync state AND farmOS identity back onto bd_history — these
+    // are separate objects from bd_pending items after a reload, so this
+    // can't rely on shared references.
+    bd_history.forEach(function(l) {
+      var p = bd_pending.filter(function(p) { return p.id === l.id; })[0];
+      if (p && p.synced) {
+        l.synced = true;
+        if (p.log && p.log.farmosUUID) { l.farmosUUID = p.log.farmosUUID; l.farmosBundle = p.log.farmosBundle; }
+      }
+    });
     localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+
+    // ===== LINK HATCH LOGS TO THEIR CHICK ASSETS =====
+    // Mirrors the GoatDesk birth-log fix: a hatch log's "asset" relationship
+    // must point at the newly-created chicks. Per-chick assets were already
+    // created correctly above (via create_bird) — they just weren't linked
+    // back to the hatch log itself, so the event and the birds it produced
+    // had no connection in farmOS.
+    var hatchLogs = bd_history.filter(function(l) { return l.type === 'hatch' && l.farmosUUID && !l.hatchLinked; });
+    for (var hl = 0; hl < hatchLogs.length; hl++) {
+      var hLog = hatchLogs[hl];
+      var chicks = bd_birds.filter(function(b) { return b.hatchLogId === hLog.id && b.uuid; });
+      if (!chicks.length) continue; // chicks not synced yet — retry next sync
+      try {
+        var hBundle = hLog.farmosBundle || 'birth';
+        var linkPayload = { data: { type: 'log--' + hBundle, id: hLog.farmosUUID, relationships: {
+          asset: { data: chicks.map(function(c) { return { type: 'asset--animal', id: c.uuid }; }) }
+        } } };
+        var linkRes = await fetch(bd_apiUrl('/api/log/' + hBundle + '/' + hLog.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(linkPayload) });
+        if (linkRes.ok) hLog.hatchLinked = true;
+        else if (logEl) logEl.textContent += 'FAIL: link hatch log to chicks: ' + linkRes.status + '\n';
+      } catch(e) {
+        if (logEl) logEl.textContent += 'FAIL: link hatch log to chicks: ' + e.message + '\n';
+      }
+    }
+    if (hatchLogs.length) localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+    // ===== END LINK HATCH LOGS =====
+
     var now = new Date().toLocaleString();
     localStorage.setItem(BD_LS.lastSync, now);
     var lsel = document.getElementById('bd-last-sync'); if (lsel) lsel.textContent = now;
@@ -8962,9 +9312,25 @@ async function bd_pushLog(log, token) {
   var ftype = bd_farmosLogType(log.type);
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === log.birdId; })[0];
   var birdUUID = bird ? bird.uuid : null;
-  var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
+  var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
   var res = await fetch(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  var data = await res.json();
+  return { uuid: data && data.data && data.data.id, bundle: ftype };
+}
+
+// PATCHes an already-synced bird log instead of creating a duplicate — used
+// when editing a log that has a farmosUUID, or completing a scheduled task
+// (status pending -> done). Previously bird logs had no update path at all;
+// every edit re-pushed as a brand new farmOS log.
+async function bd_patchLog(log, token) {
+  var ftype = log.farmosBundle || bd_farmosLogType(log.type);
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === log.birdId; })[0];
+  var birdUUID = bird ? bird.uuid : null;
+  var payload = { data: { type: 'log--' + ftype, id: log.farmosUUID, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
+  if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
+  var res = await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
 }
 
@@ -9116,16 +9482,52 @@ function bd_closeBirdProfile() {
 
 // ===== LOG MODAL =====
 function bd_openLogSheet(id) {
+  bd_activeTaskId = null; // plain new log, not completing a scheduled task
   bd_currentBirdId = id;
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
   document.getElementById('bd-log-modal-title').textContent = 'Log - ' + (bird ? (bird.tag || bird.name || 'Bird') : 'Bird');
+  document.getElementById('bd-log-type').value = 'weight';
   var now = new Date(); now.setSeconds(0,0);
   document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16);
   bd_currentPhoto = null; bd_renderLogFields();
   document.getElementById('bd-log-modal').style.display = 'block';
 }
+
+// Opens the log modal pre-filled from a scheduled task, ready to fill in
+// real values. Saving completes the task in place (see bd_saveLog).
+function bd_openTaskForm(id) {
+  var task = bd_history.filter(function(x) { return x.id === id; })[0];
+  if (!task) return;
+  bd_activeTaskId = id;
+  bd_currentBirdId = task.birdId;
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === task.birdId; })[0];
+  document.getElementById('bd-log-modal-title').textContent = '📋 Complete — ' + (bird ? (bird.tag || bird.name || 'Bird') : 'Bird');
+  document.getElementById('bd-log-type').value = task.type;
+  var now = new Date(); now.setSeconds(0,0);
+  document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16); // log at completion time, not the originally scheduled time
+  bd_currentPhoto = null;
+  bd_renderLogFields();
+  setTimeout(function() {
+    if (task.type === 'med') {
+      var medEl = document.getElementById('bd-f-med'); if (medEl && task.med) medEl.value = task.med;
+      var routeEl = document.getElementById('bd-f-route'); if (routeEl && task.route) routeEl.value = task.route;
+    } else if (task.type === 'obs') {
+      var titleEl = document.getElementById('bd-f-obs-title'); if (titleEl && task.title) titleEl.value = task.title;
+    } else if (task.type === 'proc') {
+      var procEl = document.getElementById('bd-f-proc'); if (procEl && task.proc) procEl.value = task.proc;
+    } else if (task.type === 'weight') {
+      var wuEl = document.getElementById('bd-f-weight-unit'); if (wuEl && task.weightUnit) wuEl.value = task.weightUnit;
+    } else if (task.type === 'feed') {
+      var fdEl = document.getElementById('bd-f-feeder'); if (fdEl && task.feederId) fdEl.value = task.feederId;
+      var ftEl = document.getElementById('bd-f-feed-type'); if (ftEl && task.feedType) ftEl.value = task.feedType;
+    }
+    var notesEl = document.getElementById('bd-f-notes'); if (notesEl && task.notes) notesEl.value = task.notes;
+  }, 0);
+  document.getElementById('bd-log-modal').style.display = 'block';
+}
+
 function bd_setLogNow() { var now = new Date(); now.setSeconds(0,0); document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16); }
-function bd_closeLogModal(e) { if (!e || e.target === document.getElementById('bd-log-modal')) document.getElementById('bd-log-modal').style.display = 'none'; }
+function bd_closeLogModal(e) { if (!e || e.target === document.getElementById('bd-log-modal')) { document.getElementById('bd-log-modal').style.display = 'none'; bd_activeTaskId = null; } }
 
 function bd_renderLogFields() {
   var t = document.getElementById('bd-log-type').value;
@@ -9157,7 +9559,12 @@ function bd_saveLog() {
   var ts = String(Math.floor(new Date(timeVal).getTime() / 1000));
   var notes = document.getElementById('bd-f-notes') ? document.getElementById('bd-f-notes').value : '';
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_currentBirdId; })[0];
-  var logData = { id: Date.now() + '_' + Math.random().toString(36).slice(2), type: t, birdId: bd_currentBirdId, birdTag: bird ? (bird.tag||'') : '', birdName: bird ? (bird.name||'') : '', timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, synced: false };
+  // Completing a scheduled task? Reuse its identity (and farmOS UUID, if it
+  // was already pushed as "pending") so this updates the same log instead
+  // of creating a duplicate — mirrors GoatDesk's _activeTaskId mechanism.
+  var existingTask = bd_activeTaskId ? bd_history.filter(function(x) { return x.id === bd_activeTaskId; })[0] : null;
+  var logData = { id: existingTask ? existingTask.id : (Date.now() + '_' + Math.random().toString(36).slice(2)), type: t, birdId: bd_currentBirdId, birdTag: bird ? (bird.tag||'') : '', birdName: bird ? (bird.name||'') : '', timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, status: 'done', synced: false };
+  if (existingTask) { logData.farmosUUID = existingTask.farmosUUID; logData.farmosBundle = existingTask.farmosBundle; }
   var dateStr = bd_localISO(new Date(timeVal)).slice(0,10);
   var birdLabel = bird ? (bird.tag || bird.name || 'Bird') : 'Bird';
   if (t === 'weight') {
@@ -9192,7 +9599,7 @@ function bd_saveLog() {
     logData.hatchFlock   = document.getElementById('bd-f-hatch-flock')   ? document.getElementById('bd-f-hatch-flock').value   : '';
     logData.logName = 'Hatch - ' + logData.hatchSpecies + ' - ' + dateStr;
     for (var hi = 1; hi <= count; hi++) {
-      var nb = { _localId: 'local_' + Date.now() + '_' + hi, uuid: null, tag: '', name: 'Untagged ' + logData.hatchSpecies + ' ' + String(hi).padStart(3,'0'), species: logData.hatchSpecies, breed: logData.hatchBreed, sex: '', flock: logData.hatchFlock, status: 'active', notes: 'Hatched ' + dateStr, synced: false };
+      var nb = { _localId: 'local_' + Date.now() + '_' + hi, uuid: null, tag: '', name: 'Untagged ' + logData.hatchSpecies + ' ' + String(hi).padStart(3,'0'), species: logData.hatchSpecies, breed: logData.hatchBreed, sex: '', flock: logData.hatchFlock, status: 'active', notes: 'Hatched ' + dateStr, hatchLogId: logData.id, synced: false };
       bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
     }
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
@@ -9209,13 +9616,21 @@ function bd_saveLog() {
     bd_stockDeductFeed(logData.feedType, parseFloat(logData.feedAmount), logData.feedUnit, logData.feederName, ts);
   }
   if (bd_currentPhoto) { logData.photo = bd_currentPhoto; bd_currentPhoto = null; }
-  bd_history.unshift(logData);
-  bd_pending.push({ action: 'log', log: logData, id: logData.id, synced: false });
+  if (existingTask) {
+    Object.assign(existingTask, logData);
+    var pTask = bd_pending.filter(function(x) { return x.id === existingTask.id; })[0];
+    if (pTask) { pTask.log = existingTask; pTask.synced = false; }
+    else { bd_pending.push({ action: 'log', log: existingTask, id: existingTask.id, synced: false }); }
+  } else {
+    bd_history.unshift(logData);
+    bd_pending.push({ action: 'log', log: logData, id: logData.id, synced: false });
+  }
+  bd_activeTaskId = null;
   localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
   localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
   bd_updateSyncBadge();
   document.getElementById('bd-log-modal').style.display = 'none';
-  bd_toast('Log saved'); bd_renderBirds();
+  bd_toast(existingTask ? '✅ Task completed' : 'Log saved'); bd_renderBirds();
 }
 
 // ===== STOCK DEDUCT BRIDGE =====
@@ -9362,13 +9777,14 @@ function bd_renderHistory() {
   if (bd_histFilter === 'health')    logs = logs.filter(function(l) { return ['weight','med','obs','proc','hatch'].indexOf(l.type) >= 0; });
   if (bd_histFilter === 'feed')      logs = logs.filter(function(l) { return l.type === 'feed'; });
   if (bd_histFilter === 'mortality') logs = logs.filter(function(l) { return l.type === 'mortality'; });
+  if (bd_histFilter === 'scheduled') logs = logs.filter(function(l) { return l.status === 'pending'; });
   if (search) logs = logs.filter(function(l) { return (l.birdTag||'').toLowerCase().indexOf(search) >= 0 || (l.birdName||'').toLowerCase().indexOf(search) >= 0 || (l.flock||'').toLowerCase().indexOf(search) >= 0; });
   if (!logs.length) { list.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No logs found.</div>"; return; }
   list.innerHTML = ''; logs.slice(0,100).forEach(function(l) { list.appendChild(bd_makeLogEl(l)); });
 }
 function bd_logSummary(l) {
   if (l.type === 'egg')       return l.nestBox + ': ' + l.eggCount + ' egg' + (l.eggCount !== 1 ? 's' : '');
-  if (l.type === 'weight')    return l.weight + ' ' + l.weightUnit;
+  if (l.type === 'weight')    return (l.weight !== undefined && l.weight !== '') ? (l.weight + ' ' + (l.weightUnit||'')) : '📅 Scheduled weigh-in';
   if (l.type === 'med')       return l.med + ' ' + (l.dose||'') + (l.doseUnit||'') + ' ' + (l.route||'');
   if (l.type === 'obs')       return l.title || l.notes || '';
   if (l.type === 'proc')      return l.proc || '';
@@ -9381,7 +9797,9 @@ function bd_makeLogEl(l) {
   var d = document.createElement('div');
   d.className = 'log'; d.style.cursor = 'pointer';
   var birdLabel = l.type === 'egg' ? (l.flock || 'Eggs') : (l.birdTag || l.birdName || '?');
-  var syncTag = !l.synced ? "<span style='color:#c90;font-size:11px;margin-left:4px;'>pending</span>" : '';
+  var syncTag = l.status === 'pending'
+    ? (l.synced ? " <span style='color:#888;font-size:11px;margin-left:4px;'>\u23F0 scheduled</span>" : " <span style='color:#c90;font-size:11px;margin-left:4px;'>\u23F0 scheduled \u00B7 \u23F3 not in farmOS yet</span>")
+    : (l.synced ? " <span style='color:#3a7;font-size:11px;margin-left:4px;'>\u2713 synced</span>" : '');
   var timeStr = l.timeISO ? new Date(l.timeISO).toLocaleString() : '';
   var summary = bd_logSummary(l);
   var birdNameHTML;
@@ -9406,6 +9824,10 @@ function bd_makeLogEl(l) {
   d.onclick = function(e) { if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'IMG') return; bd_toggleLogDrawer(d); };
   var actDiv = d.querySelector('#bd-log-actions-' + l.id);
   if (actDiv) {
+    if (l.status === 'pending') {
+      var logItBtn = document.createElement('button'); logItBtn.textContent = '📋 Log It'; logItBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#1b5e8e;'; logItBtn.onclick = function(e) { e.stopPropagation(); bd_openTaskForm(l.id); };
+      actDiv.appendChild(logItBtn);
+    }
     var editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;'; editBtn.onclick = function(e) { e.stopPropagation(); bd_editLog(l.id); };
     var cloneBtn = document.createElement('button'); cloneBtn.textContent = 'Clone'; cloneBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#4a3a7a;'; cloneBtn.onclick = function(e) { e.stopPropagation(); bd_cloneLog(l.id); };
     var delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#8b0000;'; delBtn.onclick = function(e) { e.stopPropagation(); bd_deleteLog(l.id); };
@@ -9461,10 +9883,64 @@ function bd_editLog(id) {
   document.getElementById('bd-edit-title').textContent = 'Edit - ' + birdLabel + ' - ' + l.type;
   var rawTime = l.timeISO ? new Date(l.timeISO) : new Date();
   var localTime = bd_localISO(rawTime).slice(0,16);
-  var html = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'>";
-  html += "<label>Notes</label><textarea id='bd-ed-notes' rows='3'>" + (l.notes||'') + "</textarea>";
-  if (l.type === 'weight') html = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'><label>Weight</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-weight' type='number' step='0.01' value='" + (l.weight||'') + "' style='flex:1;'><select id='bd-ed-wunit' style='width:90px;margin:0;'><option" + (l.weightUnit==='lbs'?' selected':'') + ">lbs</option><option" + (l.weightUnit==='g'?' selected':'') + ">g</option><option" + (l.weightUnit==='kg'?' selected':'') + ">kg</option></select></div><label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
-  if (l.type === 'med') html = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'><label>Medication</label><input id='bd-ed-med' value='" + (l.med||'') + "'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-dose' type='number' step='0.01' value='" + (l.dose||'') + "' style='flex:1;'><select id='bd-ed-dunit' style='width:90px;margin:0;'><option" + (l.doseUnit==='ml'?' selected':'') + ">ml</option><option" + (l.doseUnit==='cc'?' selected':'') + ">cc</option><option" + (l.doseUnit==='mg'?' selected':'') + ">mg</option></select></div><label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+
+  // Stage current photo as the working copy — same pattern as GoatDesk's
+  // edit modal. Bird logs don't have a separate file-attach concept.
+  editCurrentPhoto      = l.photo || null;
+  editCurrentFileAttach = null;
+
+  var timeField = "<label>Time</label><input type='datetime-local' id='bd-ed-time' value='" + localTime + "'>";
+  var html = timeField;
+
+  if (l.type === 'weight') {
+    html = timeField +
+      "<label>Weight</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-weight' type='number' step='0.01' value='" + (l.weight||'') + "' style='flex:1;'><select id='bd-ed-wunit' style='width:90px;margin:0;'><option" + (l.weightUnit==='lbs'?' selected':'') + ">lbs</option><option" + (l.weightUnit==='g'?' selected':'') + ">g</option><option" + (l.weightUnit==='kg'?' selected':'') + ">kg</option></select></div>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'med') {
+    html = timeField +
+      "<label>Medication</label><input id='bd-ed-med' value='" + (l.med||'') + "'>" +
+      "<label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-dose' type='number' step='0.01' value='" + (l.dose||'') + "' style='flex:1;'><select id='bd-ed-dunit' style='width:90px;margin:0;'><option" + (l.doseUnit==='ml'?' selected':'') + ">ml</option><option" + (l.doseUnit==='cc'?' selected':'') + ">cc</option><option" + (l.doseUnit==='mg'?' selected':'') + ">mg</option><option" + (l.doseUnit==='tablet'?' selected':'') + ">tablet</option></select></div>" +
+      "<label>Route</label><select id='bd-ed-route'>" + ["Oral","SQ","IM","Topical"].map(function(r){ return "<option" + (l.route===r?' selected':'') + ">" + r + "</option>"; }).join('') + "</select>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'obs') {
+    html = timeField +
+      "<label>Observation</label><input id='bd-ed-obstitle' value='" + ((l.title||'').replace(/"/g,'&quot;')) + "'>" +
+      "<label>Details</label><textarea id='bd-ed-notes' rows='3'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'proc') {
+    html = timeField +
+      "<label>Procedure</label><input id='bd-ed-proc' value='" + (l.proc||'') + "'>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'mortality') {
+    html = timeField +
+      "<label>Cause</label><select id='bd-ed-cause'>" + ["Unknown","Predator","Disease","Injury","Natural","Culled","Other"].map(function(c){ return "<option" + (l.cause===c?' selected':'') + ">" + c + "</option>"; }).join('') + "</select>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'hatch') {
+    // Count/species are tied to already-created bird assets — editing those
+    // here would orphan or duplicate birds, so only time/breed/notes are safe to change.
+    html = timeField +
+      "<p style='color:#888;font-size:13px;margin:4px 0;'>" + l.hatchCount + " " + l.hatchSpecies + " hatched — count and species can't be changed after birds are created.</p>" +
+      "<label>Breed</label><input id='bd-ed-hatch-breed' value='" + (l.hatchBreed||'') + "'>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'feed') {
+    var feeders = bd_birds.filter(function(b) { return b.type === 'feeder'; });
+    var feederOpts = feeders.map(function(f){ return "<option value='" + (f.uuid||f._localId) + "'" + ((f.uuid||f._localId)===l.feederId?' selected':'') + ">" + f.name + "</option>"; }).join('');
+    html = timeField +
+      "<label>Feeder</label><select id='bd-ed-feeder'>" + feederOpts + "</select>" +
+      "<label>Feed Type</label><input id='bd-ed-feedtype' value='" + (l.feedType||'') + "'>" +
+      "<label>Amount</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-ed-feedamount' type='number' step='0.1' value='" + (l.feedAmount||'') + "' style='flex:1;'><select id='bd-ed-feedunit' style='width:90px;margin:0;'><option" + (l.feedUnit==='lbs'?' selected':'') + ">lbs</option><option" + (l.feedUnit==='kg'?' selected':'') + ">kg</option><option" + (l.feedUnit==='cups'?' selected':'') + ">cups</option></select></div>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else if (l.type === 'egg') {
+    html = timeField +
+      "<p style='color:#888;font-size:13px;margin:4px 0;'>" + l.flock + " — " + l.nestBox + "</p>" +
+      "<label>Egg Count</label><input id='bd-ed-eggcount' type='number' min='0' step='1' value='" + (l.eggCount||0) + "'>" +
+      "<label>Notes</label><textarea id='bd-ed-notes' rows='2'>" + (l.notes||'') + "</textarea>";
+  } else {
+    html = timeField + "<label>Notes</label><textarea id='bd-ed-notes' rows='3'>" + (l.notes||'') + "</textarea>";
+  }
+
+  // Photo editing for every type except egg (eggs don't carry a photo today)
+  if (l.type !== 'egg') html += editPhotoBlockHTML();
+
   document.getElementById('bd-edit-fields').innerHTML = html;
   document.getElementById('bd-edit-modal').style.display = 'block';
 }
@@ -9473,8 +9949,39 @@ function bd_saveEdit() {
   var timeVal = document.getElementById('bd-ed-time') ? document.getElementById('bd-ed-time').value : null;
   if (timeVal) { l.timeISO = new Date(timeVal).toISOString(); l.timestamp = String(Math.floor(new Date(timeVal).getTime()/1000)); }
   var notesEl = document.getElementById('bd-ed-notes'); if (notesEl) l.notes = notesEl.value;
-  if (l.type === 'weight') { var wEl = document.getElementById('bd-ed-weight'); if (wEl) l.weight = wEl.value; var wuEl = document.getElementById('bd-ed-wunit'); if (wuEl) l.weightUnit = wuEl.value; }
-  if (l.type === 'med')    { var mEl = document.getElementById('bd-ed-med'); if (mEl) l.med = mEl.value; var dEl = document.getElementById('bd-ed-dose'); if (dEl) l.dose = dEl.value; var duEl = document.getElementById('bd-ed-dunit'); if (duEl) l.doseUnit = duEl.value; }
+
+  if (l.type === 'weight') {
+    var wEl = document.getElementById('bd-ed-weight'); if (wEl) l.weight = wEl.value;
+    var wuEl = document.getElementById('bd-ed-wunit'); if (wuEl) l.weightUnit = wuEl.value;
+  } else if (l.type === 'med') {
+    var mEl = document.getElementById('bd-ed-med'); if (mEl) l.med = mEl.value;
+    var dEl = document.getElementById('bd-ed-dose'); if (dEl) l.dose = dEl.value;
+    var duEl = document.getElementById('bd-ed-dunit'); if (duEl) l.doseUnit = duEl.value;
+    var rEl = document.getElementById('bd-ed-route'); if (rEl) l.route = rEl.value;
+  } else if (l.type === 'obs') {
+    var otEl = document.getElementById('bd-ed-obstitle'); if (otEl) l.title = otEl.value;
+  } else if (l.type === 'proc') {
+    var pEl = document.getElementById('bd-ed-proc'); if (pEl) l.proc = pEl.value;
+  } else if (l.type === 'mortality') {
+    var cEl = document.getElementById('bd-ed-cause'); if (cEl) l.cause = cEl.value;
+  } else if (l.type === 'hatch') {
+    var hbEl = document.getElementById('bd-ed-hatch-breed'); if (hbEl) l.hatchBreed = hbEl.value;
+  } else if (l.type === 'feed') {
+    var fdEl = document.getElementById('bd-ed-feeder'); if (fdEl) {
+      l.feederId = fdEl.value;
+      var feeder = bd_birds.filter(function(b) { return (b.uuid||b._localId) === fdEl.value; })[0];
+      l.feederName = feeder ? feeder.name : l.feederName;
+    }
+    var ftEl = document.getElementById('bd-ed-feedtype'); if (ftEl) l.feedType = ftEl.value;
+    var faEl = document.getElementById('bd-ed-feedamount'); if (faEl) l.feedAmount = faEl.value;
+    var fuEl = document.getElementById('bd-ed-feedunit'); if (fuEl) l.feedUnit = fuEl.value;
+  } else if (l.type === 'egg') {
+    var ecEl = document.getElementById('bd-ed-eggcount'); if (ecEl) l.eggCount = parseInt(ecEl.value) || 0;
+  }
+
+  // Commit staged photo (added, replaced, rotated, or cleared via the buttons)
+  if (l.type !== 'egg') l.photo = editCurrentPhoto || null;
+
   l.synced = false;
   var p = bd_pending.filter(function(x) { return x.id === l.id; })[0];
   if (p) { p.log = l; p.synced = false; } else { bd_pending.push({ action: 'log', log: l, id: l.id, synced: false }); }
@@ -9482,18 +9989,19 @@ function bd_saveEdit() {
   localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
   bd_updateSyncBadge();
   document.getElementById('bd-edit-modal').style.display = 'none';
+  editCurrentPhoto = null; editCurrentFileAttach = null;
   bd_renderHistory(); bd_toast('Log updated');
 }
-function bd_closeEditModal(e) { if (!e || e.target === document.getElementById('bd-edit-modal')) document.getElementById('bd-edit-modal').style.display = 'none'; }
+function bd_closeEditModal(e) { if (!e || e.target === document.getElementById('bd-edit-modal')) { document.getElementById('bd-edit-modal').style.display = 'none'; editCurrentPhoto = null; editCurrentFileAttach = null; } }
 
 // ===== WEBVIEW-SAFE MODAL WRAPPERS =====
 function bd_stopProp() { /* called from onclick — stops bubbling to overlay close */ return false; }
-function bd_closeLogModalOverlay()     { document.getElementById('bd-log-modal').style.display = 'none'; }
+function bd_closeLogModalOverlay()     { document.getElementById('bd-log-modal').style.display = 'none'; bd_activeTaskId = null; }
 function bd_closeBirdModalOverlay()    { document.getElementById('bd-bird-modal').style.display = 'none'; }
 function bd_closeFlockModalOverlay()   { document.getElementById('bd-flock-modal').style.display = 'none'; }
 function bd_closeSpeciesModalOverlay() { document.getElementById('bd-species-modal').style.display = 'none'; }
 function bd_closeConfirmModalOverlay() { document.getElementById('bd-confirm-modal').style.display = 'none'; }
-function bd_closeEditModalOverlay()    { document.getElementById('bd-edit-modal').style.display = 'none'; }
+function bd_closeEditModalOverlay()    { document.getElementById('bd-edit-modal').style.display = 'none'; editCurrentPhoto = null; editCurrentFileAttach = null; }
 
 
 // ===== CONFIRM MODAL =====
@@ -9887,6 +10395,31 @@ function renderDashboardScreen() {
       if (low.length > 5) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (low.length - 5) + ' more</p>';
     }
     html += '<button onclick="goModule(\'stock\')" class="secondary wide" style="margin-top:8px;">View Stock</button></div>';
+  }
+
+  // ===== STOCK REMINDERS (local-only, see SD_LS.tasks) =====
+  if (enabled.includes('stock')) {
+    const sTasks = JSON.parse(localStorage.getItem(SD_LS.tasks) || '[]')
+      .filter(t => !t.done)
+      .sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
+    html += '<div class="box"><strong>📅 Stock Reminders' + (sTasks.length ? ' (' + sTasks.length + ')' : '') + '</strong>';
+    if (!sTasks.length) {
+      html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No reminders set.</p>';
+    } else {
+      const today = new Date().toISOString().slice(0,10);
+      html += sTasks.slice(0,5).map(t => {
+        const overdue = t.dueDate < today;
+        const dateStr = new Date(t.dueDate).toLocaleDateString();
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' +
+          '<div>' + t.itemName + ' — <span style="color:' + (overdue ? '#e55' : '#888') + ';">' + dateStr + (overdue ? ' (overdue)' : '') + '</span></div>' +
+          '<div style="display:flex;gap:6px;margin-top:4px;">' +
+            '<button onclick="completeStockTask(\'' + t.id + '\', true)" style="flex:1;margin:0;padding:6px;font-size:12px;background:#1b5e8e;">📦 Adjust Now</button>' +
+            '<button onclick="completeStockTask(\'' + t.id + '\', false)" class="secondary" style="flex:1;margin:0;padding:6px;font-size:12px;">✓ Dismiss</button>' +
+          '</div></div>';
+      }).join('');
+      if (sTasks.length > 5) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (sTasks.length - 5) + ' more — see Scheduler</p>';
+    }
+    html += '</div>';
   }
 
   // ===== SYNC STATUS (per enabled module) =====
