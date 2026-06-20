@@ -9512,7 +9512,20 @@ async function bd_pushLog(log, token) {
   var res = await fetch(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
-  return { uuid: data && data.data && data.data.id, bundle: ftype };
+  var logUUID = data && data.data && data.data.id;
+  // Photo was being saved locally but never actually reached farmOS — same
+  // two-step upload pattern GoatDesk logs already use successfully.
+  if (log.photo && logUUID) {
+    try {
+      var blob = await (await fetch(log.photo)).blob();
+      await fetch(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+        body: blob
+      });
+    } catch(pe) { /* photo upload non-fatal — log itself already saved */ }
+  }
+  return { uuid: logUUID, bundle: ftype };
 }
 
 // PATCHes an already-synced bird log instead of creating a duplicate — used
@@ -9527,6 +9540,18 @@ async function bd_patchLog(log, token) {
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
   var res = await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
+  // Re-upload the photo if it's a fresh local capture (data: URL) — same
+  // gap as the POST path above, now closed on edit too.
+  if (log.photo && log.photo.startsWith('data:')) {
+    try {
+      var blob = await (await fetch(log.photo)).blob();
+      await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+        body: blob
+      });
+    } catch(pe) { /* photo upload non-fatal — log itself already saved */ }
+  }
 }
 
 // Uploads a bird's profile photo to its own asset--animal record — the
