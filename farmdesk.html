@@ -1346,6 +1346,21 @@ header > div:last-child { min-width: 0; }
   </div>
 </div>
 
+<!-- BIRD MED FORMULA MANAGER -->
+<div id="bd-formula-modal" class="bd-modal" onclick="bd_closeFormulaModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3>Bird Med Formula Manager</h3>
+    <p style="color:#888;font-size:13px;">Dose, unit, and route used to pre-fill the Med log form. Separate from Goat's formulas — different species, different dosing.</p>
+    <div id="bd-formula-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <input id="bd-new-med-name" placeholder="Med name" style="flex:1;margin:0;">
+      <input id="bd-new-med-dose" placeholder="dose" type="number" step="0.01" style="width:90px;margin:0;">
+      <button onclick="bd_addFormula()" style="margin:0;padding:10px;">Add</button>
+    </div>
+    <button class="wide secondary" onclick="bd_closeFormulaModal()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
 <!-- CONFIRM MODAL -->
 <div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModalOverlay()">
   <div class="bd-modal-box" onclick="event.stopPropagation()">
@@ -9160,11 +9175,16 @@ const BD_LS = {
   lastSync: "farmdesk_bird_lastsync",
   excluded: "farmdesk_bird_excluded",
   flocks:   "farmdesk_bird_flocks",
-  species:  "farmdesk_bird_species"
+  species:  "farmdesk_bird_species",
+  formulas: "farmdesk_bird_formulas"
 };
 
 let bd_birds   = JSON.parse(localStorage.getItem(BD_LS.assets)  || "[]");
 let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
+// Bird's own med formula list — separate from Goat's (different species,
+// different dosing). Seeded empty rather than guessing poultry dosing
+// numbers; add real ones via Settings > Bird Desk > Manage Med Formulas.
+let bd_formulas = JSON.parse(localStorage.getItem(BD_LS.formulas) || "{}");
 
 // ===== ONE-TIME MIGRATION: bird log photos -> Photos store (IDs only) =====
 // Same raw-base64-in-array risk bird profile photos and Stock items had —
@@ -10143,7 +10163,11 @@ function bd_renderLogFields() {
   if (t === 'weight') {
     box.innerHTML = "<label>Weight</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-weight' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-weight-unit' style='width:90px;margin:0;'><option>lbs</option><option>g</option><option>kg</option></select></div><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
   } else if (t === 'med') {
-    box.innerHTML = "<label>Medication</label><input id='bd-f-med' placeholder='Med name'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-dose' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-dose-unit' style='width:90px;margin:0;'><option>ml</option><option>cc</option><option>mg</option><option>tablet</option></select></div><label>Route</label><select id='bd-f-route'><option>Oral</option><option>SQ</option><option>IM</option><option>Topical</option></select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
+    var medFormulaNames = Object.keys(bd_formulas).sort();
+    var medFormulaSelect = medFormulaNames.length
+      ? "<select id='bd-f-med-formula' onchange=\"bd_applyMedFormula(this.value)\"><option value=''>-- choose a formula or type below --</option>" + medFormulaNames.map(function(n) { return "<option>" + n + "</option>"; }).join('') + "</select>"
+      : "";
+    box.innerHTML = "<label>Medication</label>" + medFormulaSelect + "<input id='bd-f-med' placeholder='Med name' style='margin-top:6px;'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-dose' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-dose-unit' style='width:90px;margin:0;'><option>ml</option><option>cc</option><option>mg</option><option>tablet</option></select></div><label>Route</label><select id='bd-f-route'><option>Oral</option><option>SQ</option><option>IM</option><option>Topical</option></select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
   } else if (t === 'obs') {
     box.innerHTML = "<label>Observation</label><input id='bd-f-obs-title' placeholder='Brief title'><label>Details</label><textarea id='bd-f-notes' rows='3'></textarea>" + bd_photoFieldHTML();
   } else if (t === 'proc') {
@@ -10717,6 +10741,61 @@ function bd_addBreed(sp) {
 }
 function bd_deleteBreed(sp, i) { bd_speciesCfg[sp].splice(i,1); localStorage.setItem(BD_LS.species, JSON.stringify(bd_speciesCfg)); bd_renderSpeciesList(); }
 
+function bd_openFormulaManager() { var m = document.getElementById('bd-formula-modal'); if (m.parentNode !== document.body) document.body.appendChild(m); bd_renderFormulaList(); m.style.display = 'block'; }
+function bd_closeFormulaModal(e) { if (!e || e.target === document.getElementById('bd-formula-modal')) document.getElementById('bd-formula-modal').style.display = 'none'; }
+function bd_closeFormulaModalOverlay() { document.getElementById('bd-formula-modal').style.display = 'none'; }
+function bd_renderFormulaList() {
+  var list = document.getElementById('bd-formula-list');
+  var names = Object.keys(bd_formulas).sort();
+  if (!names.length) { list.innerHTML = '<p style="color:#888;font-size:13px;">No formulas yet — add one below.</p>'; return; }
+  list.innerHTML = names.map(function(name) {
+    var f = bd_formulas[name];
+    return "<div class='box' style='margin-bottom:8px;padding:10px;'>" +
+      "<div style='display:flex;justify-content:space-between;align-items:center;'><strong>" + name + "</strong>" +
+      "<button class='sm danger' onclick=\"bd_deleteFormula('" + name.replace(/'/g,"\\'") + "')\" style='margin:0;padding:6px 10px;'>X</button></div>" +
+      "<div style='display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;'>" +
+        "<input type='number' step='0.01' value='" + f.dose + "' style='width:80px;margin:0;' onchange=\"bd_updateFormulaField('" + name.replace(/'/g,"\\'") + "','dose',this.value)\">" +
+        "<input value='" + (f.unit||'ml') + "' style='width:70px;margin:0;' onchange=\"bd_updateFormulaField('" + name.replace(/'/g,"\\'") + "','unit',this.value)\">" +
+        "<select style='margin:0;' onchange=\"bd_updateFormulaField('" + name.replace(/'/g,"\\'") + "','route',this.value)\">" +
+          ["Oral","SQ","IM","Topical"].map(function(r) { return "<option" + (f.route===r?' selected':'') + ">" + r + "</option>"; }).join('') +
+        "</select>" +
+      "</div></div>";
+  }).join('');
+}
+function bd_addFormula() {
+  var nameEl = document.getElementById('bd-new-med-name');
+  var doseEl = document.getElementById('bd-new-med-dose');
+  var name = nameEl.value.trim();
+  var dose = parseFloat(doseEl.value);
+  if (!name || isNaN(dose)) { bd_toast('Enter a name and dose'); return; }
+  bd_formulas[name] = { dose: dose, unit: 'ml', route: 'Oral' };
+  localStorage.setItem(BD_LS.formulas, JSON.stringify(bd_formulas));
+  nameEl.value = ''; doseEl.value = '';
+  bd_renderFormulaList();
+  bd_toast('Formula added');
+}
+function bd_deleteFormula(name) {
+  delete bd_formulas[name];
+  localStorage.setItem(BD_LS.formulas, JSON.stringify(bd_formulas));
+  bd_renderFormulaList();
+}
+function bd_updateFormulaField(name, field, value) {
+  if (!bd_formulas[name]) return;
+  bd_formulas[name][field] = field === 'dose' ? (parseFloat(value) || 0) : value;
+  localStorage.setItem(BD_LS.formulas, JSON.stringify(bd_formulas));
+}
+
+// Selecting a formula in the Med log form fills name/dose/unit/route — the
+// fields stay editable afterward, this is just a starting point.
+function bd_applyMedFormula(name) {
+  if (!name || !bd_formulas[name]) return;
+  var f = bd_formulas[name];
+  var medEl = document.getElementById('bd-f-med'); if (medEl) medEl.value = name;
+  var doseEl = document.getElementById('bd-f-dose'); if (doseEl) doseEl.value = f.dose;
+  var unitEl = document.getElementById('bd-f-dose-unit'); if (unitEl) unitEl.value = f.unit || 'ml';
+  var routeEl = document.getElementById('bd-f-route'); if (routeEl) routeEl.value = f.route || 'Oral';
+}
+
 function bd_populateFlock(elId, selected) {
   var el = document.getElementById(elId); if (!el) return;
   el.innerHTML = "<option value=''>-- No Flock --</option>" + bd_flocks.map(function(f) {
@@ -10745,6 +10824,11 @@ function bd_renderSettings() {
           '<strong>Species &amp; Breeds</strong>' +
           '<p style="color:#888;font-size:13px;margin-top:4px;">Add custom breeds to each species.</p>' +
           '<button onclick="bd_openSpeciesManager()" class="wide secondary" style="margin-top:6px;">Manage Species &amp; Breeds</button>' +
+        '</div>' +
+        '<div class="set-sub">' +
+          '<strong>Med Formulas</strong>' +
+          '<p style="color:#888;font-size:13px;margin-top:4px;">Dose/unit/route for the Med log dropdown — separate from Goat\'s formulas.</p>' +
+          '<button onclick="bd_openFormulaManager()" class="wide secondary" style="margin-top:6px;">Manage Med Formulas</button>' +
         '</div>' +
         '<div class="set-sub">' +
           '<strong>Animal Type Filter</strong>' +
@@ -11319,6 +11403,11 @@ function medDeductPrompt(medName, dose, unit, linkedName, linkedType) {
   const medAssets = sdAssets.filter(a => a.category === 'Medical');
   if (!medAssets.length) return; // no inventory tracked, skip silently
 
+  // Defensive: a lingering loading overlay (z-index 9998) would silently
+  // block every tap to this modal even though it's visually on top.
+  if (typeof setLoading === 'function') setLoading(false);
+  if (typeof bd_setLoading === 'function') bd_setLoading(false);
+
   _medDeductPending = { medName, dose, unit, sdAssets, linkedName, linkedType: linkedType || 'goat' };
 
   // Build asset dropdown — pre-select best name match
@@ -11633,7 +11722,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 
 
 <!-- ===== MED DEDUCT PROMPT ===== -->
-<div id="medDeductModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;">
+<div id="medDeductModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10001;overflow-y:auto;">
   <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
     <strong id="medDeductTitle" style="font-size:17px;color:#3a7;">💉 Deduct from Inventory?</strong>
     <p id="medDeductSubtitle" style="color:#aaa;font-size:14px;margin:6px 0 10px;"></p>
