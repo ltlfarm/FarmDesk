@@ -1417,7 +1417,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1781962348"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1781962935"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6218,12 +6218,40 @@ async function testFarmOS() {
     });
     if (res.ok) {
       let farmName = cfg.url;
+      let data = null;
       try {
-        const data = await res.json();
+        data = await res.json();
         farmName = data?.meta?.farm?.name || cfg.url;
       } catch(e) { /* use url as fallback */ }
       const via = window._useProxy ? "via proxy" : "direct";
-      el.textContent = "✅ Connected to: " + farmName + " (" + via + ")";
+      let html = "✅ Connected to: " + farmName + " (" + via + ")";
+
+      // ===== CAPABILITY DETECTION =====
+      // The JSON:API root we just fetched already lists every resource type
+      // this instance actually has — no extra request needed. Optional
+      // modules (Ledger, Equipment) aren't guaranteed present, and features
+      // built on them (Sell/Purchase, Hoof/Maintenance logs) would otherwise
+      // only be discovered broken when the user tries to use them.
+      if (data && data.links) {
+        const available = Object.keys(data.links);
+        const caps = {
+          ledger:    available.includes("log--sale") && available.includes("log--purchase"),
+          equipment: available.includes("log--maintenance"),
+          group:     available.includes("asset--group")
+        };
+        localStorage.setItem("farmdesk_capabilities", JSON.stringify(caps));
+        const warnings = [];
+        if (!caps.ledger)    warnings.push("⚠️ Sell/Purchase (Ledger module not detected — these may fail)");
+        if (!caps.equipment) warnings.push("⚠️ Hoof logs (Equipment module not detected — these may fail)");
+        if (!caps.group)     warnings.push("⚠️ Herd/Flock groups (Group module not detected — these may fail)");
+        if (warnings.length) {
+          html += '<div style="margin-top:8px;color:#c90;font-size:13px;">' + warnings.join("<br>") + '</div>';
+        } else {
+          html += '<div style="margin-top:8px;color:#3a7;font-size:13px;">✅ Sell/Purchase, Hoof logs, and Herd/Flock groups all available</div>';
+        }
+      }
+
+      el.innerHTML = html;
       el.style.color = "#3a7";
     } else {
       el.textContent = "❌ API error: " + res.status;
