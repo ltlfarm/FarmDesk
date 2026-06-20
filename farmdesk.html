@@ -4313,7 +4313,7 @@ async function ensureAnimalTypeUUID(typeName, token) {
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
     body: JSON.stringify(payload)
   });
-  if (!res.ok) { var err = await res.text(); throw new Error('type HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('type HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var jd = await res.json();
   return jd.data && jd.data.id;
 }
@@ -4513,7 +4513,7 @@ async function ensureGoatGroupUUID(groupName, token) {
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
     body: JSON.stringify(payload)
   });
-  if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var jd = await res.json();
   var nid = jd.data && jd.data.id;
   if (grp && nid) { grp.uuid = nid; localStorage.setItem(LS.goatGroups, JSON.stringify(goatGroups)); }
@@ -9379,7 +9379,7 @@ async function bd_pushLog(log, token) {
   var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
   var res = await fetch(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
   return { uuid: data && data.data && data.data.id, bundle: ftype };
 }
@@ -9395,7 +9395,7 @@ async function bd_patchLog(log, token) {
   var payload = { data: { type: 'log--' + ftype, id: log.farmosUUID, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
   var res = await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
 async function bd_pushCreateBird(bird, token) {
@@ -9410,7 +9410,7 @@ async function bd_pushCreateBird(bird, token) {
     } catch(e) { /* species set is best-effort on create — core fields still save */ }
   }
   var res = await fetch(bd_apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
   var lb = bd_birds.filter(function(b) { return b._localId === bird._localId; })[0];
   if (lb && data.data && data.data.id) {
@@ -9446,7 +9446,7 @@ async function bd_pushUpdateBird(bird, token) {
     } catch(e) { /* species update is best-effort — core fields still save */ }
   }
   var res = await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Upload photo if present (two-step binary POST)
   if (bird.photo && bird.photo.startsWith('data:')) {
     try {
@@ -9462,7 +9462,7 @@ async function bd_pushArchiveBird(uuid, token) {
   // farmOS v4+ uses a boolean 'archived' attribute, not status:'archived'
   var payload = { data: { type: 'asset--animal', id: uuid, attributes: { archived: true } } };
   var res = await fetch(bd_apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
 // ===== LOGOUT =====
@@ -10957,7 +10957,7 @@ async function bd_ensureGroupUUID(flockName, token) {
   if (r.ok) { var d = await r.json(); if (d.data && d.data[0]) { var id = d.data[0].id; if (flock) { flock.uuid = id; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); } return id; } }
   var payload = { data: { type: 'asset--group', attributes: { name: flockName } } };
   var res = await fetch(bd_apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var jd = await res.json(); var nid = jd.data && jd.data.id;
   if (flock && nid) { flock.uuid = nid; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
   return nid;
@@ -10968,7 +10968,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   var groupId = flockName ? await bd_ensureGroupUUID(flockName, token) : null;
   var payload = { data: { type: 'log--activity', attributes: { name: flockName ? ('Move to ' + flockName) : 'Remove from flock', status: 'done', timestamp: String(Math.floor(Date.now()/1000)), is_group_assignment: true }, relationships: { asset: { data: [{ type: 'asset--animal', id: birdUUID }] }, group: { data: groupId ? [{ type: 'asset--group', id: groupId }] : [] } } } };
   var res = await fetch(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
-  if (!res.ok) { var err = await res.text(); throw new Error('assign HTTP ' + res.status + ': ' + err.slice(0,120)); }
+  if (!res.ok) { var err = await res.text(); throw new Error('assign HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
 </script>
