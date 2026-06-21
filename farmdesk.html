@@ -10026,6 +10026,81 @@ async function bd_pushArchiveBird(uuid, token) {
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
+// Sale lifecycle for an individual bird — mirrors GoatDesk's
+// archiveAnimalWithLog exactly (immediate sync, not local-first queued,
+// same as Goat's Sell). Reuses buildPriceQuantityRef as-is since it's
+// already module-agnostic (just needs a token).
+async function bd_archiveBirdWithLog(birdId, logBundle, details) {
+  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { bd_toast('⚠️ Connect to farmOS in Settings first'); return false; }
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === birdId; })[0];
+  if (!bird || !bird.uuid) { bd_toast('⚠️ Sync first — bird not yet synced'); return false; }
+  try {
+    var token = await bd_getToken(cfg);
+    var headers = bd_postHeaders(token);
+    var label = bird.tag || bird.name || 'Bird';
+    var attrs = {
+      name: (logBundle === 'sale' ? 'Sale: ' : 'Death: ') + label,
+      status: 'done',
+      timestamp: String(Math.floor(Date.now() / 1000)),
+      notes: { value: (details && details.notes) || '', format: 'default' }
+    };
+    var relationships = { asset: { data: [{ type: 'asset--animal', id: bird.uuid }] } };
+    if (logBundle === 'sale') {
+      var priceRef = await buildPriceQuantityRef(details && details.unitPrice, token);
+      if (priceRef) relationships.quantity = { data: [priceRef] };
+    }
+    var payload = { data: { type: 'log--' + logBundle, attributes: attrs, relationships: relationships } };
+    var res = await fetch(bd_apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,200)); }
+    await bd_pushArchiveBird(bird.uuid, token);
+    return true;
+  } catch(e) {
+    bd_toast('⚠️ ' + e.message);
+    return false;
+  }
+}
+
+// Reuses the shared editModal (same one Goat's Sell uses) — already
+// confirmed module-agnostic, lives outside every module container.
+function bd_openSellModal(birdId) {
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === birdId; })[0];
+  if (!bird) return;
+  var label = bird.tag || bird.name || 'Bird';
+  var modal = document.getElementById('editModal');
+  var fields = document.getElementById('editFields');
+  var title = document.getElementById('editTitle');
+  if (!modal || !fields) return;
+  if (title) title.textContent = '🏷️ Sell ' + label;
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;">Records a sale log in farmOS and archives this bird.</p>' +
+    '<label>Sale Price</label>' +
+    '<input id="lifecyclePrice" type="number" step="0.01" min="0" placeholder="Optional — $ per head">' +
+    '<label>Notes (buyer, etc.)</label>' +
+    '<textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>';
+  var sb = document.getElementById('modalSaveBtn');
+  if (sb) {
+    sb.style.display = '';
+    sb.textContent = '🏷️ Confirm Sale';
+    sb.style.background = '#8b6500';
+    sb.onclick = async function() {
+      var notes = document.getElementById('lifecycleNotes').value || '';
+      var priceVal = parseFloat(document.getElementById('lifecyclePrice').value);
+      sb.disabled = true; sb.textContent = 'Saving...';
+      var ok = await bd_archiveBirdWithLog(birdId, 'sale', { notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
+      sb.disabled = false; sb.textContent = '🏷️ Confirm Sale';
+      if (ok) {
+        bd_toast('✅ ' + label + ' sold and archived');
+        closeEdit();
+        bird.status = 'archived';
+        localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+        bd_renderBirds();
+      }
+    };
+  }
+  modal.style.display = 'block';
+}
+
 // ===== LOGOUT =====
 
 // ===== SPECIES FILTER =====
@@ -10071,6 +10146,9 @@ function bd_renderBirds() {
           thumb +
           '<div class="bird-info" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
           '<button onclick="bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;margin:-6px 0 8px;">' +
+            '<button onclick="bd_openSellModal(\'' + id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#8b6500;margin:0;">🏷️ Sell</button>' +
           '</div>';
       }).join('');
   }).join('');
