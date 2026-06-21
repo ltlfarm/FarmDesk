@@ -4250,6 +4250,33 @@ const BATCHES_LS_KEY = 'farmdesk_batches';
 let batches = JSON.parse(localStorage.getItem(BATCHES_LS_KEY) || '[]');
 function saveBatches() { localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(batches)); }
 
+// ===== SHARED: OFFLINE-FIRST PENDING ACTIONS QUEUE =====
+// Local-first write-back queue for actions that aren't a fit for the
+// `logs` array (asset archiving, profile pushes, retypes, batch
+// sell/died/promote, purchases). Local state changes happen immediately
+// and unconditionally when the user taps Save/Confirm — no farmOS
+// connection is required to perform the action locally. These entries
+// just remember what still needs to be pushed to farmOS next sync. A
+// farm that never connects to farmOS simply never processes this queue;
+// nothing is lost or blocked.
+const PENDING_ACTIONS_LS_KEY = 'farmdesk_pending_actions';
+let pendingActions = JSON.parse(localStorage.getItem(PENDING_ACTIONS_LS_KEY) || '[]');
+function savePendingActions() { localStorage.setItem(PENDING_ACTIONS_LS_KEY, JSON.stringify(pendingActions)); }
+// dedupeByAnimal: for "current state" actions (profile/retype) only the
+// latest local edit matters, so replace any not-yet-synced entry of the
+// same type for the same animal instead of stacking redundant pushes.
+// Discrete events (sell/death/move/purchase/batch actions) never dedupe —
+// each is its own real transaction and must be preserved.
+function queuePendingAction(type, payload, dedupeByAnimal) {
+  if (dedupeByAnimal && payload && payload.animalName) {
+    pendingActions = pendingActions.filter(function(a) { return a.synced || a.type !== type || a.payload.animalName !== payload.animalName; });
+  }
+  var a = { id: 'pa_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), type: type, payload: payload, createdAt: new Date().toISOString(), synced: false, lastError: null };
+  pendingActions.push(a);
+  savePendingActions();
+  return a;
+}
+
 function createBatch(module, species, breed, count, parentDam, parentSire, groupName, notes) {
   var b = {
     id: 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
@@ -4345,90 +4372,38 @@ async function buildBatchSaleQuantityRef(count, unitPrice, productUUID, token) {
   } catch(e) { return null; }
 }
 
-async function sellFromBatch(batchId, count, unitPrice, notes) {
+function sellFromBatch(batchId, count, unitPrice, notes) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return false;
   if (!count || count <= 0 || count > b.count) { showToast('⚠️ Enter a valid count (1–' + b.count + ')'); return false; }
-  if (!b.productUUID) { showToast('⚠️ Sync first — batch not yet synced to farmOS'); return false; }
-  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
-  try {
-    var token = await getToken(cfg);
-    var qRef = await buildBatchSaleQuantityRef(count, unitPrice, b.productUUID, token);
-    if (!qRef) throw new Error('Could not create inventory quantity');
-    var relationships = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] } };
-    var attrs = { name: 'Sale: ' + count + ' ' + b.species + ' (batch)', status: 'done', timestamp: String(Math.floor(Date.now() / 1000)), notes: { value: notes || '', format: 'default' } };
-    var res = await fetch(apiUrl('/api/log/sale'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: relationships } }) });
-    if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,200)); }
-    b.count -= count;
-    saveBatches();
-    return true;
-  } catch(e) {
-    showToast('⚠️ ' + e.message);
-    return false;
-  }
+  b.count -= count;
+  saveBatches();
+  queuePendingAction('batchSell', { batchId: batchId, count: count, unitPrice: unitPrice, notes: notes, species: b.species });
+  return true;
 }
 
-async function markBatchDied(batchId, count, notes) {
+function markBatchDied(batchId, count, notes) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return false;
   if (!count || count <= 0 || count > b.count) { showToast('⚠️ Enter a valid count (1–' + b.count + ')'); return false; }
-  if (!b.productUUID) { showToast('⚠️ Sync first — batch not yet synced to farmOS'); return false; }
-  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
-  try {
-    var token = await getToken(cfg);
-    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
-    var qPayload = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(count), denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
-    var qRes = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload) });
-    if (!qRes.ok) throw new Error('HTTP ' + qRes.status);
-    var qData = await qRes.json();
-    var qUUID = qData?.data?.id;
-    var qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
-    var attrs = { name: 'Death: ' + count + ' ' + b.species + ' (batch)', status: 'done', timestamp: String(Math.floor(Date.now() / 1000)), notes: { value: notes || '', format: 'default' } };
-    var relationships = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
-    var res = await fetch(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs, relationships: relationships } }) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    b.count -= count;
-    saveBatches();
-    return true;
-  } catch(e) {
-    showToast('⚠️ ' + e.message);
-    return false;
-  }
+  b.count -= count;
+  saveBatches();
+  queuePendingAction('batchDied', { batchId: batchId, count: count, notes: notes, species: b.species });
+  return true;
 }
 
 // Pulls one animal out of the batch count to be tracked individually —
 // decrements the batch (a quiet activity log + quantity decrement, not a
 // sale or death), then opens the normal Add Bird / Add Animal form so the
 // user names it through the same flow used for any other new individual.
-async function promoteFromBatch(batchId) {
+function promoteFromBatch(batchId) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return false;
   if (b.count <= 0) { showToast('⚠️ No remaining count in this batch'); return false; }
-  if (!b.productUUID) { showToast('⚠️ Sync first — batch not yet synced to farmOS'); return false; }
-  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
-  try {
-    var token = await getToken(cfg);
-    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
-    var qPayload = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: '1', denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
-    var qRes = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload) });
-    if (!qRes.ok) throw new Error('HTTP ' + qRes.status);
-    var qData = await qRes.json();
-    var qUUID = qData?.data?.id;
-    var qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
-    var attrs = { name: 'Promoted to individual: ' + b.species + ' (batch)', status: 'done', timestamp: String(Math.floor(Date.now() / 1000)), notes: { value: 'One animal pulled from batch to be tracked individually', format: 'default' } };
-    var relationships = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
-    var res = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs, relationships: relationships } }) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    b.count -= 1;
-    saveBatches();
-    return true;
-  } catch(e) {
-    showToast('⚠️ ' + e.message);
-    return false;
-  }
+  b.count -= 1;
+  saveBatches();
+  queuePendingAction('batchPromote', { batchId: batchId, species: b.species });
+  return true;
 }
 
 // ===== SHARED BATCH ACTION MODAL (Sell / Mark Died) =====
@@ -4483,7 +4458,7 @@ async function confirmBatchAction() {
   }
   btn.disabled = false; btn.textContent = origText;
   if (ok) {
-    showToast('✅ Done');
+    showToast('✅ Saved locally — will sync to farmOS next push');
     closeBatchActionModal();
     if (typeof bd_renderBirds === 'function') bd_renderBirds();
     if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
@@ -4603,21 +4578,17 @@ function openSellAnimalModal(name) {
     sb.style.display = '';
     sb.textContent = '🏷️ Confirm Sale';
     sb.style.background = '#8b6500';
-    sb.onclick = async function() {
+    sb.onclick = function() {
       var notes = document.getElementById('lifecycleNotes').value || '';
       var priceVal = parseFloat(document.getElementById('lifecyclePrice').value);
-      sb.disabled = true; sb.textContent = 'Saving...';
-      var ok = await archiveAnimalWithLog(name, 'sale', { notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
-      sb.disabled = false; sb.textContent = '🏷️ Confirm Sale';
-      if (ok) {
-        showToast('✅ ' + name + ' sold and archived');
-        closeEdit();
-        delete animalProfiles[name];
-        saveProfilesSafely();
-        goats = goats.filter(g => g !== name);
-        localStorage.setItem(LS.goats, JSON.stringify(goats));
-        renderAnimalsScreen();
-      }
+      queuePendingAction('sell', { animalName: name, notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
+      showToast('✅ ' + name + ' sold and archived locally — will sync to farmOS next push');
+      closeEdit();
+      delete animalProfiles[name];
+      saveProfilesSafely();
+      goats = goats.filter(g => g !== name);
+      localStorage.setItem(LS.goats, JSON.stringify(goats));
+      renderAnimalsScreen();
     };
   }
   modal.style.display = 'block';
@@ -4638,20 +4609,16 @@ function openDeathAnimalModal(name) {
     sb.style.display = '';
     sb.textContent = '💀 Confirm Death';
     sb.style.background = '#8b0000';
-    sb.onclick = async function() {
+    sb.onclick = function() {
       var notes = document.getElementById('lifecycleNotes').value || '';
-      sb.disabled = true; sb.textContent = 'Saving...';
-      var ok = await archiveAnimalWithLog(name, 'observation', { notes: 'Death recorded. ' + notes });
-      sb.disabled = false; sb.textContent = '💀 Confirm Death';
-      if (ok) {
-        showToast('✅ ' + name + ' recorded and archived');
-        closeEdit();
-        delete animalProfiles[name];
-        saveProfilesSafely();
-        goats = goats.filter(g => g !== name);
-        localStorage.setItem(LS.goats, JSON.stringify(goats));
-        renderAnimalsScreen();
-      }
+      queuePendingAction('death', { animalName: name, notes: 'Death recorded. ' + notes });
+      showToast('✅ ' + name + ' recorded and archived locally — will sync to farmOS next push');
+      closeEdit();
+      delete animalProfiles[name];
+      saveProfilesSafely();
+      goats = goats.filter(g => g !== name);
+      localStorage.setItem(LS.goats, JSON.stringify(goats));
+      renderAnimalsScreen();
     };
   }
   modal.style.display = 'block';
@@ -4672,21 +4639,17 @@ function openRetypeAnimalModal(name) {
     sb.style.display = '';
     sb.textContent = '❓ Confirm Retype';
     sb.style.background = '#555';
-    sb.onclick = async function() {
+    sb.onclick = function() {
       var typeName = (document.getElementById('lifecycleRetype').value || '').trim();
       if (!typeName) { showToast('⚠️ Enter a species'); return; }
-      sb.disabled = true; sb.textContent = 'Saving...';
-      var ok = await retypeAnimal(animalUUIDs[name], typeName, 'farmdesk_cfg');
-      sb.disabled = false; sb.textContent = '❓ Confirm Retype';
-      if (ok) {
-        showToast('✅ ' + name + ' retyped as ' + typeName);
-        closeEdit();
-        delete animalProfiles[name];
-        saveProfilesSafely();
-        goats = goats.filter(g => g !== name);
-        localStorage.setItem(LS.goats, JSON.stringify(goats));
-        renderAnimalsScreen();
-      }
+      queuePendingAction('retype', { animalName: name, typeName: typeName }, true);
+      showToast('✅ ' + name + ' retyped as ' + typeName + ' locally — will sync to farmOS next push');
+      closeEdit();
+      delete animalProfiles[name];
+      saveProfilesSafely();
+      goats = goats.filter(g => g !== name);
+      localStorage.setItem(LS.goats, JSON.stringify(goats));
+      renderAnimalsScreen();
     };
   }
   modal.style.display = 'block';
@@ -5007,71 +4970,56 @@ function closeMoveModal() {
   if (modal) modal.style.display = 'none';
 }
 
-async function saveMoveLog() {
+function saveMoveLog() {
   var selectedAnimals = Array.from(document.querySelectorAll('.move-animal-cb:checked')).map(function(cb){ return cb.value; });
   var locUuid = document.getElementById('moveLocationSelect').value;
   var notes = document.getElementById('moveNotes').value || '';
   if (!selectedAnimals.length) { showToast('⚠️ Select at least one animal'); return; }
   if (!locUuid) { showToast('⚠️ Select a location'); return; }
   var locName = locations[locUuid] ? locations[locUuid].name : '';
-  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return; }
+  var locType = locations[locUuid] ? locations[locUuid].type : '';
+  var ts = String(Math.floor(Date.now() / 1000));
 
-  var btn = document.getElementById('moveSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  selectedAnimals.forEach(function(name) {
+    animalLocations[name] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+  });
+  localStorage.setItem(LS.animalLocations, JSON.stringify(animalLocations));
+  queuePendingAction('move', { animalNames: selectedAnimals, locationUuid: locUuid, locationName: locName, locationType: locType, notes: notes, ts: ts });
 
-  try {
-    var token = await getToken(cfg);
-    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
-    var ts = String(Math.floor(Date.now() / 1000));
-    var missingUUID = [];
-    var assetRelationships = selectedAnimals.map(function(name) {
-      var uuid = animalUUIDs[name];
-      if (!uuid) missingUUID.push(name);
-      return uuid ? { type: 'asset--animal', id: uuid } : null;
-    }).filter(Boolean);
+  showToast('✅ Moved ' + selectedAnimals.length + ' animal(s) to ' + locName + ' locally — will sync to farmOS next push');
+  closeMoveModal();
+  if (document.getElementById('screen-animals') && document.getElementById('screen-animals').classList.contains('active')) renderAnimalsScreen();
+}
 
-    if (!assetRelationships.length) {
-      showToast('⚠️ No synced animal UUIDs — sync first');
-      if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
-      return;
+// Network-only half of a move — called from the sync queue processor once
+// a connection is available. Skips (and retries next sync) any animal
+// that still has no farmOS UUID rather than failing the whole move.
+async function pushMoveLog(payload, token) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var missingUUID = [];
+  var assetRelationships = payload.animalNames.map(function(name) {
+    var uuid = animalUUIDs[name];
+    if (!uuid) missingUUID.push(name);
+    return uuid ? { type: 'asset--animal', id: uuid } : null;
+  }).filter(Boolean);
+  if (!assetRelationships.length) throw new Error('No synced animal UUIDs yet — will retry next sync');
+  var movedPayload = { data: {
+    type: 'log--activity',
+    attributes: {
+      name: 'Move: ' + payload.animalNames.join(', ') + ' → ' + payload.locationName,
+      timestamp: payload.ts,
+      status: 'done',
+      is_movement: true,
+      notes: { value: payload.notes, format: 'default' }
+    },
+    relationships: {
+      asset: { data: assetRelationships },
+      location: { data: [{ type: payload.locationType === 'structure' ? 'asset--structure' : 'asset--land', id: payload.locationUuid }] }
     }
-
-    var payload = { data: {
-      type: 'log--activity',
-      attributes: {
-        name: 'Move: ' + selectedAnimals.join(', ') + ' → ' + locName,
-        timestamp: ts,
-        status: 'done',
-        is_movement: true,
-        notes: { value: notes, format: 'default' }
-      },
-      relationships: {
-        asset: { data: assetRelationships },
-        location: { data: [{ type: locations[locUuid].type === 'structure' ? 'asset--structure' : 'asset--land', id: locUuid }] }
-      }
-    }};
-
-    var res = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
-    if (res.ok) {
-      selectedAnimals.forEach(function(name) {
-        animalLocations[name] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
-      });
-      localStorage.setItem(LS.animalLocations, JSON.stringify(animalLocations));
-      var msg = '✅ Moved ' + selectedAnimals.length + ' animal(s) to ' + locName;
-      if (missingUUID.length) msg += ' (skipped: ' + missingUUID.join(', ') + ' — not synced)';
-      showToast(msg);
-      closeMoveModal();
-      if (document.getElementById('screen-animals') && document.getElementById('screen-animals').classList.contains('active')) renderAnimalsScreen();
-    } else {
-      var errText = await res.text();
-      showToast('⚠️ Move failed: ' + res.status);
-    }
-  } catch(e) {
-    showToast('⚠️ ' + e.message);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '💾 Save'; }
-  }
+  }};
+  var res = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(movedPayload) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  if (missingUUID.length) throw new Error('Moved ' + assetRelationships.length + '/' + payload.animalNames.length + ' — skipped (not synced): ' + missingUUID.join(', '));
 }
 
 // ===== Profile photo editing state — separate from the entry-flow currentPhoto =====
@@ -5217,22 +5165,16 @@ async function saveAnimalProfile(name) {
   };
   saveProfilesSafely();
   epEditPhoto = null;
-  showToast("✅ " + name + " saved");
+  showToast("✅ " + name + " saved" + ((groupChanged || coreChanged || photoChanged) ? " — will sync to farmOS next push" : ""));
   openAnimalProfile(name);
   if (groupChanged) {
-    pushGoatGroupAssign(name, newGroup).then(function(ok) {
-      if (ok) showToast("✅ Group updated in farmOS");
-    });
+    queuePendingAction('profileGroup', { animalName: name, newGroup: newGroup }, true);
   }
   if (coreChanged) {
-    pushAnimalProfileCore(name, { sex: newSex, birthdate: newDob, breed: newBreed, tag: newTag, notes: newNotes }).then(function(ok) {
-      if (ok) showToast("✅ Profile synced to farmOS");
-    });
+    queuePendingAction('profileCore', { animalName: name, sex: newSex, birthdate: newDob, breed: newBreed, tag: newTag, notes: newNotes }, true);
   }
   if (photoChanged) {
-    pushAnimalProfilePhoto(name, pendingPhotoUpload).then(function(ok) {
-      if (ok) showToast("✅ Photo synced to farmOS");
-    });
+    queuePendingAction('profilePhoto', { animalName: name, photoId: newPhotoId }, true);
   }
 }
 
@@ -5372,7 +5314,7 @@ function renderAnimalsScreen() {
   });
   lazyLoadPhotos(al); // fill in <img data-photoid> from the file store
 }
-async function addAnimalFromScreen() {
+function addAnimalFromScreen() {
   var name = (document.getElementById("animalsNewName").value || "").trim();
   if (!name) { showToast("Name is required"); return; }
   if (goats.includes(name)) { showToast("Animal already exists"); return; }
@@ -5413,46 +5355,12 @@ async function addAnimalFromScreen() {
 
   populateGoatSelect();
   renderAnimalsScreen();
-  showToast("✅ " + name + " added");
 
   if (isPurchase) {
-    var cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
-    if (!cfg.url || !cfg.user || !cfg.pass) {
-      showToast("⚠️ Connect to farmOS in Settings to log the purchase — animal saved locally for now");
-      return;
-    }
-    showToast("Creating farmOS record for purchase...");
-    try {
-      var token = await getToken(cfg);
-      var goatTypeId = localStorage.getItem(LS.goatTypeUUID);
-      var assetPayload = { data: {
-        type: 'asset--animal',
-        attributes: {
-          name: name,
-          ...(sex ? { sex: sex.toLowerCase() === 'm' ? 'male' : sex.toLowerCase() === 'f' ? 'female' : sex.toLowerCase() } : {}),
-          ...(dob ? { birthdate: dob } : {}),
-          ...(tag ? { id_tag: [{ id: tag, type: 'tag' }] } : {})
-        },
-        ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
-      }};
-      var assetRes = await fetch(apiUrl('/api/asset/animal'), {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
-        body: JSON.stringify(assetPayload)
-      });
-      if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
-      var assetData = await assetRes.json();
-      var newUUID = assetData.data && assetData.data.id;
-      if (newUUID) {
-        animalUUIDs[name] = newUUID;
-        localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
-        var purchaseResult = await createPurchaseLog(name, { notes: notes, unitPrice: purchasePrice });
-        if (purchaseResult.ok) showToast("✅ Purchase logged in farmOS");
-        else showToast("⚠️ Animal created but purchase log failed: " + purchaseResult.reason);
-      }
-    } catch(e) {
-      showToast("⚠️ farmOS purchase record failed: " + e.message);
-    }
+    queuePendingAction('purchase', { animalName: name, notes: notes, unitPrice: purchasePrice, sex: sex, dob: dob, tag: tag });
+    showToast("✅ " + name + " added — purchase will sync to farmOS next push");
+  } else {
+    showToast("✅ " + name + " added");
   }
 }
 
@@ -6350,6 +6258,8 @@ function clearLogs() {
     bd_updateSyncBadge();
     bd_renderBirds();
     bd_renderHistory();
+    batches = []; saveBatches();
+    pendingActions = []; savePendingActions();
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
     saveBtn.onclick = saveEdit;
@@ -6409,7 +6319,9 @@ function renderSync() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const connLine2 = document.getElementById("connStatusLine2");
   if (connLine2) connLine2.textContent = cfg.url ? "✅ " + cfg.url : "❌ Not configured — set in ⚙️ Settings";
-  const unsynced = logs.filter(l => !l.synced).length;
+  const unsynced = logs.filter(l => !l.synced).length
+    + batches.filter(b => !b.synced).length
+    + pendingActions.filter(p => !p.synced).length;
   document.getElementById("unsyncedCount").textContent = unsynced;
   document.getElementById("syncLog").textContent = "";
 }
@@ -7438,6 +7350,135 @@ function buildFarmOSPayload(l) {
   return payload;
 }
 
+// ===== SHARED: PROCESS QUEUED OFFLINE-FIRST ACTIONS =====
+// Pushes the live farmOS half of everything queued by queuePendingAction
+// (sell/death/move/retype/profile edits/purchases). Called from both
+// Goat's syncToFarmOS and Bird's bd_syncToFarmOS — same queue either way.
+// Reuses the existing, already-working network functions; only the
+// *timing* changed (sync-time instead of immediate-on-save). Returns
+// {ok, skipped, fail} counts for the sync log.
+async function pushPurchaseAnimal(payload, token) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var uuid = animalUUIDs[payload.animalName];
+  if (!uuid) {
+    var goatTypeId = await getOrCreateGoatTypeUUID(token);
+    var assetPayload = { data: {
+      type: 'asset--animal',
+      attributes: Object.assign(
+        { name: payload.animalName },
+        payload.sex ? { sex: payload.sex.toLowerCase() === 'm' ? 'male' : payload.sex.toLowerCase() === 'f' ? 'female' : payload.sex.toLowerCase() } : {},
+        payload.dob ? { birthdate: payload.dob } : {},
+        payload.tag ? { id_tag: [{ id: payload.tag, type: 'tag' }] } : {}
+      ),
+      ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
+    }};
+    var assetRes = await fetch(apiUrl('/api/asset/animal'), { method: 'POST', headers: headers, body: JSON.stringify(assetPayload) });
+    if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
+    var assetData = await assetRes.json();
+    uuid = assetData.data && assetData.data.id;
+    if (uuid) { animalUUIDs[payload.animalName] = uuid; localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs)); }
+  }
+  if (!uuid) throw new Error('Could not create animal asset');
+  var purchaseResult = await createPurchaseLog(payload.animalName, { notes: payload.notes, unitPrice: payload.unitPrice });
+  if (!purchaseResult.ok) throw new Error('Purchase log failed: ' + purchaseResult.reason);
+}
+
+async function processPendingGoatActions(token, logFn) {
+  var items = pendingActions.filter(function(a) { return !a.synced && ['sell','death','move','retype','profileGroup','profileCore','profilePhoto','purchase','birdSell'].indexOf(a.type) !== -1; });
+  var ok = 0, skipped = 0, fail = 0;
+  for (var i = 0; i < items.length; i++) {
+    var a = items[i];
+    try {
+      if (a.type === 'sell' || a.type === 'death') {
+        var uuid = animalUUIDs[a.payload.animalName];
+        if (!uuid) { a.synced = true; a.lastError = 'Animal was never synced — nothing to archive in farmOS'; skipped++; continue; }
+        var bundle = a.type === 'sell' ? 'sale' : 'observation';
+        var okArch = await archiveAnimalWithLog(a.payload.animalName, bundle, { notes: a.payload.notes, unitPrice: a.payload.unitPrice });
+        if (!okArch) throw new Error('archive failed');
+      } else if (a.type === 'birdSell') {
+        var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === a.payload.birdId; })[0];
+        if (!bird || !bird.uuid) { a.synced = true; a.lastError = 'Bird was never synced — nothing to archive in farmOS'; skipped++; continue; }
+        var okBird = await bd_archiveBirdWithLog(a.payload.birdId, 'sale', { notes: a.payload.notes, unitPrice: a.payload.unitPrice });
+        if (!okBird) throw new Error('archive failed');
+      } else if (a.type === 'move') {
+        await pushMoveLog(a.payload, token);
+      } else if (a.type === 'retype') {
+        var uuid2 = animalUUIDs[a.payload.animalName];
+        if (!uuid2) { a.synced = true; a.lastError = 'Animal was never synced — nothing to retype in farmOS'; skipped++; continue; }
+        var okR = await retypeAnimal(uuid2, a.payload.typeName, 'farmdesk_cfg');
+        if (!okR) throw new Error('retype failed');
+      } else if (a.type === 'profileGroup') {
+        var ok1 = await pushGoatGroupAssign(a.payload.animalName, a.payload.newGroup);
+        if (!ok1) throw new Error('group push failed');
+      } else if (a.type === 'profileCore') {
+        var ok2 = await pushAnimalProfileCore(a.payload.animalName, a.payload);
+        if (!ok2) throw new Error('profile push failed');
+      } else if (a.type === 'profilePhoto') {
+        var dataUrl = a.payload.photoId ? await Photos.load(a.payload.photoId) : null;
+        var ok3 = await pushAnimalProfilePhoto(a.payload.animalName, dataUrl);
+        if (!ok3) throw new Error('photo push failed');
+      } else if (a.type === 'purchase') {
+        await pushPurchaseAnimal(a.payload, token);
+      }
+      a.synced = true; a.lastError = null; ok++;
+      if (logFn) logFn('✅ ' + a.type + ' (' + (a.payload.animalName || a.payload.birdId || '') + ') pushed\n');
+    } catch(e) {
+      a.lastError = e.message; fail++;
+      if (logFn) logFn('⚠️ ' + a.type + ' (' + (a.payload.animalName || a.payload.birdId || '') + ') failed: ' + e.message + '\n');
+    }
+  }
+  savePendingActions();
+  return { ok: ok, skipped: skipped, fail: fail };
+}
+
+async function processPendingBatchActions(token, logFn) {
+  var items = pendingActions.filter(function(a) { return !a.synced && ['batchSell','batchDied','batchPromote'].indexOf(a.type) !== -1; });
+  var ok = 0, skipped = 0, fail = 0;
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  for (var i = 0; i < items.length; i++) {
+    var a = items[i];
+    var b = batches.find(function(x) { return x.id === a.payload.batchId; });
+    if (!b || !b.productUUID) { skipped++; continue; } // batch itself not synced yet — retry next time
+    try {
+      if (a.type === 'batchSell') {
+        var qRef = await buildBatchSaleQuantityRef(a.payload.count, a.payload.unitPrice, b.productUUID, token);
+        if (!qRef) throw new Error('Could not create inventory quantity');
+        var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] } };
+        var attrs = { name: 'Sale: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
+        var res = await fetch(apiUrl('/api/log/sale'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: rel } }) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      } else if (a.type === 'batchDied') {
+        var qPayload = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(a.payload.count), denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
+        var qRes = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload) });
+        if (!qRes.ok) throw new Error('HTTP ' + qRes.status);
+        var qData = await qRes.json();
+        var qUUID = qData?.data?.id, qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
+        var attrs2 = { name: 'Death: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
+        var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
+        var res2 = await fetch(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs2, relationships: rel2 } }) });
+        if (!res2.ok) throw new Error('HTTP ' + res2.status);
+      } else if (a.type === 'batchPromote') {
+        var qPayload3 = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: '1', denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
+        var qRes3 = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload3) });
+        if (!qRes3.ok) throw new Error('HTTP ' + qRes3.status);
+        var qData3 = await qRes3.json();
+        var qUUID3 = qData3?.data?.id, qRevId3 = qData3?.data?.attributes?.drupal_internal__revision_id;
+        var attrs3 = { name: 'Promoted to individual: ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: 'One animal pulled from batch to be tracked individually', format: 'default' } };
+        var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] } };
+        var res3 = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
+        if (!res3.ok) throw new Error('HTTP ' + res3.status);
+      }
+      a.synced = true; a.lastError = null; ok++;
+      if (logFn) logFn('✅ ' + a.type + ' pushed\n');
+    } catch(e) {
+      a.lastError = e.message; fail++;
+      if (logFn) logFn('⚠️ ' + a.type + ' failed: ' + e.message + '\n');
+    }
+  }
+  savePendingActions();
+  return { ok: ok, skipped: skipped, fail: fail };
+}
+
 async function syncToFarmOS() {
   const cfg = saveFarmOSCfg();
   const logEl = document.getElementById("syncLog");
@@ -7674,6 +7715,31 @@ async function syncToFarmOS() {
     } catch(e) {
       logEl.textContent += '⚠️ Batch sync error: ' + e.message + '\n';
     }
+  }
+
+  // ===== STEP 6: Process queued offline-first actions (sell/death/move/
+  // retype/profile edits/purchases/batch sell-died-promote). Batches above
+  // run first so any batchSell/Died/Promote here has a productUUID to work
+  // with. =====
+  const pendingCount = pendingActions.filter(p => !p.synced).length;
+  if (pendingCount > 0) {
+    logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
+    try {
+      const batchActionResult = await processPendingBatchActions(token, function(msg) { logEl.textContent += msg; });
+      const goatActionResult = await processPendingGoatActions(token, function(msg) { logEl.textContent += msg; });
+      logEl.textContent += 'Queued actions: ' + (batchActionResult.ok + goatActionResult.ok) + ' ok, ' +
+        (batchActionResult.skipped + goatActionResult.skipped) + ' skipped (not synced yet), ' +
+        (batchActionResult.fail + goatActionResult.fail) + ' failed.\n';
+    } catch(e) {
+      logEl.textContent += '⚠️ Queued action sync error: ' + e.message + '\n';
+    }
+  }
+
+  const finalUnsyncedEl = document.getElementById("unsyncedCount");
+  if (finalUnsyncedEl) {
+    finalUnsyncedEl.textContent = logs.filter(l => !l.synced).length
+      + batches.filter(b => !b.synced).length
+      + pendingActions.filter(p => !p.synced).length;
   }
 }
 
@@ -10060,7 +10126,9 @@ async function bd_syncToFarmOS() {
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
   if (!cfg.url || !cfg.user) { bd_toast('No connection saved'); return; }
   var unsynced = bd_pending.filter(function(p) { return !p.synced; });
-  if (!unsynced.length) { bd_toast('Nothing to sync'); return; }
+  var unsyncedBatchesCheck = batches.filter(function(b) { return !b.synced; });
+  var unsyncedActionsCheck = pendingActions.filter(function(p) { return !p.synced; });
+  if (!unsynced.length && !unsyncedBatchesCheck.length && !unsyncedActionsCheck.length) { bd_toast('Nothing to sync'); return; }
   bd_setLoading(true, 'Syncing to farmOS...');
   var logEl = document.getElementById('bd-sync-log'); if (logEl) logEl.textContent = '';
   var synced = 0, failed = 0;
@@ -10137,6 +10205,20 @@ async function bd_syncToFarmOS() {
     var unsyncedBirdBatches = batches.filter(function(b) { return !b.synced; });
     if (unsyncedBirdBatches.length > 0) {
       try { await syncBatchesToFarmOS(token); } catch(be) { /* best-effort — retried next sync */ }
+    }
+
+    // Process queued offline-first actions (batch sell/died/promote, and
+    // any sell/death/move/retype/profile/purchase actions queued from the
+    // Goat module — one shared queue, pushed from whichever module's
+    // sync button the user taps first).
+    var pendingCount = pendingActions.filter(function(p) { return !p.synced; }).length;
+    if (pendingCount > 0) {
+      try {
+        var batchActionResult = await processPendingBatchActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
+        var goatActionResult = await processPendingGoatActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
+        synced += batchActionResult.ok + goatActionResult.ok;
+        failed += batchActionResult.fail + goatActionResult.fail;
+      } catch(be) { /* best-effort — retried next sync */ }
     }
 
     bd_toast(synced + ' synced' + (failed ? ', ' + failed + ' failed' : ''));
@@ -10388,9 +10470,9 @@ async function bd_pushArchiveBird(uuid, token) {
 }
 
 // Sale lifecycle for an individual bird — mirrors GoatDesk's
-// archiveAnimalWithLog exactly (immediate sync, not local-first queued,
-// same as Goat's Sell). Reuses buildPriceQuantityRef as-is since it's
-// already module-agnostic (just needs a token).
+// archiveAnimalWithLog exactly. Called only from processPendingGoatActions
+// at sync time now (local-first queued via 'birdSell', same as Goat's
+// Sell) — not from the Confirm Sale button directly anymore.
 async function bd_archiveBirdWithLog(birdId, logBundle, details) {
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { bd_toast('⚠️ Connect to farmOS in Settings first'); return false; }
@@ -10444,19 +10526,15 @@ function bd_openSellModal(birdId) {
     sb.style.display = '';
     sb.textContent = '🏷️ Confirm Sale';
     sb.style.background = '#8b6500';
-    sb.onclick = async function() {
+    sb.onclick = function() {
       var notes = document.getElementById('lifecycleNotes').value || '';
       var priceVal = parseFloat(document.getElementById('lifecyclePrice').value);
-      sb.disabled = true; sb.textContent = 'Saving...';
-      var ok = await bd_archiveBirdWithLog(birdId, 'sale', { notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
-      sb.disabled = false; sb.textContent = '🏷️ Confirm Sale';
-      if (ok) {
-        bd_toast('✅ ' + label + ' sold and archived');
-        closeEdit();
-        bird.status = 'archived';
-        localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
-        bd_renderBirds();
-      }
+      queuePendingAction('birdSell', { birdId: birdId, notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
+      bd_toast('✅ ' + label + ' sold and archived locally — will sync to farmOS next push');
+      closeEdit();
+      bird.status = 'archived';
+      localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+      bd_renderBirds();
     };
   }
   modal.style.display = 'block';
@@ -11358,6 +11436,18 @@ function bd_clearAllData() {
       bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
       bd_excluded = [];
       bd_speciesCfg = { Chicken: ["Rhode Island Red","Leghorn","Barred Rock","Buff Orpington","Australorp","Silkie"], Duck: ["Pekin","Khaki Campbell","Rouen","Muscovy","Indian Runner"], Goose: ["Toulouse","Embden","Chinese","African","Pilgrim"], Other: [] };
+      // Bird batches (and any sell/died/promote actions queued against
+      // them) belong to this clear too — scoped to module:'bird' only so
+      // GoatDesk's own batches aren't touched.
+      var birdBatchIds = batches.filter(function(b) { return b.module === 'bird'; }).map(function(b) { return b.id; });
+      batches = batches.filter(function(b) { return b.module !== 'bird'; });
+      saveBatches();
+      pendingActions = pendingActions.filter(function(a) {
+        var isBirdBatchAction = ['batchSell','batchDied','batchPromote'].indexOf(a.type) !== -1 && birdBatchIds.indexOf(a.payload.batchId) !== -1;
+        var isBirdSellAction = a.type === 'birdSell';
+        return !isBirdBatchAction && !isBirdSellAction;
+      });
+      savePendingActions();
       bd_updateSyncBadge(); bd_renderBirds();
       bd_toast('Bird data cleared');
     }
