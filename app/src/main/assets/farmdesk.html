@@ -1435,7 +1435,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782117101"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782117833"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3046,7 +3046,9 @@ function formatLog(l) {
     out = "Kids: " + kidNames + " — Dam: " + (l.data.dam || "");
     if (l.data.sire) out += " — Sire: " + l.data.sire;
   }
+  else if (l.type === "sale")  out = l.logName || (l.data && l.data.summary) || (l.data ? 'Sale: ' + (l.data.count || '') + ' @ $' + (l.data.unitPrice || '?') + (l.data.notes ? ' — ' + l.data.notes : '') : '');
   else if (l.type === "activity") out = (l.data.title || "") + (l.data.desc ? " — " + l.data.desc : "");
+  else if (l.data && l.data.summary) out = l.data.summary;
   else out = JSON.stringify(l.data);
   // Append notes only if present and not a duplicate of the main output
   const notes = (l.data.notes || "").trim();
@@ -3094,11 +3096,14 @@ function makeLogEl(l, showActions = false) {
     : (l.synced ? " \u2713 synced" : "");
   const detail = formatLog(l);
 
+  const animalName = l.goat || (l.data && l.data.animal) || '';
+  const animalClickable = !!l.goat; // only goat entries can open a profile
+
   // Collapsed header — always visible
   d.innerHTML = `
     <div class="log-top">
       ${showActions ? `<input type="checkbox" class="log-select" data-id="${l.id}" style="width:auto;margin:0 8px 0 0;" onclick="event.stopPropagation()">` : ""}
-      <span class="log-animal" onclick="event.stopPropagation();openAnimalProfile(this.dataset.nm)" data-nm="${(l.goat||'').replace(/"/g,'&quot;')}" style="cursor:pointer;text-decoration:underline dotted;">${l.goat}</span>
+      <span class="log-animal" ${animalClickable ? `onclick="event.stopPropagation();openAnimalProfile(this.dataset.nm)"` : ''} data-nm="${animalName.replace(/"/g,'&quot;')}" style="cursor:${animalClickable ? 'pointer' : 'default'};text-decoration:${animalClickable ? 'underline dotted' : 'none'};">${animalName || '—'}</span>
       <span class="log-type">${l.type}</span>
       <span class="log-arrow" style="margin-left:auto;color:#555;font-size:14px;">\u25BC</span>
     </div>
