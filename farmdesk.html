@@ -4319,7 +4319,7 @@ async function syncBatchesToFarmOS(token, logFn) {
         var qPayload = { data: {
           type: 'quantity--standard',
           attributes: { measure: 'count', value: { numerator: String(b.originalCount), denominator: '1' }, inventory_adjustment: 'increment' },
-          relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } }
+          relationships: { inventory_asset: { data: { type: 'asset--material', id: b.productUUID } } }
         } };
         var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(qPayload) });
         if (qRes.ok) {
@@ -4371,7 +4371,7 @@ async function buildBatchSaleQuantityRef(count, unitPrice, productUUID, token) {
       attrs.unit_price  = { numerator: String(unitCents), denominator: '100' };
       attrs.total_price = { numerator: String(totalCents), denominator: '100' };
     }
-    const payload = { data: { type: 'quantity--standard', attributes: attrs, relationships: { inventory_asset: { data: { type: 'asset--product', id: productUUID } } } } };
+    const payload = { data: { type: 'quantity--standard', attributes: attrs, relationships: { inventory_asset: { data: { type: 'asset--material', id: productUUID } } } } };
     const res = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
     if (!res.ok) return null;
     const data = await res.json();
@@ -7475,28 +7475,28 @@ async function processPendingBatchActions(token, logFn) {
       if (a.type === 'batchSell') {
         var qRef = await buildBatchSaleQuantityRef(a.payload.count, a.payload.unitPrice, b.productUUID, token);
         if (!qRef) throw new Error('Could not create inventory quantity');
-        var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] } };
+        var rel = { asset: { data: [{ type: 'asset--material', id: b.productUUID }] }, quantity: { data: [qRef] } };
         var attrs = { name: 'Sale: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
         var res = await fetchWithTimeout(apiUrl('/api/log/sale'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: rel } }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
       } else if (a.type === 'batchDied') {
-        var qPayload = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(a.payload.count), denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
+        var qPayload = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(a.payload.count), denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--material', id: b.productUUID } } } } };
         var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload) });
         if (!qRes.ok) throw new Error('HTTP ' + qRes.status);
         var qData = await qRes.json();
         var qUUID = qData?.data?.id, qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
         var attrs2 = { name: 'Death: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
-        var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
+        var rel2 = { asset: { data: [{ type: 'asset--material', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
         var res2 = await fetchWithTimeout(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs2, relationships: rel2 } }) });
         if (!res2.ok) throw new Error('HTTP ' + res2.status);
       } else if (a.type === 'batchPromote') {
-        var qPayload3 = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: '1', denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
+        var qPayload3 = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: '1', denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--material', id: b.productUUID } } } } };
         var qRes3 = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload3) });
         if (!qRes3.ok) throw new Error('HTTP ' + qRes3.status);
         var qData3 = await qRes3.json();
         var qUUID3 = qData3?.data?.id, qRevId3 = qData3?.data?.attributes?.drupal_internal__revision_id;
         var attrs3 = { name: 'Promoted to individual: ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: 'One animal pulled from batch to be tracked individually', format: 'default' } };
-        var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] } };
+        var rel3 = { asset: { data: [{ type: 'asset--material', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] } };
         var res3 = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
         if (!res3.ok) throw new Error('HTTP ' + res3.status);
       }
@@ -10312,7 +10312,7 @@ async function getOrCreateProductUUID(name, token, options) {
   }
   if (!options.forceCreate) {
     try {
-      var q = apiUrl('/api/asset/product?filter[name]=' + encodeURIComponent(name) + '&page[limit]=1');
+      var q = apiUrl('/api/asset/material?filter[name]=' + encodeURIComponent(name) + '&page[limit]=1');
       var r = await fetchWithTimeout(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
       if (r.ok) {
         var d = await r.json();
@@ -10321,8 +10321,8 @@ async function getOrCreateProductUUID(name, token, options) {
     } catch(e) { /* fall through to create */ }
   }
   try {
-    var payload = { data: { type: 'asset--product', attributes: { name: name } } };
-    var res = await fetchWithTimeout(apiUrl('/api/asset/product'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
+    var payload = { data: { type: 'asset--material', attributes: { name: name } } };
+    var res = await fetchWithTimeout(apiUrl('/api/asset/material'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
     if (!res.ok) return null;
     var data = await res.json();
     var uuid = data && data.data && data.data.id;
@@ -10357,7 +10357,7 @@ async function bd_pushLog(log, token) {
         var qPayload = { data: {
           type: 'quantity--standard',
           attributes: { measure: 'count', value: { numerator: String(log.eggCount), denominator: '1' }, inventory_adjustment: 'increment' },
-          relationships: { inventory_asset: { data: { type: 'asset--product', id: eggsProductUUID } } }
+          relationships: { inventory_asset: { data: { type: 'asset--material', id: eggsProductUUID } } }
         } };
         var qRes = await fetchWithTimeout(bd_apiUrl('/api/quantity/standard'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(qPayload) });
         if (qRes.ok) {
