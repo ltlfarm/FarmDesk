@@ -4387,6 +4387,16 @@ async function buildBatchSaleQuantityRef(count, unitPrice, productUUID, token) {
   } catch(e) { return null; }
 }
 
+function _addBatchHistoryEntry(b, entry) {
+  if (b.module === 'bird') {
+    bd_history.unshift(entry);
+    localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  } else {
+    logs.unshift(entry);
+    localStorage.setItem(LS.logs, JSON.stringify(logs));
+  }
+}
+
 function sellFromBatch(batchId, count, unitPrice, notes) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return false;
@@ -4394,10 +4404,10 @@ function sellFromBatch(batchId, count, unitPrice, notes) {
   b.count -= count;
   saveBatches();
   queuePendingAction('batchSell', { batchId: batchId, count: count, unitPrice: unitPrice, notes: notes, species: b.species });
-  var entry = { id: 'bh_' + Date.now(), type: 'sale', ts: new Date().toISOString(), synced: false,
+  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'sale', ts: new Date().toISOString(), synced: false,
     data: { animal: b.species + ' batch', count: count, unitPrice: unitPrice || '', notes: notes || '',
-      summary: 'Batch sale: ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice + '/head' : '') } };
-  logs.unshift(entry); localStorage.setItem(LS.logs, JSON.stringify(logs));
+      summary: 'Batch sale: ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice + '/head' : '') },
+    logName: 'Sale - ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice : '') + (notes ? ' — ' + notes : '') });
   return true;
 }
 
@@ -4408,10 +4418,10 @@ function markBatchDied(batchId, count, notes) {
   b.count -= count;
   saveBatches();
   queuePendingAction('batchDied', { batchId: batchId, count: count, notes: notes, species: b.species });
-  var entry = { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
+  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
     data: { animal: b.species + ' batch', count: count, notes: notes || '',
-      summary: 'Batch death: ' + count + ' ' + b.species } };
-  logs.unshift(entry); localStorage.setItem(LS.logs, JSON.stringify(logs));
+      summary: 'Batch death: ' + count + ' ' + b.species },
+    logName: 'Death - ' + count + ' ' + b.species + (notes ? ' — ' + notes : '') });
   return true;
 }
 
@@ -4426,9 +4436,9 @@ function promoteFromBatch(batchId) {
   b.count -= 1;
   saveBatches();
   queuePendingAction('batchPromote', { batchId: batchId, species: b.species });
-  var entry = { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
-    data: { animal: b.species + ' batch', summary: 'Promoted 1 ' + b.species + ' from batch to individual' } };
-  logs.unshift(entry); localStorage.setItem(LS.logs, JSON.stringify(logs));
+  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
+    data: { animal: b.species + ' batch', summary: 'Promoted 1 ' + b.species + ' from batch to individual' },
+    logName: 'Promoted 1 ' + b.species + ' to individual' });
   return true;
 }
 
@@ -10891,6 +10901,13 @@ async function bd_saveLog() {
     if (!trackIndividually) {
       // Batch mode (default) — one count, not N individual birds.
       createBatch('bird', hatchSpecies, hatchBreed, count, hatchParent, '', hatchFlock, hatchNotes);
+      // Add a history entry so the hatch appears in History tab
+      var batchHatchEntry = { id: 'bh_' + Date.now(), type: 'hatch', ts: new Date().toISOString(), synced: false,
+        hatchSpecies: hatchSpecies, hatchBreed: hatchBreed, hatchCount: count,
+        hatchParent: hatchParent, hatchFlock: hatchFlock, notes: hatchNotes,
+        logName: 'Hatch - ' + hatchSpecies + ' x' + count + (hatchParent ? ' (parent: ' + hatchParent + ')' : '') };
+      bd_history.unshift(batchHatchEntry);
+      localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
       document.getElementById('bd-log-modal').style.display = 'none';
       bd_toast('✅ Batch of ' + count + ' ' + hatchSpecies + ' recorded');
       bd_renderBirds();
