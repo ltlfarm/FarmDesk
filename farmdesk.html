@@ -4311,7 +4311,7 @@ async function syncBatchesToFarmOS(token, logFn) {
     try {
       if (!b.productUUID) {
         var productName = b.species + ' Batch - ' + new Date(b.bornDate).toISOString().slice(0,10);
-        b.productUUID = await getOrCreateProductUUID(productName, token, { forceCreate: true });
+        b.productUUID = await getOrCreateProductUUID(productName, token, {});
         saveBatches();
       }
       if (!b.productUUID) { fail++; if (logFn) logFn('⚠️ Batch (' + b.species + '): could not create product — retrying next sync\n'); continue; }
@@ -10323,12 +10323,15 @@ async function getOrCreateProductUUID(name, token, options) {
   try {
     var payload = { data: { type: 'asset--material', attributes: { name: name } } };
     var res = await fetchWithTimeout(apiUrl('/api/asset/material'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      var errText = await res.text().catch(function() { return ''; });
+      throw new Error('HTTP ' + res.status + (errText ? ': ' + errText.slice(0, 120) : ''));
+    }
     var data = await res.json();
     var uuid = data && data.data && data.data.id;
     if (uuid && options.cacheKey) localStorage.setItem(options.cacheKey, uuid);
     return uuid;
-  } catch(e) { return null; }
+  } catch(e) { throw e; }
 }
 
 // Finds or creates a shared "Eggs" Product asset — farmOS's documented
