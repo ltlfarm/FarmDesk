@@ -10343,6 +10343,7 @@ async function getOrCreateProductUUID(name, token, options) {
     var prodTypeId = await getOrCreateProductTypeUUID(token);
     var payload = { data: { type: 'asset--product', attributes: { name: name } } };
     if (prodTypeId) payload.data.relationships = { product_type: { data: { type: 'taxonomy_term--product_type', id: prodTypeId } } };
+    var res = await fetchWithTimeout(apiUrl('/api/asset/product'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
     if (!res.ok) {
       var errJson = await res.json().catch(function() { return null; });
       var errMsg = (errJson && errJson.errors && errJson.errors[0]) ? (errJson.errors[0].title || '') + (errJson.errors[0].detail ? ': ' + errJson.errors[0].detail : '') : ('HTTP ' + res.status);
