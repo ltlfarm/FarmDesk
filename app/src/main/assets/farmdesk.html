@@ -1435,7 +1435,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782115883"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782116565"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4397,7 +4397,7 @@ function sellFromBatch(batchId, count, unitPrice, notes) {
   var entry = { id: 'bh_' + Date.now(), type: 'sale', ts: new Date().toISOString(), synced: false,
     data: { animal: b.species + ' batch', count: count, unitPrice: unitPrice || '', notes: notes || '',
       summary: 'Batch sale: ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice + '/head' : '') } };
-  logs.unshift(entry); saveLogs();
+  logs.unshift(entry); localStorage.setItem(LS.logs, JSON.stringify(logs));
   return true;
 }
 
@@ -4411,7 +4411,7 @@ function markBatchDied(batchId, count, notes) {
   var entry = { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
     data: { animal: b.species + ' batch', count: count, notes: notes || '',
       summary: 'Batch death: ' + count + ' ' + b.species } };
-  logs.unshift(entry); saveLogs();
+  logs.unshift(entry); localStorage.setItem(LS.logs, JSON.stringify(logs));
   return true;
 }
 
@@ -4428,7 +4428,7 @@ function promoteFromBatch(batchId) {
   queuePendingAction('batchPromote', { batchId: batchId, species: b.species });
   var entry = { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
     data: { animal: b.species + ' batch', summary: 'Promoted 1 ' + b.species + ' from batch to individual' } };
-  logs.unshift(entry); saveLogs();
+  logs.unshift(entry); localStorage.setItem(LS.logs, JSON.stringify(logs));
   return true;
 }
 
@@ -4467,22 +4467,18 @@ function closeBatchActionModal() {
   _batchActionPending = null;
 }
 
-async function confirmBatchAction() {
+function confirmBatchAction() {
   if (!_batchActionPending) return;
   var count = parseInt(document.getElementById('batchActionCount').value);
   var notes = document.getElementById('batchActionNotes').value || '';
-  var btn = document.getElementById('batchActionConfirmBtn');
-  var origText = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Saving...';
   var ok = false;
   var pending = _batchActionPending;
   if (pending.action === 'sell') {
     var price = parseFloat(document.getElementById('batchActionPrice').value);
-    ok = await sellFromBatch(pending.batchId, count, isNaN(price) ? null : price, notes);
+    ok = sellFromBatch(pending.batchId, count, isNaN(price) ? null : price, notes);
   } else if (pending.action === 'died') {
-    ok = await markBatchDied(pending.batchId, count, notes);
+    ok = markBatchDied(pending.batchId, count, notes);
   }
-  btn.disabled = false; btn.textContent = origText;
   if (ok) {
     showToast('✅ Saved locally — will sync to farmOS next push');
     closeBatchActionModal();
