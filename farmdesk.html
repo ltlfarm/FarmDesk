@@ -2051,6 +2051,11 @@ function renderStep() {
       <div id="photoPreview" style="margin-top:8px;"></div>
     `;
     addBirthKidRow(); // start with one empty row
+    // Pre-select whichever animal is currently active in the goat picker as Dam
+    setTimeout(function() {
+      var damSel = document.getElementById('f_dam');
+      if (damSel && goats[herdIndex]) damSel.value = goats[herdIndex];
+    }, 0);
   }
 
   if (t === "activity") {
@@ -4389,6 +4394,10 @@ function sellFromBatch(batchId, count, unitPrice, notes) {
   b.count -= count;
   saveBatches();
   queuePendingAction('batchSell', { batchId: batchId, count: count, unitPrice: unitPrice, notes: notes, species: b.species });
+  var entry = { id: 'bh_' + Date.now(), type: 'sale', ts: new Date().toISOString(), synced: false,
+    data: { animal: b.species + ' batch', count: count, unitPrice: unitPrice || '', notes: notes || '',
+      summary: 'Batch sale: ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice + '/head' : '') } };
+  logs.unshift(entry); saveLogs();
   return true;
 }
 
@@ -4399,6 +4408,10 @@ function markBatchDied(batchId, count, notes) {
   b.count -= count;
   saveBatches();
   queuePendingAction('batchDied', { batchId: batchId, count: count, notes: notes, species: b.species });
+  var entry = { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
+    data: { animal: b.species + ' batch', count: count, notes: notes || '',
+      summary: 'Batch death: ' + count + ' ' + b.species } };
+  logs.unshift(entry); saveLogs();
   return true;
 }
 
@@ -4413,6 +4426,9 @@ function promoteFromBatch(batchId) {
   b.count -= 1;
   saveBatches();
   queuePendingAction('batchPromote', { batchId: batchId, species: b.species });
+  var entry = { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
+    data: { animal: b.species + ' batch', summary: 'Promoted 1 ' + b.species + ' from batch to individual' } };
+  logs.unshift(entry); saveLogs();
   return true;
 }
 
@@ -10712,11 +10728,34 @@ function bd_openBirdProfile(id) {
     row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
     '<div style="display:flex;gap:8px;margin-top:14px;">' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openLogSheet(b);" style="flex:1;margin:0;">&#x1F4CB; Log</button>' +
+      '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openHatchForBird(b);" style="flex:0 0 auto;margin:0;padding:10px 12px;background:#1a4a2e;" title="Hatch">🥚</button>' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openEditBird(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">&#x270F;&#xFE0F; Edit</button>' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openSellModal(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 12px;background:#5a4400;">&#x1F3F7;&#xFE0F;</button>' +
     '</div>';
   lazyLoadPhotos(contentEl); // fill in <img data-photoid> from the Photos store
   modal.style.display = 'flex';
+}
+
+// Opens the log sheet set to Hatch, pre-filling the clicked bird as
+// Parent Tag with their species and breed already filled in.
+function bd_openHatchForBird(id) {
+  bd_activeTaskId = null;
+  bd_currentBirdId = null; // hatch isn't attached to the bird that's the parent
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
+  document.getElementById('bd-log-modal-title').textContent = 'Hatch — ' + (bird ? (bird.tag || bird.name || 'Bird') : 'Bird');
+  document.getElementById('bd-log-type').value = 'hatch';
+  var now = new Date(); now.setSeconds(0,0);
+  document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16);
+  bd_currentPhoto = null; bd_renderLogFields();
+  setTimeout(function() {
+    var parentEl = document.getElementById('bd-f-hatch-parent');
+    if (parentEl && bird) parentEl.value = bird.tag || bird.name || '';
+    var speciesEl = document.getElementById('bd-f-hatch-species');
+    if (speciesEl && bird && bird.species) speciesEl.value = bird.species;
+    var breedEl = document.getElementById('bd-f-hatch-breed');
+    if (breedEl && bird && bird.breed) breedEl.value = bird.breed;
+  }, 50);
+  document.getElementById('bd-log-modal').style.display = 'block';
 }
 
 function bd_closeBirdProfile() {
