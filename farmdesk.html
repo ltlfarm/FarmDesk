@@ -3220,7 +3220,7 @@ function renderHistory() {
   const sf = document.getElementById("sortOrder").value;
 
   let filtered = logs.filter(l =>
-    (!gf || l.goat === gf) && (!tf || l.type === tf)
+    l.goat && (!gf || l.goat === gf) && (!tf || l.type === tf)
   );
 
   if (sf === "desc") filtered.sort((a,b) => timeVal(b) - timeVal(a));
@@ -9650,6 +9650,21 @@ const BD_LS = {
 
 let bd_birds   = JSON.parse(localStorage.getItem(BD_LS.assets)  || "[]");
 let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
+
+// ===== ONE-TIME MIGRATION: orphan batch entries in logs[] → bd_history[] =====
+// Earlier builds wrote bird batch sell/died/promote events to logs[] (the
+// goat array) instead of bd_history[]. Those entries have no l.goat field
+// and a data.animal containing "batch". Move them once so they appear in
+// Bird History where they belong.
+(function migrateOrphanBatchLogs() {
+  var orphans = logs.filter(function(l) { return !l.goat && l.data && typeof l.data.animal === 'string' && l.data.animal.toLowerCase().indexOf('batch') !== -1; });
+  if (!orphans.length) return;
+  orphans.forEach(function(l) { bd_history.push(l); });
+  bd_history.sort(function(a, b) { return new Date(b.ts || b.time || 0) - new Date(a.ts || a.time || 0); });
+  logs = logs.filter(function(l) { return orphans.indexOf(l) === -1; });
+  localStorage.setItem(LS.logs, JSON.stringify(logs));
+  localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+})();
 // Bird's own med formula list — separate from Goat's (different species,
 // different dosing). Seeded empty rather than guessing poultry dosing
 // numbers; add real ones via Settings > Bird Desk > Manage Med Formulas.
