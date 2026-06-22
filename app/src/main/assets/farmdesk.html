@@ -305,6 +305,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
   background:#333; border-radius:6px; color:#888;
 }
 .module-btn.active { background:#3a7; color:#fff; }
+.module-btn.dimmed { opacity:0.45; }
 /* Screen padding for bottom nav */
 .screen { padding-bottom:80px; }
 
@@ -1435,7 +1436,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782118354"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782118935"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -11159,21 +11160,24 @@ function bd_logSummary(l) {
   if (l.type === 'egg')       return l.nestBox + ': ' + l.eggCount + ' egg' + (l.eggCount !== 1 ? 's' : '');
   if (l.type === 'weight')    return (l.weight !== undefined && l.weight !== '') ? (l.weight + ' ' + (l.weightUnit||'')) : '📅 Scheduled weigh-in';
   if (l.type === 'med')       return l.med + ' ' + (l.dose||'') + (l.doseUnit||'') + ' ' + (l.route||'');
-  if (l.type === 'obs')       return l.title || l.notes || '';
+  if (l.type === 'obs')       return l.title || l.notes || (l.data && l.data.summary) || '';
   if (l.type === 'proc')      return l.proc || '';
   if (l.type === 'mortality') return 'Cause: ' + l.cause;
-  if (l.type === 'hatch')     return l.hatchCount + ' ' + l.hatchSpecies + ' hatched';
+  if (l.type === 'hatch')     return (l.hatchCount || (l.data && l.data.count) || '') + ' ' + (l.hatchSpecies || (l.data && l.data.animal) || '') + ' hatched' + (l.hatchParent ? ' (parent: ' + l.hatchParent + ')' : '');
   if (l.type === 'feed')      return (l.feederName||'') + ': ' + (l.feedAmount||'') + ' ' + (l.feedUnit||'') + ' ' + (l.feedType||'');
-  return l.notes || '';
+  if (l.type === 'sale')      return l.logName || (l.data && l.data.summary) || 'Batch sale';
+  return l.notes || (l.data && l.data.summary) || '';
 }
 function bd_makeLogEl(l) {
   var d = document.createElement('div');
   d.className = 'log'; d.style.cursor = 'pointer';
-  var birdLabel = l.type === 'egg' ? (l.flock || 'Eggs') : (l.birdTag || l.birdName || '?');
+  // Batch entries migrated from logs[] use data.animal; native bird logs use birdTag/birdName
+  var birdLabel = l.type === 'egg' ? (l.flock || 'Eggs') : (l.birdTag || l.birdName || (l.data && l.data.animal) || '?');
+  // Use ts as fallback for migrated entries that don't have timeISO
+  var timeStr = l.timeISO ? new Date(l.timeISO).toLocaleString() : (l.ts ? new Date(l.ts).toLocaleString() : '');
   var syncTag = l.status === 'pending'
     ? (l.synced ? " <span style='color:#888;font-size:11px;margin-left:4px;'>\u23F0 scheduled</span>" : " <span style='color:#c90;font-size:11px;margin-left:4px;'>\u23F0 scheduled \u00B7 \u23F3 not in farmOS yet</span>")
     : (l.synced ? " <span style='color:#3a7;font-size:11px;margin-left:4px;'>\u2713 synced</span>" : '');
-  var timeStr = l.timeISO ? new Date(l.timeISO).toLocaleString() : '';
   var summary = bd_logSummary(l);
   var birdNameHTML;
   if (l.type !== 'egg' && l.birdId) {
@@ -11768,6 +11772,7 @@ function goModule(id) {
   var cur = localStorage.getItem(MODULE_KEY);
   switchModule(id);
   resetNavStack(id, 'home');
+  _updateHeaderActiveState(null);
 }
 
 // ── SHARED SETTINGS ──
@@ -11825,11 +11830,11 @@ function renderDashboardScreen() {
   let recentItems = [];
   if (enabled.includes('goats')) {
     const goatLogs = JSON.parse(localStorage.getItem(LS.logs) || '[]').filter(l => l.status !== 'pending');
-    goatLogs.forEach(l => recentItems.push({ mod: 'goats', time: l.time, text: (l.animal||'Goat') + ' — ' + (l.type||'') }));
+    goatLogs.forEach(l => recentItems.push({ mod: 'goats', time: l.time, text: (l.goat||'Goat') + ' — ' + (l.type||''), id: l.id, goat: l.goat }));
   }
   if (enabled.includes('birds')) {
     const birdLogs = JSON.parse(localStorage.getItem(BD_LS.history) || '[]');
-    birdLogs.forEach(l => recentItems.push({ mod: 'birds', time: l.time || l.timestamp, text: (l.birdName || l.flockName || 'Bird') + ' — ' + (l.type||'') }));
+    birdLogs.forEach(l => recentItems.push({ mod: 'birds', time: l.timeISO || l.ts || l.time, text: (l.birdTag || l.birdName || (l.data && l.data.animal) || 'Bird') + ' — ' + (l.type||''), id: l.id }));
   }
   recentItems.sort((a,b) => new Date(b.time) - new Date(a.time));
   html += '<div class="box"><strong>🗒️ Recent Logs</strong>';
@@ -11837,11 +11842,15 @@ function renderDashboardScreen() {
     html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No logs yet.</p>';
   } else {
     const shownRecent = _dashRecentExpanded ? recentItems : recentItems.slice(0,5);
-    html += shownRecent.map(it => {
+    html += shownRecent.map(function(it) {
       const d = new Date(it.time);
       const dateStr = isNaN(d) ? '' : d.toLocaleDateString();
       const icon = it.mod === 'goats' ? '🐐' : '🐦';
-      return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + icon + ' ' + it.text + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
+      var clickFn = it.mod === 'goats'
+        ? "goModule('goats');show('history');"
+        : "goModule('birds');bd_show('history');";
+      return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="' + clickFn + '">' +
+        icon + ' ' + it.text + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
     }).join('');
     if (recentItems.length > 5) {
       html += '<p style="color:#3a7;font-size:12px;margin:6px 0 0;cursor:pointer;" onclick="toggleDashRecent()">' + (_dashRecentExpanded ? '▲ Show less' : '▼ See all ' + recentItems.length) + '</p>';
@@ -11927,6 +11936,7 @@ function openDashboard() {
   updateFarmNameSubtitle();
   renderDashboardScreen();
   pushNav('app', 'dashboard');
+  _updateHeaderActiveState('home');
 }
 
 function openSharedSettings() {
@@ -11944,6 +11954,7 @@ function openSharedSettings() {
   if (typeof bd_renderSettings === 'function') bd_renderSettings();
   renderSettings();
   pushNav('app', 'settings');
+  _updateHeaderActiveState('settings');
 }
 
 function settingsHome() {
@@ -11952,6 +11963,20 @@ function settingsHome() {
   const modId = moduleEnabled(active) ? active : enabledModules()[0].id;
   switchModule(modId);
   resetNavStack(modId, 'home');
+  _updateHeaderActiveState(null);
+}
+
+// Highlights the 🏠 or ⚙️ header button when those screens are active,
+// and clears module tab highlighting when neither is a module.
+function _updateHeaderActiveState(which) {
+  var homeBtn = document.querySelector('#moduleSwitcher').previousElementSibling;
+  var settingsBtn = document.querySelector('#moduleSwitcher').nextElementSibling;
+  if (homeBtn) homeBtn.classList.toggle('active', which === 'home');
+  if (settingsBtn) settingsBtn.classList.toggle('active', which === 'settings');
+  // Dim module tabs when Home or Settings is shown
+  document.querySelectorAll('.module-btn').forEach(function(b) {
+    if (b !== homeBtn && b !== settingsBtn) b.classList.toggle('dimmed', !!which);
+  });
 }
 
 function updateFarmNameSubtitle() {
