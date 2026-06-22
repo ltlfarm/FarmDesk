@@ -10674,19 +10674,33 @@ function bd_mapFarmOSTypeToLocal(farmosType, logName) {
   var n = (logName || '').trim();
   if (farmosType === 'log--observation') {
     if (n.indexOf('Weight - ') === 0) return 'weight';
-    if (n.indexOf('Death - ') === 0) return 'mortality';
+    if (n.indexOf('Death - ') === 0)  return 'mortality';
     return 'obs';
   }
   if (farmosType === 'log--medical') {
     if (n.indexOf('Proc - ') === 0) return 'proc';
     return 'med';
   }
-  return null; // unrecognized bundle/name combo — skip rather than guess
+  if (farmosType === 'log--harvest') return 'egg';
+  if (farmosType === 'log--birth')   return 'hatch';
+  if (farmosType === 'log--input') {
+    // Companion med deduct logs — skip, already covered by log--medical
+    if (n.indexOf('Administer ') === 0) return null;
+    // Feed logs
+    if (n.indexOf('Feed - ') === 0) return 'feed';
+    return null;
+  }
+  if (farmosType === 'log--activity') {
+    if (n.indexOf('Promoted to individual') === 0) return 'promote';
+    // Batch hatch in old format — skip (covered by log--birth)
+    return null;
+  }
+  return null;
 }
 
 async function bd_fetchLogs(token, cfg) {
   var h = bd_authHeaders(token);
-  var bundles = ['observation', 'medical'];
+  var bundles = ['observation', 'medical', 'harvest', 'birth', 'input'];
   var responses = await Promise.all(bundles.map(function(b) {
     return fetchWithTimeout(bd_apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: h });
   }));
@@ -10705,12 +10719,18 @@ async function bd_fetchLogs(token, cfg) {
   var fetchedLogs = [];
   rawLogs.forEach(function(log) {
     var localType = bd_mapFarmOSTypeToLocal(log.type, log.attributes.name);
-    if (!localType) return; // unrecognized — skip rather than import garbage
+    if (!localType) return;
 
     var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
-    var assetId = Array.isArray(assetRel) ? (assetRel.length ? assetRel[0].id : null) : (assetRel && assetRel.id);
-    var bird = assetId ? bd_birds.filter(function(b) { return b.uuid === assetId; })[0] : null;
-    if (!bird) return; // bird not in our local list (other module's animal, or not yet fetched) — skip
+    var assetIds = Array.isArray(assetRel) ? assetRel.map(function(a) { return a.id; }) : (assetRel ? [assetRel.id] : []);
+    // Find linked bird (asset--animal). Batch logs link to asset--product — no bird match, still import.
+    var bird = null;
+    for (var ai = 0; ai < assetIds.length; ai++) {
+      var b = bd_birds.filter(function(x) { return x.uuid === assetIds[ai]; })[0];
+      if (b) { bird = b; break; }
+    }
+    // Skip logs with no asset link AND no recognizable log name — true noise
+    if (!bird && ['obs','weight','med','proc','mortality'].indexOf(localType) >= 0) return;
 
     var imageRel = log.relationships && log.relationships.image && log.relationships.image.data;
     var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length-1].id : null) : (imageRel && imageRel.id);
@@ -10718,28 +10738,95 @@ async function bd_fetchLogs(token, cfg) {
 
     var ts = log.attributes.timestamp;
     var timeISO = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
-    var notesText = (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '';
+    var notesRaw = (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '';
+    var logName  = (log.attributes.name || '').trim();
 
-    fetchedLogs.push({
+    // Parse structured fields back from log name + notes
+    function noteVal(key) {
+      var m = notesRaw.match(new RegExp('^' + key + ': (.+)$', 'm'));
+      return m ? m[1].trim() : '';
+    }
+
+    var extra = {};
+
+    if (localType === 'egg') {
+      // Name: "Eggs - {flock} - {nestBox} - {date}"
+      var egParts = logName.replace(/^Eggs - /, '').split(' - ');
+      extra.flock   = egParts[0] || noteVal('Flock') || 'Eggs';
+      extra.nestBox = egParts[1] || noteVal('Nest') || '';
+      extra.eggCount = parseInt(noteVal('Count')) || 0;
+      // birdTag used as display label in history
+      extra.birdTag  = extra.flock;
+      extra.birdName = extra.flock;
+    } else if (localType === 'hatch') {
+      // Name: "Hatch - {label or species batch} x{count} (dam: {dam})"
+      // or old: "Hatch - {species} - {date}"
+      var htM = logName.match(/^Hatch - (.+?) x(\d+)/);
+      extra.hatchSpecies = htM ? htM[1] : (noteVal('Species') || '');
+      extra.hatchCount   = htM ? parseInt(htM[2]) : (parseInt(noteVal('Count')) || 0);
+      extra.hatchBreed   = noteVal('Breed');
+      extra.hatchParent  = noteVal('Parent') || (logName.match(/\(parent: (.+?)\)/) || [])[1] || '';
+      // Try to extract species/breed separately if label was used
+      if (!extra.hatchBreed) {
+        var specM = extra.hatchSpecies.match(/^(.+?) - (.+)$/);
+        if (specM) { extra.hatchBreed = ''; } // label format — leave as-is
+      }
+      extra.birdTag  = extra.hatchSpecies;
+      extra.birdName = extra.hatchSpecies;
+    } else if (localType === 'feed') {
+      // Name: "Feed - {feederName} - {date}"
+      var fdParts = logName.replace(/^Feed - /, '').split(' - ');
+      extra.feederName = fdParts[0] || noteVal('Feeder') || '';
+      extra.feedType   = noteVal('Feed');
+      var amtM = noteVal('Amount').match(/^([\d.]+)\s*(.*)$/);
+      extra.feedAmount = amtM ? amtM[1] : '';
+      extra.feedUnit   = amtM ? amtM[2] : '';
+      extra.birdTag    = extra.feederName;
+      extra.birdName   = extra.feederName;
+    } else if (localType === 'med') {
+      extra.med      = noteVal('Med')   || logName.replace(/^Administer /, '').split(':')[0];
+      var doseStr    = noteVal('Dose');
+      var doseM      = doseStr.match(/^([\d.]+)\s*(.*)$/);
+      extra.dose     = doseM ? doseM[1] : '';
+      extra.doseUnit = doseM ? doseM[2] : '';
+      extra.route    = noteVal('Route');
+      extra.birdTag  = bird ? (bird.tag || bird.name) : '';
+      extra.birdName = bird ? bird.name : '';
+    } else if (localType === 'weight') {
+      var wtStr = noteVal('Weight');
+      var wtM   = wtStr.match(/^([\d.]+)\s*(.*)$/);
+      extra.weight     = wtM ? wtM[1] : '';
+      extra.weightUnit = wtM ? wtM[2] : (logName.match(/\d+\s*(\w+)/) || [])[1] || '';
+      extra.birdTag    = bird ? (bird.tag || bird.name) : '';
+      extra.birdName   = bird ? bird.name : '';
+    } else if (localType === 'promote') {
+      extra.birdTag  = logName.replace('Promoted to individual: ', '');
+      extra.birdName = extra.birdTag;
+    } else {
+      extra.birdTag  = bird ? (bird.tag || bird.name) : '';
+      extra.birdName = bird ? bird.name : '';
+    }
+
+    var entry = Object.assign({
       id: log.id,
       type: localType,
-      birdId: bird.uuid,
-      birdTag: bird.tag || '',
-      birdName: bird.name || '',
+      birdId: bird ? bird.uuid : null,
       timestamp: ts || String(Math.floor(Date.now()/1000)),
       timeISO: timeISO,
-      notes: notesText,
+      notes: notesRaw,
+      logName: logName,
       status: log.attributes.status === 'pending' ? 'pending' : 'done',
-      logName: log.attributes.name || '',
       photoUrl: photoUrl,
       synced: true,
       farmosUUID: log.id,
       farmosBundle: log.type
-    });
+    }, extra);
+
+    fetchedLogs.push(entry);
   });
 
-  // Merge — farmOS is the source of truth for its own logs. A local copy
-  // with unsynced changes wins until it has been pushed (same rule GoatDesk uses).
+  // Merge — farmOS is source of truth for synced logs.
+  // Local unsynced entries (synced:false) always win.
   var localByFarmOSId = {};
   bd_history.forEach(function(l, i) { if (l.farmosUUID) localByFarmOSId[l.farmosUUID] = i; });
   var added = 0, updated = 0;
@@ -10749,6 +10836,7 @@ async function bd_fetchLogs(token, cfg) {
     else if (bd_history[idx].synced) { bd_history[idx] = l; updated++; }
   });
   if (added || updated) {
+    bd_history.sort(function(a, b) { return new Date(b.timeISO || b.ts || 0) - new Date(a.timeISO || a.ts || 0); });
     localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
     bd_renderHistory();
   }
@@ -11726,14 +11814,74 @@ function bd_setHistFilter(f, btn) {
   if (btn) btn.classList.add('active');
   bd_renderHistory();
 }
+// Builds synthetic log entries from local batches + pendingActions for
+// display in Bird History. These are read-only — managed from Batches list.
+function bd_batchHistoryLogs() {
+  var entries = [];
+  // Hatch events — one entry per bird batch
+  batches.forEach(function(b) {
+    if (b.module !== 'bird') return;
+    entries.push({
+      id: b.id + '_hatch',
+      type: 'hatch',
+      birdTag: b.label || b.species,
+      birdName: b.label || b.species,
+      hatchSpecies: b.species,
+      hatchCount: b.originalCount,
+      hatchBreed: b.breed || '',
+      hatchParent: (b.parentDams && b.parentDams[0]) || b.parentDam || '',
+      timeISO: b.bornDate,
+      timestamp: String(Math.floor(new Date(b.bornDate).getTime() / 1000)),
+      notes: b.notes || '',
+      status: 'done',
+      synced: b.synced,
+      _synthetic: true,
+      _batchId: b.id
+    });
+  });
+  // Sell / died / promote actions
+  pendingActions.forEach(function(a) {
+    if (['batchSell','batchDied','batchPromote'].indexOf(a.type) < 0) return;
+    var b = batches.find(function(x) { return x.id === a.payload.batchId; });
+    if (!b || b.module !== 'bird') return;
+    var label = b.label || b.species;
+    var typeMap = { batchSell: 'sale', batchDied: 'mortality', batchPromote: 'promote' };
+    entries.push({
+      id: a.id + '_action',
+      type: typeMap[a.type],
+      birdTag: label,
+      birdName: label,
+      timeISO: a.createdAt,
+      timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)),
+      notes: a.payload.notes || '',
+      status: 'done',
+      synced: a.synced,
+      _synthetic: true,
+      _batchId: b.id,
+      // Sell/died count for summary
+      _count: a.payload.count || 1,
+      _price: a.payload.pricePerHead || null
+    });
+  });
+  return entries;
+}
+
 function bd_renderHistory() {
   var list = document.getElementById('bd-history-list'); if (!list) return;
   var search = (document.getElementById('bd-hist-search') ? document.getElementById('bd-hist-search').value : '').toLowerCase().trim();
   var logs = bd_history.slice();
+  // Append batch-derived synthetic entries
+  var synthLogs = bd_batchHistoryLogs();
+  // Merge — skip synthetics whose farmosUUID already exists in bd_history
+  var existingIds = {};
+  logs.forEach(function(l) { if (l.farmosUUID) existingIds[l.farmosUUID] = true; });
+  synthLogs.forEach(function(s) { logs.push(s); });
+  // Sort combined list newest first
+  logs.sort(function(a, b) { return new Date(b.timeISO || b.ts || 0) - new Date(a.timeISO || a.ts || 0); });
   if (bd_histFilter === 'egg')       logs = logs.filter(function(l) { return l.type === 'egg'; });
-  if (bd_histFilter === 'health')    logs = logs.filter(function(l) { return ['weight','med','obs','proc','hatch'].indexOf(l.type) >= 0; });
+  if (bd_histFilter === 'health')    logs = logs.filter(function(l) { return ['weight','med','obs','proc','hatch','promote'].indexOf(l.type) >= 0; });
   if (bd_histFilter === 'feed')      logs = logs.filter(function(l) { return l.type === 'feed'; });
-  if (bd_histFilter === 'mortality') logs = logs.filter(function(l) { return l.type === 'mortality'; });
+  if (bd_histFilter === 'mortality') logs = logs.filter(function(l) { return l.type === 'mortality' || l.type === 'sale'; });
   if (bd_histFilter === 'scheduled') logs = logs.filter(function(l) { return l.status === 'pending'; });
   if (search) logs = logs.filter(function(l) { return (l.birdTag||'').toLowerCase().indexOf(search) >= 0 || (l.birdName||'').toLowerCase().indexOf(search) >= 0 || (l.flock||'').toLowerCase().indexOf(search) >= 0; });
   if (!logs.length) { list.innerHTML = "<div class='box' style='color:#888;text-align:center;'>No logs found.</div>"; return; }
@@ -11745,10 +11893,11 @@ function bd_logSummary(l) {
   if (l.type === 'med')       return l.med + ' ' + (l.dose||'') + (l.doseUnit||'') + ' ' + (l.route||'');
   if (l.type === 'obs')       return l.title || l.notes || (l.data && l.data.summary) || '';
   if (l.type === 'proc')      return l.proc || '';
-  if (l.type === 'mortality') return 'Cause: ' + l.cause;
-  if (l.type === 'hatch')     return (l.hatchCount || (l.data && l.data.count) || '') + ' ' + (l.hatchSpecies || (l.data && l.data.animal) || '') + ' hatched' + (l.hatchParent ? ' (parent: ' + l.hatchParent + ')' : '');
+  if (l.type === 'mortality') return l._synthetic ? 'Batch: ' + (l._count||1) + ' died' : ('Cause: ' + l.cause);
+  if (l.type === 'hatch')     return (l.hatchCount || (l.data && l.data.count) || '') + ' ' + (l.hatchSpecies || (l.data && l.data.animal) || '') + ' hatched' + (l.hatchBreed ? ' · ' + l.hatchBreed : '') + (l.hatchParent ? ' (mother: ' + l.hatchParent + ')' : '');
   if (l.type === 'feed')      return (l.feederName||'') + ': ' + (l.feedAmount||'') + ' ' + (l.feedUnit||'') + ' ' + (l.feedType||'');
-  if (l.type === 'sale')      return l.logName || (l.data && l.data.summary) || 'Batch sale';
+  if (l.type === 'sale')      return l._synthetic ? 'Batch: ' + (l._count||1) + ' sold' + (l._price ? ' @ $' + l._price + '/head' : '') : (l.logName || (l.data && l.data.summary) || 'Batch sale');
+  if (l.type === 'promote')   return l._synthetic ? 'Promoted 1 from batch to individual' : (l.logName || 'Promoted to individual');
   return l.notes || (l.data && l.data.summary) || '';
 }
 function bd_makeLogEl(l) {
@@ -11785,14 +11934,29 @@ function bd_makeLogEl(l) {
   d.onclick = function(e) { if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'IMG') return; bd_toggleLogDrawer(d); };
   var actDiv = d.querySelector('#bd-log-actions-' + l.id);
   if (actDiv) {
-    if (l.status === 'pending') {
-      var logItBtn = document.createElement('button'); logItBtn.textContent = '📋 Log It'; logItBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#1b5e8e;'; logItBtn.onclick = function(e) { e.stopPropagation(); bd_openTaskForm(l.id); };
-      actDiv.appendChild(logItBtn);
+    if (l._synthetic) {
+      // Batch-derived entries — managed from the Batches list, not editable here
+      var synthNote = document.createElement('span');
+      synthNote.style.cssText = 'font-size:12px;color:#888;padding:4px 0;';
+      synthNote.textContent = '📦 From batch';
+      actDiv.appendChild(synthNote);
+      if (l._batchId) {
+        var vbBtn = document.createElement('button');
+        vbBtn.textContent = 'View Batch';
+        vbBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#2a4a6a;';
+        vbBtn.onclick = function(e) { e.stopPropagation(); openBatchEditModal(l._batchId); };
+        actDiv.appendChild(vbBtn);
+      }
+    } else {
+      if (l.status === 'pending') {
+        var logItBtn = document.createElement('button'); logItBtn.textContent = '📋 Log It'; logItBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#1b5e8e;'; logItBtn.onclick = function(e) { e.stopPropagation(); bd_openTaskForm(l.id); };
+        actDiv.appendChild(logItBtn);
+      }
+      var editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;'; editBtn.onclick = function(e) { e.stopPropagation(); bd_editLog(l.id); };
+      var cloneBtn = document.createElement('button'); cloneBtn.textContent = 'Clone'; cloneBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#4a3a7a;'; cloneBtn.onclick = function(e) { e.stopPropagation(); bd_cloneLog(l.id); };
+      var delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#8b0000;'; delBtn.onclick = function(e) { e.stopPropagation(); bd_deleteLog(l.id); };
+      actDiv.appendChild(editBtn); actDiv.appendChild(cloneBtn); actDiv.appendChild(delBtn);
     }
-    var editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;'; editBtn.onclick = function(e) { e.stopPropagation(); bd_editLog(l.id); };
-    var cloneBtn = document.createElement('button'); cloneBtn.textContent = 'Clone'; cloneBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#4a3a7a;'; cloneBtn.onclick = function(e) { e.stopPropagation(); bd_cloneLog(l.id); };
-    var delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#8b0000;'; delBtn.onclick = function(e) { e.stopPropagation(); bd_deleteLog(l.id); };
-    actDiv.appendChild(editBtn); actDiv.appendChild(cloneBtn); actDiv.appendChild(delBtn);
   }
   return d;
 }
