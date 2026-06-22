@@ -12310,13 +12310,14 @@ function setModuleEnabled(id, on) {
   const cfg = JSON.parse(localStorage.getItem(MODULES_CFG) || '{}');
   if (!on && enabledModules().length === 1 && enabledModules()[0].id === id) {
     showToast('At least one module must stay on');
-    if (typeof renderModuleToggles === 'function') renderModuleToggles(); // reset checkbox
+    if (typeof renderModuleToggles === 'function') renderModuleToggles();
     return;
   }
   cfg[id] = !!on;
   localStorage.setItem(MODULES_CFG, JSON.stringify(cfg));
-  localStorage.setItem('farmdesk_modules_touched', '1'); // manual change — stop applying remote config pulls
+  localStorage.setItem('farmdesk_modules_touched', '1');
   renderModuleBar();
+  if (typeof renderModuleToggles === 'function') renderModuleToggles(); // update toggle button immediately
   // If the active module was just turned off, fall back to the first enabled one
   const active = localStorage.getItem(MODULE_KEY) || 'goats';
   if (!moduleEnabled(active)) switchModule(enabledModules()[0].id);
@@ -12327,7 +12328,7 @@ function renderModuleBar() {
   if (!bar) return;
   const enabled = enabledModules();
   const active  = localStorage.getItem(MODULE_KEY) || 'goats';
-  bar.style.display = enabled.length > 1 ? '' : 'none'; // hide bar if only one module
+  bar.style.display = ''; // always show — hiding it traps the user with no nav to Settings
   bar.innerHTML = enabled.map(m =>
     `<button class="module-btn${m.id === active ? ' active' : ''}" onclick="goModule('${m.id}')">${m.label}</button>`
   ).join('');
