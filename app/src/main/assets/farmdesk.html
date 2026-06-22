@@ -1435,7 +1435,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782113047"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782114047"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -10304,6 +10304,25 @@ function bd_farmosLogType(t) {
 // product (cacheKey set, name reused). Batches use forceCreate — each
 // hatch/birth event needs its own distinct Product even if two happen to
 // share a name (e.g. two hatches same day), never merged together.
+// Find or create a product_type taxonomy term for batch tracking.
+// Tries "Livestock" first, falls back to first available term, last
+// resort creates "Livestock". UUID cached per session.
+async function getOrCreateProductTypeUUID(token) {
+  var LS_KEY = 'farmdesk_productTypeUUID';
+  var cached = localStorage.getItem(LS_KEY);
+  if (cached) return cached;
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  try {
+    var r = await fetchWithTimeout(apiUrl('/api/taxonomy_term/product_type?filter[name]=Livestock&page[limit]=1'), { headers: headers });
+    if (r.ok) { var d = await r.json(); if (d.data && d.data[0]) { localStorage.setItem(LS_KEY, d.data[0].id); return d.data[0].id; } }
+    var r2 = await fetchWithTimeout(apiUrl('/api/taxonomy_term/product_type?page[limit]=1'), { headers: headers });
+    if (r2.ok) { var d2 = await r2.json(); if (d2.data && d2.data[0]) { localStorage.setItem(LS_KEY, d2.data[0].id); return d2.data[0].id; } }
+    var res = await fetchWithTimeout(apiUrl('/api/taxonomy_term/product_type'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'taxonomy_term--product_type', attributes: { name: 'Livestock' } } }) });
+    if (res.ok) { var rd = await res.json(); var id = rd.data && rd.data.id; if (id) { localStorage.setItem(LS_KEY, id); return id; } }
+  } catch(e) { /* non-fatal */ }
+  return null;
+}
+
 async function getOrCreateProductUUID(name, token, options) {
   options = options || {};
   if (options.cacheKey) {
@@ -10321,9 +10340,9 @@ async function getOrCreateProductUUID(name, token, options) {
     } catch(e) { /* fall through to create */ }
   }
   try {
+    var prodTypeId = await getOrCreateProductTypeUUID(token);
     var payload = { data: { type: 'asset--product', attributes: { name: name } } };
-    var payload = { data: { type: 'asset--product', attributes: { name: name } } };
-    var res = await fetchWithTimeout(apiUrl('/api/asset/product'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
+    if (prodTypeId) payload.data.relationships = { product_type: { data: { type: 'taxonomy_term--product_type', id: prodTypeId } } };
     if (!res.ok) {
       var errJson = await res.json().catch(function() { return null; });
       var errMsg = (errJson && errJson.errors && errJson.errors[0]) ? (errJson.errors[0].title || '') + (errJson.errors[0].detail ? ': ' + errJson.errors[0].detail : '') : ('HTTP ' + res.status);
