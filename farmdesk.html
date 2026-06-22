@@ -2295,7 +2295,7 @@ function orientedCanvas(img, rawDataUrl, maxW, callback) {
 async function keepOnlyNewestImage(entityType, bundle, uuid, fileId, token) {
   if (!fileId) return;
   try {
-    await fetch(apiUrl(`/api/${entityType}/${bundle}/${uuid}`), {
+    await fetchWithTimeout(apiUrl(`/api/${entityType}/${bundle}/${uuid}`), {
       method: "PATCH",
       headers: {
         "Content-Type":  "application/vnd.api+json",
@@ -4102,7 +4102,7 @@ async function setAnimalFlag(name, flag, on) {
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Not connected to farmOS'); return; }
   try {
     var token = await getToken(cfg);
-    var res = await fetch(apiUrl('/api/asset/animal/' + uuid), {
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify({ data: { type: 'asset--animal', id: uuid, attributes: { flag: flags } } })
@@ -4197,7 +4197,7 @@ async function priceFieldsSupported(token) {
   const cached = localStorage.getItem(PRICE_FIELDS_KEY);
   if (cached !== null) return cached === '1';
   try {
-    const res = await fetch(apiUrl('/api/schema/quantity/standard'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+    const res = await fetchWithTimeout(apiUrl('/api/schema/quantity/standard'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
     if (res.ok) {
       const schema = await res.json();
       const supported = !!(schema && schema.properties && schema.properties.unit_price && schema.properties.total_price);
@@ -4223,7 +4223,7 @@ async function buildPriceQuantityRef(unitPrice, token) {
       attrs.unit_price  = { numerator: String(priceCents), denominator: '100' };
       attrs.total_price = { numerator: String(priceCents), denominator: '100' };
     }
-    const qRes = await fetch(apiUrl('/api/quantity/standard'), {
+    const qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify({ data: { type: 'quantity--standard', attributes: attrs } })
@@ -4303,7 +4303,8 @@ function createBatch(module, species, breed, count, parentDam, parentSire, group
 // quantity + birth/hatch log to farmOS. Called as an extra step from both
 // modules' existing sync flows, same pattern Goat sync already uses to
 // also sync Stock.
-async function syncBatchesToFarmOS(token) {
+async function syncBatchesToFarmOS(token, logFn) {
+  var ok = 0, fail = 0;
   for (var i = 0; i < batches.length; i++) {
     var b = batches[i];
     if (b.synced) continue;
@@ -4313,14 +4314,14 @@ async function syncBatchesToFarmOS(token) {
         b.productUUID = await getOrCreateProductUUID(productName, token, { forceCreate: true });
         saveBatches();
       }
-      if (!b.productUUID) continue; // couldn't create — retry next sync
+      if (!b.productUUID) { fail++; if (logFn) logFn('⚠️ Batch (' + b.species + '): could not create product — retrying next sync\n'); continue; }
       if (!b.logUUID) {
         var qPayload = { data: {
           type: 'quantity--standard',
           attributes: { measure: 'count', value: { numerator: String(b.originalCount), denominator: '1' }, inventory_adjustment: 'increment' },
           relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } }
         } };
-        var qRes = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(qPayload) });
+        var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(qPayload) });
         if (qRes.ok) {
           var qData = await qRes.json();
           var qUUID = qData?.data?.id;
@@ -4336,17 +4337,26 @@ async function syncBatchesToFarmOS(token) {
           // Link the dam via the mother relationship if she's a known, synced animal
           var damUUID = b.module === 'goat' ? animalUUIDs[b.parentDam] : (bd_birds.find(function(x) { return x.name === b.parentDam || x.tag === b.parentDam; }) || {}).uuid;
           if (damUUID) logRelationships.mother = { data: { type: 'asset--animal', id: damUUID } };
-          var logRes = await fetch(apiUrl('/api/log/birth'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify({ data: { type: 'log--birth', attributes: logAttrs, relationships: logRelationships } }) });
+          var logRes = await fetchWithTimeout(apiUrl('/api/log/birth'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify({ data: { type: 'log--birth', attributes: logAttrs, relationships: logRelationships } }) });
           if (logRes.ok) {
             var logData = await logRes.json();
             b.logUUID = logData?.data?.id;
+          } else {
+            if (logFn) logFn('⚠️ Batch (' + b.species + '): birth/hatch log failed — HTTP ' + logRes.status + '\n');
           }
+        } else {
+          if (logFn) logFn('⚠️ Batch (' + b.species + '): inventory quantity failed — HTTP ' + qRes.status + '\n');
         }
       }
-      if (b.productUUID && b.logUUID) b.synced = true;
+      if (b.productUUID && b.logUUID) { b.synced = true; ok++; if (logFn) logFn('✅ Batch (' + b.species + ', ' + b.originalCount + ') synced\n'); }
+      else fail++;
       saveBatches();
-    } catch(e) { /* best-effort — retried next sync */ }
+    } catch(e) {
+      fail++;
+      if (logFn) logFn('⚠️ Batch (' + b.species + ') error: ' + e.message + '\n');
+    }
   }
+  return { ok: ok, fail: fail };
 }
 
 // One quantity carries both the inventory decrement AND the sale price
@@ -4362,7 +4372,7 @@ async function buildBatchSaleQuantityRef(count, unitPrice, productUUID, token) {
       attrs.total_price = { numerator: String(totalCents), denominator: '100' };
     }
     const payload = { data: { type: 'quantity--standard', attributes: attrs, relationships: { inventory_asset: { data: { type: 'asset--product', id: productUUID } } } } };
-    const res = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
+    const res = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
     if (!res.ok) return null;
     const data = await res.json();
     const uuid = data?.data?.id;
@@ -4511,7 +4521,7 @@ async function createPurchaseLog(animalName, details) {
       },
       relationships: relationships
     }};
-    var res = await fetch(apiUrl('/api/log/purchase'), {
+    var res = await fetchWithTimeout(apiUrl('/api/log/purchase'), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify(payload)
@@ -4547,12 +4557,12 @@ async function archiveAnimalWithLog(animalName, logBundle, details) {
       attributes: attrs,
       relationships: relationships
     }};
-    var res = await fetch(apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    var res = await fetchWithTimeout(apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
     if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
     // Archive the animal asset — farmOS v4+ uses a boolean 'archived' attribute
     // (status attribute was removed from assets entirely in v4)
     var archivePayload = { data: { type: 'asset--animal', id: uuid, attributes: { archived: true } } };
-    var archiveRes = await fetch(apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: headers, body: JSON.stringify(archivePayload) });
+    var archiveRes = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: headers, body: JSON.stringify(archivePayload) });
     if (!archiveRes.ok) { showToast('⚠️ Log saved but archive failed — remove manually in farmOS'); return false; }
     return true;
   } catch(e) {
@@ -4668,7 +4678,7 @@ async function breedFieldSupported(token) {
   const cached = localStorage.getItem(BREED_FIELD_KEY);
   if (cached !== null) return cached === '1';
   try {
-    const res = await fetch(apiUrl('/api/schema/asset/animal'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+    const res = await fetchWithTimeout(apiUrl('/api/schema/asset/animal'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
     if (res.ok) {
       const schema = await res.json();
       const supported = !!(schema && schema.properties && schema.properties.breed);
@@ -4693,7 +4703,7 @@ async function ensureAnimalTypeUUID(typeName, token) {
     if (d.data && d.data[0]) return d.data[0].id;
   }
   var payload = { data: { type: 'taxonomy_term--animal_type', attributes: { name: typeName } } };
-  var res = await fetch(apiUrl('/api/taxonomy_term/animal_type'), {
+  var res = await fetchWithTimeout(apiUrl('/api/taxonomy_term/animal_type'), {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
     body: JSON.stringify(payload)
@@ -4713,7 +4723,7 @@ async function getOrCreateGoatTypeUUID(token) {
   var cached = localStorage.getItem(LS.goatTypeUUID);
   if (cached) return cached;
   try {
-    var r = await fetch(apiUrl('/api/taxonomy_term/animal_type?page[limit]=100'), {
+    var r = await fetchWithTimeout(apiUrl('/api/taxonomy_term/animal_type?page[limit]=100'), {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
     });
     if (r.ok) {
@@ -4759,7 +4769,7 @@ async function syncBirthKidAssets(l, logUUID, token, headers, logEl) {
         },
         ...(goatTypeUUID ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeUUID } } } } : {})
       }};
-      const kidRes = await fetch(apiUrl('/api/asset/animal'), { method: 'POST', headers, body: JSON.stringify(kidPayload) });
+      const kidRes = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers, body: JSON.stringify(kidPayload) });
       if (kidRes.ok) {
         const kidData = await kidRes.json();
         const kidUUID = kidData?.data?.id;
@@ -4795,7 +4805,7 @@ async function syncBirthKidAssets(l, logUUID, token, headers, logEl) {
           asset: { data: kidUUIDs.map(id => ({ type: 'asset--animal', id })) }
         }
       }};
-      const patchRes = await fetch(apiUrl('/api/log/birth/' + logUUID), { method: 'PATCH', headers, body: JSON.stringify(patchPayload) });
+      const patchRes = await fetchWithTimeout(apiUrl('/api/log/birth/' + logUUID), { method: 'PATCH', headers, body: JSON.stringify(patchPayload) });
       if (!patchRes.ok) logEl.textContent += `  ⚠️ Birth log link failed: ${patchRes.status}\n`;
     } catch(pe) {
       logEl.textContent += `  ⚠️ Birth log link error: ${pe.message}\n`;
@@ -4818,7 +4828,7 @@ async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
       id: animalUUID,
       relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } }
     }};
-    var res = await fetch(apiUrl('/api/asset/animal/' + animalUUID), {
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + animalUUID), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify(payload)
@@ -4893,7 +4903,7 @@ async function ensureGoatGroupUUID(groupName, token) {
     }
   }
   var payload = { data: { type: 'asset--group', attributes: { name: groupName } } };
-  var res = await fetch(apiUrl('/api/asset/group'), {
+  var res = await fetchWithTimeout(apiUrl('/api/asset/group'), {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
     body: JSON.stringify(payload)
@@ -4929,7 +4939,7 @@ async function pushGoatGroupAssign(animalName, groupName) {
         group: { data: groupId ? [{ type: 'asset--group', id: groupId }] : [] }
       }
     }};
-    var res = await fetch(apiUrl('/api/log/activity'), {
+    var res = await fetchWithTimeout(apiUrl('/api/log/activity'), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify(payload)
@@ -5017,7 +5027,7 @@ async function pushMoveLog(payload, token) {
       location: { data: [{ type: payload.locationType === 'structure' ? 'asset--structure' : 'asset--land', id: payload.locationUuid }] }
     }
   }};
-  var res = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(movedPayload) });
+  var res = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(movedPayload) });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   if (missingUUID.length) throw new Error('Moved ' + assetRelationships.length + '/' + payload.animalNames.length + ' — skipped (not synced): ' + missingUUID.join(', '));
 }
@@ -5191,14 +5201,19 @@ async function pushAnimalProfilePhoto(name, dataUrl) {
   try {
     var token = await getToken(cfg);
     var blob = await (await fetch(dataUrl)).blob();
-    var fd = new FormData();
-    fd.append('file', blob, 'goat-' + uuid + '.jpg');
-    var res = await fetch(apiUrl('/api/asset/animal/' + uuid + '/image'), {
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid + '/image'), {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token },
-      body: fd
+      headers: {
+        'Content-Type':        'application/octet-stream',
+        'Content-Disposition': 'file; filename="goat-' + uuid + '.jpg"',
+        'Accept':              'application/vnd.api+json',
+        'Authorization':       'Bearer ' + token
+      },
+      body: blob
     });
     if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status); }
+    var fileData = await res.json().catch(function() { return null; });
+    await keepOnlyNewestImage('asset', 'animal', uuid, fileData?.data?.id, token);
     return true;
   } catch(e) {
     showToast('⚠️ Photo upload failed: ' + e.message);
@@ -5234,7 +5249,7 @@ async function pushAnimalProfileCore(name, fields) {
       if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
     }
     var payload = { data: { type: 'asset--animal', id: uuid, attributes: attrs } };
-    var res = await fetch(apiUrl('/api/asset/animal/' + uuid), {
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify(payload)
@@ -6405,6 +6420,23 @@ function apiUrl(path) {
   return window._useProxy ? "/proxy" + path : (JSON.parse(localStorage.getItem(LS.cfg) || "{}").url || "") + path;
 }
 
+// ===== SHARED: fetch with a hard timeout =====
+// Nothing in this app put a timeout on its farmOS requests — a slow or
+// unresponsive server just hangs the awaiting code forever with zero
+// feedback (looks identical to a frozen app). This aborts after 20s so
+// every sync step always finishes one way or another, success or error.
+function fetchWithTimeout(url, options, timeoutMs) {
+  timeoutMs = timeoutMs || 20000;
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
+  var opts = Object.assign({}, options || {}, { signal: controller.signal });
+  return fetch(url, opts).then(function(res) { clearTimeout(timer); return res; }, function(err) {
+    clearTimeout(timer);
+    if (err && err.name === 'AbortError') throw new Error('Timed out after ' + (timeoutMs/1000) + 's — no response from farmOS');
+    throw err;
+  });
+}
+
 
 // ===== SHARED MODULE: logout =====
 function logout() {
@@ -6535,7 +6567,7 @@ async function testFarmOS() {
   el.textContent = "Connecting...";
   try {
     const token = await getToken(cfg);
-    const res = await fetch(apiUrl("/api"), {
+    const res = await fetchWithTimeout(apiUrl("/api"), {
       headers: { "Authorization": "Bearer " + token }
     });
     if (res.ok) {
@@ -6637,7 +6669,7 @@ async function pushConfig(token) {
   if (configLogUUID) {
     // PATCH existing config log
     const payload = buildConfigPayload(configLogUUID);
-    const res = await fetch(apiUrl("/api/log/activity/" + configLogUUID), {
+    const res = await fetchWithTimeout(apiUrl("/api/log/activity/" + configLogUUID), {
       method: "PATCH", headers, body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -6653,7 +6685,7 @@ async function pushConfig(token) {
   if (!configLogUUID) {
     // POST new config log
     const payload = buildConfigPayload(null);
-    const res = await fetch(apiUrl("/api/log/activity"), {
+    const res = await fetchWithTimeout(apiUrl("/api/log/activity"), {
       method: "POST", headers, body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error("Config create failed: " + res.status);
@@ -6770,7 +6802,7 @@ async function fetchAnimalUUIDs(silent = false) {
     // Fetches allowed flag values from farmOS JSON Schema so the app works
     // on any instance regardless of what custom flags are configured.
     try {
-      const schemaRes = await fetch(apiUrl('/api/schema/asset/animal'), { headers: authHeaders });
+      const schemaRes = await fetchWithTimeout(apiUrl('/api/schema/asset/animal'), { headers: authHeaders });
       if (schemaRes.ok) {
         const schema = await schemaRes.json();
         const flagProp = schema?.properties?.flag || schema?.definitions?.flag;
@@ -6926,8 +6958,8 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) el.textContent = "Fetching locations...";
     try {
       const [landRes, structRes] = await Promise.all([
-        fetch(apiUrl('/api/asset/land?page[limit]=100'), { headers: authHeaders }),
-        fetch(apiUrl('/api/asset/structure?page[limit]=100'), { headers: authHeaders })
+        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100'), { headers: authHeaders })
       ]);
       const newLocations = {};
       if (landRes.ok) {
@@ -6960,7 +6992,7 @@ async function fetchAnimalUUIDs(silent = false) {
       // bundle — movement is a behavior (is_movement:true) on a regular
       // log, same as group assignment uses log--activity + a boolean flag.
       // Sorted newest-first; first occurrence per animal wins.
-      const moveRes = await fetch(apiUrl('/api/log/activity?filter[is_movement]=1&sort=-timestamp&page[limit]=100&include=asset,location'), { headers: authHeaders });
+      const moveRes = await fetchWithTimeout(apiUrl('/api/log/activity?filter[is_movement]=1&sort=-timestamp&page[limit]=100&include=asset,location'), { headers: authHeaders });
       if (moveRes.ok) {
         const moveData = await moveRes.json();
         const assetNames = {}; // uuid -> name, from included asset--animal records
@@ -6997,11 +7029,11 @@ async function fetchAnimalUUIDs(silent = false) {
 
     // include=image fetches the image file data alongside each log in one request
     const [actRes, obsRes, medRes, maintRes, birthRes] = await Promise.all([
-      fetch(apiUrl("/api/log/activity?page[limit]=30&sort=-timestamp&include=image"),    { headers: authHeaders }),
-      fetch(apiUrl("/api/log/observation?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
-      fetch(apiUrl("/api/log/medical?page[limit]=30&sort=-timestamp&include=image"),     { headers: authHeaders }),
-      fetch(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
-      fetch(apiUrl("/api/log/birth?page[limit]=30&sort=-timestamp&include=image"),       { headers: authHeaders })
+      fetchWithTimeout(apiUrl("/api/log/activity?page[limit]=30&sort=-timestamp&include=image"),    { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/observation?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/medical?page[limit]=30&sort=-timestamp&include=image"),     { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/birth?page[limit]=30&sort=-timestamp&include=image"),       { headers: authHeaders })
     ]);
 
     const allLogs = [];
@@ -7028,7 +7060,7 @@ async function fetchAnimalUUIDs(silent = false) {
     // Try to fetch user list for ID->name mapping
     const userNames = {};
     try {
-      const userRes = await fetch(apiUrl("/api/user/user?page[limit]=50"), { headers: authHeaders });
+      const userRes = await fetchWithTimeout(apiUrl("/api/user/user?page[limit]=50"), { headers: authHeaders });
       if (userRes.ok) {
         const userData = await userRes.json();
         (userData.data || []).forEach(u => {
@@ -7041,7 +7073,7 @@ async function fetchAnimalUUIDs(silent = false) {
 
     if (Object.keys(userNames).length === 0) {
       try {
-        const meRes = await fetch(apiUrl("/api/user/user?filter[name]=" + encodeURIComponent(cfg.user) + "&page[limit]=1"), { headers: authHeaders });
+        const meRes = await fetchWithTimeout(apiUrl("/api/user/user?filter[name]=" + encodeURIComponent(cfg.user) + "&page[limit]=1"), { headers: authHeaders });
         if (meRes.ok) {
           const meData = await meRes.json();
           const me = (meData.data || [])[0];
@@ -7372,7 +7404,7 @@ async function pushPurchaseAnimal(payload, token) {
       ),
       ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
     }};
-    var assetRes = await fetch(apiUrl('/api/asset/animal'), { method: 'POST', headers: headers, body: JSON.stringify(assetPayload) });
+    var assetRes = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers: headers, body: JSON.stringify(assetPayload) });
     if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
     var assetData = await assetRes.json();
     uuid = assetData.data && assetData.data.id;
@@ -7445,27 +7477,27 @@ async function processPendingBatchActions(token, logFn) {
         if (!qRef) throw new Error('Could not create inventory quantity');
         var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] } };
         var attrs = { name: 'Sale: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
-        var res = await fetch(apiUrl('/api/log/sale'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: rel } }) });
+        var res = await fetchWithTimeout(apiUrl('/api/log/sale'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: rel } }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
       } else if (a.type === 'batchDied') {
         var qPayload = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(a.payload.count), denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
-        var qRes = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload) });
+        var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload) });
         if (!qRes.ok) throw new Error('HTTP ' + qRes.status);
         var qData = await qRes.json();
         var qUUID = qData?.data?.id, qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
         var attrs2 = { name: 'Death: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
         var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
-        var res2 = await fetch(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs2, relationships: rel2 } }) });
+        var res2 = await fetchWithTimeout(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs2, relationships: rel2 } }) });
         if (!res2.ok) throw new Error('HTTP ' + res2.status);
       } else if (a.type === 'batchPromote') {
         var qPayload3 = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: '1', denominator: '1' }, inventory_adjustment: 'decrement' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
-        var qRes3 = await fetch(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload3) });
+        var qRes3 = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayload3) });
         if (!qRes3.ok) throw new Error('HTTP ' + qRes3.status);
         var qData3 = await qRes3.json();
         var qUUID3 = qData3?.data?.id, qRevId3 = qData3?.data?.attributes?.drupal_internal__revision_id;
         var attrs3 = { name: 'Promoted to individual: ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: 'One animal pulled from batch to be tracked individually', format: 'default' } };
         var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] } };
-        var res3 = await fetch(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
+        var res3 = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
         if (!res3.ok) throw new Error('HTTP ' + res3.status);
       }
       a.synced = true; a.lastError = null; ok++;
@@ -7611,7 +7643,7 @@ async function syncToFarmOS() {
               if (!photoData) throw new Error("photo not found in local store");
               const photoRes = await fetch(photoData);
               const blob = await photoRes.blob();
-              const photoUpload = await fetch(apiUrl(`/api/log/${farmosType}/${l.id}/image`), {
+              const photoUpload = await fetchWithTimeout(apiUrl(`/api/log/${farmosType}/${l.id}/image`), {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
@@ -7634,7 +7666,7 @@ async function syncToFarmOS() {
           // Push a newly-attached file too (added/replaced via edit) — same as new logs
           if (l.data?.fileAttach && l.data.fileAttach._blob) {
             try {
-              const fileUpload = await fetch(apiUrl(`/api/log/${farmosType}/${l.id}/file`), {
+              const fileUpload = await fetchWithTimeout(apiUrl(`/api/log/${farmosType}/${l.id}/file`), {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
@@ -7711,7 +7743,8 @@ async function syncToFarmOS() {
   if (unsyncedBatches.length > 0) {
     logEl.textContent += '\nAlso pushing ' + unsyncedBatches.length + ' batch(es)...\n';
     try {
-      await syncBatchesToFarmOS(token);
+      const batchResult = await syncBatchesToFarmOS(token, function(msg) { logEl.textContent += msg; });
+      logEl.textContent += 'Batches: ' + batchResult.ok + ' ok, ' + batchResult.fail + ' failed.\n';
     } catch(e) {
       logEl.textContent += '⚠️ Batch sync error: ' + e.message + '\n';
     }
@@ -7741,6 +7774,8 @@ async function syncToFarmOS() {
       + batches.filter(b => !b.synced).length
       + pendingActions.filter(p => !p.synced).length;
   }
+  logEl.textContent += '\n✅ Sync complete.\n';
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 function toggleSelectAll(checked) {
@@ -8298,8 +8333,8 @@ async function sd_loadTaxonomy(h) {
       return 'count';
     };
     const [catRes, unitRes] = await Promise.all([
-      fetch(apiUrl('/api/taxonomy_term/material_type?page[limit]=50'), { headers: h }),
-      fetch(apiUrl('/api/taxonomy_term/unit?page[limit]=50'),          { headers: h })
+      fetchWithTimeout(apiUrl('/api/taxonomy_term/material_type?page[limit]=50'), { headers: h }),
+      fetchWithTimeout(apiUrl('/api/taxonomy_term/unit?page[limit]=50'),          { headers: h })
     ]);
     const tax = { cats: [], units: [] };
     if (catRes.ok) {
@@ -9239,7 +9274,7 @@ async function sd_syncToFarmOS() {
             }
           }
         };
-        const res = await fetch(apiUrl('/api/asset/material'), {
+        const res = await fetchWithTimeout(apiUrl('/api/asset/material'), {
           method: 'POST', headers: h, body: JSON.stringify(payload)
         });
         if (!res.ok) {
@@ -9275,7 +9310,7 @@ async function sd_syncToFarmOS() {
           if (!photoData) throw new Error('photo not found in local store');
           const photoRes  = await fetch(photoData);
           const blob      = await photoRes.blob();
-          const uploadRes = await fetch(apiUrl(`/api/asset/material/${item.uuid}/image`), {
+          const uploadRes = await fetchWithTimeout(apiUrl(`/api/asset/material/${item.uuid}/image`), {
             method:  'POST',
             headers: {
               'Content-Type':        'application/octet-stream',
@@ -9305,7 +9340,7 @@ async function sd_syncToFarmOS() {
             }
           }
         };
-        const pRes = await fetch(apiUrl(`/api/asset/material/${item.uuid}`), {
+        const pRes = await fetchWithTimeout(apiUrl(`/api/asset/material/${item.uuid}`), {
           method: 'PATCH', headers: h, body: JSON.stringify(patchBody)
         });
         if (!pRes.ok) {
@@ -9335,7 +9370,7 @@ async function sd_syncToFarmOS() {
             }
           }
         };
-        const qRes = await fetch(apiUrl('/api/quantity/standard'), {
+        const qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
           method: 'POST', headers: h, body: JSON.stringify(qBody)
         });
         if (!qRes.ok) {
@@ -9377,7 +9412,7 @@ async function sd_syncToFarmOS() {
             }
           }
         };
-        const lRes = await fetch(apiUrl('/api/log/' + logBundle), {
+        const lRes = await fetchWithTimeout(apiUrl('/api/log/' + logBundle), {
           method: 'POST', headers: h, body: JSON.stringify(lBody)
         });
         if (!lRes.ok) {
@@ -9902,7 +9937,7 @@ async function bd_fetchAssets() {
   try {
     var token = await bd_getToken(cfg);
     var h = bd_authHeaders(token);
-    var res = await fetch(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
+    var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
     var typeMap = {}; var groupMap = {}; var fileMap = {};
@@ -9951,7 +9986,7 @@ async function bd_fetchAssets() {
       }
       return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, synced: true };
     });
-    var resEq = await fetch(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
+    var resEq = await fetchWithTimeout(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
     if (resEq.ok) {
       var deq = await resEq.json();
@@ -10037,7 +10072,7 @@ async function bd_fetchLogs(token, cfg) {
   var h = bd_authHeaders(token);
   var bundles = ['observation', 'medical'];
   var responses = await Promise.all(bundles.map(function(b) {
-    return fetch(bd_apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: h });
+    return fetchWithTimeout(bd_apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: h });
   }));
   var imageUrlMap = {};
   var rawLogs = [];
@@ -10186,7 +10221,7 @@ async function bd_syncToFarmOS() {
         var linkPayload = { data: { type: 'log--' + hBundle, id: hLog.farmosUUID, relationships: {
           asset: { data: chicks.map(function(c) { return { type: 'asset--animal', id: c.uuid }; }) }
         } } };
-        var linkRes = await fetch(bd_apiUrl('/api/log/' + hBundle + '/' + hLog.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(linkPayload) });
+        var linkRes = await fetchWithTimeout(bd_apiUrl('/api/log/' + hBundle + '/' + hLog.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(linkPayload) });
         if (linkRes.ok) hLog.hatchLinked = true;
         else if (logEl) logEl.textContent += 'FAIL: link hatch log to chicks: ' + linkRes.status + '\n';
       } catch(e) {
@@ -10204,7 +10239,13 @@ async function bd_syncToFarmOS() {
     // Also sync any unsynced offspring batches (Hatch defaults to batch mode)
     var unsyncedBirdBatches = batches.filter(function(b) { return !b.synced; });
     if (unsyncedBirdBatches.length > 0) {
-      try { await syncBatchesToFarmOS(token); } catch(be) { /* best-effort — retried next sync */ }
+      if (logEl) logEl.textContent += '\nAlso pushing ' + unsyncedBirdBatches.length + ' batch(es)...\n';
+      try {
+        var batchResult = await syncBatchesToFarmOS(token, function(msg) { if (logEl) logEl.textContent += msg; });
+        synced += batchResult.ok; failed += batchResult.fail;
+      } catch(be) {
+        if (logEl) logEl.textContent += '⚠️ Batch sync error: ' + be.message + '\n';
+      }
     }
 
     // Process queued offline-first actions (batch sell/died/promote, and
@@ -10213,14 +10254,18 @@ async function bd_syncToFarmOS() {
     // sync button the user taps first).
     var pendingCount = pendingActions.filter(function(p) { return !p.synced; }).length;
     if (pendingCount > 0) {
+      if (logEl) logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
       try {
         var batchActionResult = await processPendingBatchActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var goatActionResult = await processPendingGoatActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         synced += batchActionResult.ok + goatActionResult.ok;
         failed += batchActionResult.fail + goatActionResult.fail;
-      } catch(be) { /* best-effort — retried next sync */ }
+      } catch(be) {
+        if (logEl) logEl.textContent += '⚠️ Queued action sync error: ' + be.message + '\n';
+      }
     }
 
+    if (logEl) { logEl.textContent += '\n✅ Sync complete.\n'; logEl.scrollTop = logEl.scrollHeight; }
     bd_toast(synced + ' synced' + (failed ? ', ' + failed + ' failed' : ''));
   } catch(e) {
     bd_toast('Sync failed: ' + e.message);
@@ -10268,7 +10313,7 @@ async function getOrCreateProductUUID(name, token, options) {
   if (!options.forceCreate) {
     try {
       var q = apiUrl('/api/asset/product?filter[name]=' + encodeURIComponent(name) + '&page[limit]=1');
-      var r = await fetch(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+      var r = await fetchWithTimeout(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
       if (r.ok) {
         var d = await r.json();
         if (d.data && d.data[0]) { if (options.cacheKey) localStorage.setItem(options.cacheKey, d.data[0].id); return d.data[0].id; }
@@ -10277,7 +10322,7 @@ async function getOrCreateProductUUID(name, token, options) {
   }
   try {
     var payload = { data: { type: 'asset--product', attributes: { name: name } } };
-    var res = await fetch(apiUrl('/api/asset/product'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
+    var res = await fetchWithTimeout(apiUrl('/api/asset/product'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
     if (!res.ok) return null;
     var data = await res.json();
     var uuid = data && data.data && data.data.id;
@@ -10314,7 +10359,7 @@ async function bd_pushLog(log, token) {
           attributes: { measure: 'count', value: { numerator: String(log.eggCount), denominator: '1' }, inventory_adjustment: 'increment' },
           relationships: { inventory_asset: { data: { type: 'asset--product', id: eggsProductUUID } } }
         } };
-        var qRes = await fetch(bd_apiUrl('/api/quantity/standard'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(qPayload) });
+        var qRes = await fetchWithTimeout(bd_apiUrl('/api/quantity/standard'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(qPayload) });
         if (qRes.ok) {
           var qData = await qRes.json();
           var qUUID = qData && qData.data && qData.data.id;
@@ -10325,7 +10370,7 @@ async function bd_pushLog(log, token) {
     } catch(qe) { /* egg inventory tracking is a nice-to-have — log itself still saves below */ }
   }
 
-  var res = await fetch(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
   var logUUID = data && data.data && data.data.id;
@@ -10336,7 +10381,7 @@ async function bd_pushLog(log, token) {
       var photoData = await Photos.load(log.photoId);
       if (photoData) {
         var blob = await (await fetch(photoData)).blob();
-        await fetch(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
+        await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: blob
@@ -10357,7 +10402,7 @@ async function bd_patchLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, id: log.farmosUUID, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
-  var res = await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Re-upload the photo if present — same gap as the POST path above, now closed on edit too.
   if (log.photoId) {
@@ -10365,7 +10410,7 @@ async function bd_patchLog(log, token) {
       var photoData = await Photos.load(log.photoId);
       if (photoData) {
         var blob = await (await fetch(photoData)).blob();
-        await fetch(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
+        await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: blob
@@ -10385,8 +10430,20 @@ async function bd_pushProfilePhoto(birdUUID, photoId, token) {
   if (!photoData) return;
   try {
     var blob = await (await fetch(photoData)).blob();
-    var fd = new FormData(); fd.append('file', blob, 'bird-' + birdUUID + '.jpg');
-    await fetch(bd_apiUrl('/api/asset/animal/' + birdUUID + '/image'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+    var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal/' + birdUUID + '/image'), {
+      method: 'POST',
+      headers: {
+        'Content-Type':        'application/octet-stream',
+        'Content-Disposition': 'file; filename="bird-' + birdUUID + '.jpg"',
+        'Accept':              'application/vnd.api+json',
+        'Authorization':       'Bearer ' + token
+      },
+      body: blob
+    });
+    if (res.ok) {
+      var fileData = await res.json().catch(function() { return null; });
+      await keepOnlyNewestImage('asset', 'animal', birdUUID, fileData?.data?.id, token);
+    }
   } catch(e) { /* photo upload non-fatal — local copy is unaffected either way */ }
 }
 
@@ -10412,7 +10469,7 @@ async function bd_pushCreateBird(bird, token) {
       if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
     } catch(e) { /* species set is best-effort on create — core fields still save */ }
   }
-  var res = await fetch(bd_apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
   var lb = bd_birds.filter(function(b) { return b._localId === bird._localId; })[0];
@@ -10454,7 +10511,7 @@ async function bd_pushUpdateBird(bird, token) {
       if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
     } catch(e) { /* species update is best-effort — core fields still save */ }
   }
-  var res = await fetch(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Photos attach to logs, not assets — pushing straight to the bird's
   // image field wasn't reliable. Attach via a log instead.
@@ -10465,7 +10522,7 @@ async function bd_pushArchiveBird(uuid, token) {
   if (!uuid) return;
   // farmOS v4+ uses a boolean 'archived' attribute, not status:'archived'
   var payload = { data: { type: 'asset--animal', id: uuid, attributes: { archived: true } } };
-  var res = await fetch(bd_apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
@@ -10494,7 +10551,7 @@ async function bd_archiveBirdWithLog(birdId, logBundle, details) {
       if (priceRef) relationships.quantity = { data: [priceRef] };
     }
     var payload = { data: { type: 'log--' + logBundle, attributes: attrs, relationships: relationships } };
-    var res = await fetch(bd_apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    var res = await fetchWithTimeout(bd_apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
     if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,200)); }
     await bd_pushArchiveBird(bird.uuid, token);
     return true;
@@ -12210,7 +12267,7 @@ async function bd_ensureGroupUUID(flockName, token) {
   var r = await fetch(q, { headers: bd_authHeaders(token) });
   if (r.ok) { var d = await r.json(); if (d.data && d.data[0]) { var id = d.data[0].id; if (flock) { flock.uuid = id; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); } return id; } }
   var payload = { data: { type: 'asset--group', attributes: { name: flockName } } };
-  var res = await fetch(bd_apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var jd = await res.json(); var nid = jd.data && jd.data.id;
   if (flock && nid) { flock.uuid = nid; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
@@ -12221,7 +12278,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   if (!birdUUID) return;
   var groupId = flockName ? await bd_ensureGroupUUID(flockName, token) : null;
   var payload = { data: { type: 'log--activity', attributes: { name: flockName ? ('Move to ' + flockName) : 'Remove from flock', status: 'done', timestamp: String(Math.floor(Date.now()/1000)), is_group_assignment: true }, relationships: { asset: { data: [{ type: 'asset--animal', id: birdUUID }] }, group: { data: groupId ? [{ type: 'asset--group', id: groupId }] : [] } } } };
-  var res = await fetch(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('assign HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
