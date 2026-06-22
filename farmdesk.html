@@ -807,6 +807,15 @@ header > div:last-child { min-width: 0; }
       </div>
 
       <div class="set-sub">
+        <strong>Birth Litter Default</strong>
+        <p style="color:#888;font-size:13px;margin-top:4px;">Most kids get named individually — or track as a count for litters you won't keep. Switch the default here; you can flip it per-birth on the form.</p>
+        <select id="goatBirthDefaultSel" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-top:6px;" onchange="localStorage.setItem('farmdesk_goat_birth_default', this.value); showToast('✅ Birth default saved');">
+          <option value="individual">Individual (named kids) — default</option>
+          <option value="batch">Batch (count only)</option>
+        </select>
+      </div>
+
+      <div class="set-sub">
         <strong>Data</strong>
         <button class="wide secondary" onclick="exportLogs()">📤 Export Logs (JSON)</button>
         <button class="wide secondary" onclick="document.getElementById('importFile').click()" style="margin-top:8px;">📥 Import Logs (JSON)</button>
@@ -2020,13 +2029,13 @@ function renderStep() {
       <label style="margin-top:10px;">Dam (mother)</label>
       <select id="f_dam">
         <option value="">— select —</option>
-        ${goats.map(g => `<option>${g}</option>`).join("")}
+        ${getDams().length ? getDams().map(g => `<option>${g}</option>`).join("") : '<option disabled style="color:#888;">No females recorded</option>'}
       </select>
 
       <label>Sire (father)</label>
       <select id="f_sire">
         <option value="">— unknown —</option>
-        ${goats.map(g => `<option>${g}</option>`).join("")}
+        ${getSires().length ? getSires().map(g => `<option>${g}</option>`).join("") : '<option disabled style="color:#888;">No intact males recorded</option>'}
       </select>
 
       <label>Birth type</label>
@@ -2052,10 +2061,18 @@ function renderStep() {
       <div id="photoPreview" style="margin-top:8px;"></div>
     `;
     addBirthKidRow(); // start with one empty row
-    // Pre-select whichever animal is currently active in the goat picker as Dam
+    // Apply birth litter default from settings
+    if (goatBirthDefaultMode() === 'batch') {
+      var batchChk = document.getElementById('f_birth_batch');
+      if (batchChk) { batchChk.checked = true; toggleBirthBatchMode(true); }
+    }
+    // Pre-select the active animal as Dam only if she is female
     setTimeout(function() {
       var damSel = document.getElementById('f_dam');
-      if (damSel && goats[herdIndex]) damSel.value = goats[herdIndex];
+      var activeName = goats[herdIndex];
+      if (damSel && activeName && (animalProfiles[activeName] || {}).sex === 'F') {
+        damSel.value = activeName;
+      }
     }, 0);
   }
 
@@ -2236,29 +2253,6 @@ function correctOrientation(img, rawDataUrl, callback) {
   }
 }
 
-function drawWithOrientation(canvas, img, orientation) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.save();
-  // Rotate/flip based on EXIF orientation
-  switch (orientation) {
-    case 2: ctx.transform(-1,0,0,1,w,0); break;
-    case 3: ctx.transform(-1,0,0,-1,w,h); break;
-    case 4: ctx.transform(1,0,0,-1,0,h); break;
-    case 5: ctx.transform(0,1,1,0,0,0); break;
-    case 6: ctx.transform(0,1,-1,0,h,0); break;
-    case 7: ctx.transform(0,-1,-1,0,h,w); break;
-    case 8: ctx.transform(0,-1,1,0,0,w); break;
-    default: break;
-  }
-  // For orientations 5-8, width/height are swapped
-  if (orientation >= 5) {
-    ctx.drawImage(img, 0, 0, h, w);
-  } else {
-    ctx.drawImage(img, 0, 0, w, h);
-  }
-  ctx.restore();
-}
 
 function orientedCanvas(img, rawDataUrl, maxW, callback) {
   correctOrientation(img, rawDataUrl, (img, orient) => {
@@ -3762,6 +3756,9 @@ function renderSettings() {
   // GoatDesk-specific boxes only make sense when the Goats module is on
   const goatsOn = (typeof moduleEnabled === "function") ? moduleEnabled("goats") : true;
   document.querySelectorAll("#screen-settings .gd-only").forEach(b => b.style.display = goatsOn ? "" : "none");
+  // Populate Birth Litter Default dropdown
+  var birthDefaultSel = document.getElementById("goatBirthDefaultSel");
+  if (birthDefaultSel) birthDefaultSel.value = goatBirthDefaultMode();
   // Module enable/disable toggles (registry lives at the bottom of this script)
   if (typeof renderModuleToggles === "function") renderModuleToggles();
   // Stock module settings section — only when Stock is enabled
@@ -4261,6 +4258,23 @@ const BATCHES_LS_KEY = 'farmdesk_batches';
 let batches = JSON.parse(localStorage.getItem(BATCHES_LS_KEY) || '[]');
 function saveBatches() { localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(batches)); }
 
+// One-time migration: add label, parentDams[], parentSires[] to existing batches.
+(function migrateBatches() {
+  var changed = false;
+  batches.forEach(function(b) {
+    if (!b.label) { b.label = ''; changed = true; }
+    if (!Array.isArray(b.parentDams)) {
+      b.parentDams = b.parentDam ? [b.parentDam] : [];
+      changed = true;
+    }
+    if (!Array.isArray(b.parentSires)) {
+      b.parentSires = b.parentSire ? [b.parentSire] : [];
+      changed = true;
+    }
+  });
+  if (changed) localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(batches));
+})();
+
 // ===== SHARED: OFFLINE-FIRST PENDING ACTIONS QUEUE =====
 // Local-first write-back queue for actions that aren't a fit for the
 // `logs` array (asset archiving, profile pushes, retypes, batch
@@ -4292,10 +4306,13 @@ function createBatch(module, species, breed, count, parentDam, parentSire, group
   var b = {
     id: 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     module: module, // 'bird' | 'goat'
+    label: '',
     species: species,
     breed: breed || '',
-    parentDam: parentDam || '',
-    parentSire: parentSire || '',
+    parentDam: parentDam || '',   // kept for farmOS birth log mother relationship (first dam)
+    parentSire: parentSire || '', // kept for farmOS (first sire)
+    parentDams: parentDam ? [parentDam] : [],
+    parentSires: parentSire ? [parentSire] : [],
     groupName: groupName || '',
     bornDate: new Date().toISOString(),
     originalCount: count,
@@ -4303,6 +4320,7 @@ function createBatch(module, species, breed, count, parentDam, parentSire, group
     notes: notes || '',
     productUUID: null,
     logUUID: null,
+    labelSynced: true, // false when label edited after first sync — triggers PATCH
     synced: false
   };
   batches.push(b);
@@ -4316,13 +4334,30 @@ function createBatch(module, species, breed, count, parentDam, parentSire, group
 // also sync Stock.
 async function syncBatchesToFarmOS(token, logFn) {
   var ok = 0, fail = 0;
+  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
   for (var i = 0; i < batches.length; i++) {
     var b = batches[i];
-    if (b.synced) continue;
+    if (b.synced && b.labelSynced !== false) continue;
     try {
+      // If already synced but label was edited — PATCH the product name only
+      if (b.synced && b.labelSynced === false && b.productUUID) {
+        var labelProductName = (b.label ? b.label + ' - ' : '') + b.species + ' Batch - ' + new Date(b.bornDate).toISOString().slice(0,10);
+        var patchRes = await fetchWithTimeout(apiUrl('/api/asset/product/' + b.productUUID), {
+          method: 'PATCH', headers: h,
+          body: JSON.stringify({ data: { type: 'asset--product', id: b.productUUID, attributes: { name: labelProductName } } })
+        });
+        if (patchRes.ok) {
+          b.labelSynced = true; saveBatches();
+          if (logFn) logFn('✅ Batch label updated: ' + labelProductName + '\n');
+        } else {
+          if (logFn) logFn('⚠️ Batch label PATCH failed: HTTP ' + patchRes.status + '\n');
+        }
+        continue;
+      }
       if (!b.productUUID) {
-        var productName = b.species + ' Batch - ' + new Date(b.bornDate).toISOString().slice(0,10);
+        var productName = (b.label ? b.label + ' - ' : '') + b.species + ' Batch - ' + new Date(b.bornDate).toISOString().slice(0,10);
         b.productUUID = await getOrCreateProductUUID(productName, token, {});
+        b.labelSynced = true;
         saveBatches();
       }
       if (!b.productUUID) { fail++; if (logFn) logFn('⚠️ Batch (' + b.species + '): could not create product — retrying next sync\n'); continue; }
@@ -4338,7 +4373,7 @@ async function syncBatchesToFarmOS(token, logFn) {
           var qUUID = qData?.data?.id;
           var qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
           var logAttrs = {
-            name: (b.module === 'bird' ? 'Hatch' : 'Birth') + ' - ' + b.species + ' batch of ' + b.originalCount,
+            name: (b.module === 'bird' ? 'Hatch' : 'Birth') + ' - ' + (b.label || b.species + ' batch') + ' x' + b.originalCount + (b.parentDam ? ' (dam: ' + b.parentDam + ')' : ''),
             status: 'done',
             timestamp: String(Math.floor(new Date(b.bornDate).getTime() / 1000)),
             notes: { value: b.notes || '', format: 'default' }
@@ -4524,9 +4559,292 @@ async function confirmPromoteFromBatch(batchId) {
     setTimeout(function() {
       var spEl = document.getElementById('animalsNewSpecies'); if (spEl) spEl.value = b.species || '';
       var brEl = document.getElementById('animalsNewBreed'); if (brEl) brEl.value = b.breed || '';
+      // Pre-fill dam from batch parentDams if exactly one female known
+      var dams = b.parentDams || [];
+      if (dams.length === 1) {
+        var damEl = document.getElementById('animalsNewDam'); if (damEl) damEl.value = dams[0];
+      }
     }, 50);
     showToast('Now in Animals — fill in the name to finish');
   }
+}
+
+// ===== BATCH EDIT MODAL =====
+var _batchEditId = null;
+
+function openBatchEditModal(batchId) {
+  var b = batches.find(function(x) { return x.id === batchId; });
+  if (!b) return;
+  _batchEditId = batchId;
+  var modal = document.getElementById('batchEditModal');
+  if (!modal) return;
+
+  // Ensure arrays exist (migration guard)
+  if (!Array.isArray(b.parentDams))  b.parentDams  = b.parentDam  ? [b.parentDam]  : [];
+  if (!Array.isArray(b.parentSires)) b.parentSires = b.parentSire ? [b.parentSire] : [];
+
+  var isGoat = b.module === 'goat';
+  var isbird  = b.module === 'bird';
+
+  // Parent selectors
+  var damOptions = isGoat
+    ? getDams().map(function(g) { return '<option value="'+g+'">'+g+'</option>'; }).join('')
+    : bd_birds.filter(function(x) { return x.sex === 'F' && x.status !== 'archived'; })
+              .map(function(x) { return '<option value="'+(x.tag||x.name||'')+'">'+(x.name||(x.tag?'#'+x.tag:''))+'</option>'; }).join('');
+  var sireOptions = isGoat
+    ? getSires().map(function(g) { return '<option value="'+g+'">'+g+'</option>'; }).join('')
+    : '';
+
+  // Render dam chips
+  function damChipsHTML(arr) {
+    return arr.map(function(d, i) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;background:#2a4a2a;border-radius:4px;padding:3px 8px;margin:2px;font-size:13px;">'+d+
+        '<button onclick="batchRemoveDam('+i+')" style="margin:0;padding:0 4px;font-size:11px;background:transparent;color:#c00;min-width:0;">✕</button></span>';
+    }).join('');
+  }
+  function sireChipsHTML(arr) {
+    return arr.map(function(s, i) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;background:#2a2a4a;border-radius:4px;padding:3px 8px;margin:2px;font-size:13px;">'+s+
+        '<button onclick="batchRemoveSire('+i+')" style="margin:0;padding:0 4px;font-size:11px;background:transparent;color:#c00;min-width:0;">✕</button></span>';
+    }).join('');
+  }
+
+  // Add-individual sub-form dam/sire selects
+  var indivDamOpts = '<option value="">— unknown —</option>' + (isGoat
+    ? getDams().map(function(g) { return '<option value="'+g+'"'+(b.parentDams.length===1&&b.parentDams[0]===g?' selected':'')+'>'+g+'</option>'; }).join('')
+    : bd_birds.filter(function(x) { return x.sex === 'F' && x.status !== 'archived'; })
+              .map(function(x) { var v=x.tag||x.name||''; return '<option value="'+v+'">'+v+'</option>'; }).join(''));
+  var indivSireOpts = isGoat ? '<option value="">— unknown —</option>' + getSires().map(function(g) {
+    return '<option value="'+g+'"'+(b.parentSires.length===1&&b.parentSires[0]===g?' selected':'')+'>'+g+'</option>';
+  }).join('') : '';
+
+  var sexOpts = isGoat
+    ? '<option value="">— select —</option><option value="F">Female</option><option value="M">Male</option><option value="W">Wether</option>'
+    : '<option value="">— select —</option><option value="F">Female</option><option value="M">Male</option>';
+
+  var flockOpts = isbird ? '<option value="">— No Flock —</option>' + (typeof bd_flocks !== 'undefined' ? bd_flocks.map(function(f) { return '<option value="'+f.name+'">'+f.name+'</option>'; }).join('') : '') : '';
+
+  var countDisplay = b.count;
+  var bornDateISO = b.bornDate ? b.bornDate.slice(0,10) : new Date().toISOString().slice(0,10);
+
+  document.getElementById('batchEditContent').innerHTML =
+    '<p style="color:#888;font-size:13px;margin-top:0;">'+b.count+' remaining · ' + (b.label || b.species+' batch') + '</p>' +
+
+    '<label>Label <span style="color:#888;font-size:12px;">(human-readable name)</span></label>' +
+    '<input id="beLabel" value="'+(b.label||'')+'" placeholder="e.g. Doeling Crop 2025" style="width:100%;box-sizing:border-box;">' +
+
+    '<label style="margin-top:10px;">Species</label>' +
+    '<input id="beSpecies" value="'+(b.species||'')+'" style="width:100%;box-sizing:border-box;">' +
+
+    '<label style="margin-top:10px;">Breed</label>' +
+    '<input id="beBreed" value="'+(b.breed||'')+'" style="width:100%;box-sizing:border-box;">' +
+
+    '<label style="margin-top:10px;">Notes</label>' +
+    '<textarea id="beNotes" rows="2" style="width:100%;box-sizing:border-box;">'+(b.notes||'')+'</textarea>' +
+
+    (isGoat ? (
+      '<div style="margin-top:12px;border-top:1px solid #383838;padding-top:10px;">' +
+      '<strong style="font-size:14px;">Dams</strong> <span style="color:#888;font-size:12px;">females only · mixed litters OK</span>' +
+      '<div id="beDamChips" style="margin:4px 0;">' + (b.parentDams.length ? damChipsHTML(b.parentDams) : '<span style="color:#666;font-size:12px;">None</span>') + '</div>' +
+      '<div style="display:flex;gap:6px;margin-top:4px;">' +
+      '<select id="beDamAdd" style="flex:1;padding:8px;font-size:14px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"><option value="">— add dam —</option>'+damOptions+'</select>' +
+      '<button onclick="batchAddDam()" style="margin:0;padding:8px 14px;font-size:14px;">Add</button></div>' +
+      '</div>' +
+      '<div style="margin-top:10px;">' +
+      '<strong style="font-size:14px;">Sires</strong> <span style="color:#888;font-size:12px;">intact males only</span>' +
+      '<div id="beSireChips" style="margin:4px 0;">' + (b.parentSires.length ? sireChipsHTML(b.parentSires) : '<span style="color:#666;font-size:12px;">None</span>') + '</div>' +
+      '<div style="display:flex;gap:6px;margin-top:4px;">' +
+      '<select id="beSireAdd" style="flex:1;padding:8px;font-size:14px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"><option value="">— add sire —</option>'+sireOptions+'</select>' +
+      '<button onclick="batchAddSire()" style="margin:0;padding:8px 14px;font-size:14px;">Add</button></div>' +
+      '</div>'
+    ) : (
+      '<div style="margin-top:12px;border-top:1px solid #383838;padding-top:10px;">' +
+      '<strong style="font-size:14px;">Mother / Broody</strong>' +
+      '<div id="beDamChips" style="margin:4px 0;">' + (b.parentDams.length ? damChipsHTML(b.parentDams) : '<span style="color:#666;font-size:12px;">None</span>') + '</div>' +
+      '<div style="display:flex;gap:6px;margin-top:4px;">' +
+      '<select id="beDamAdd" style="flex:1;padding:8px;font-size:14px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"><option value="">— add mother —</option>'+damOptions+'</select>' +
+      '<button onclick="batchAddDam()" style="margin:0;padding:8px 14px;font-size:14px;">Add</button></div>' +
+      '</div>'
+    )) +
+
+    '<div style="margin-top:12px;border-top:1px solid #383838;padding-top:10px;">' +
+    '<strong style="font-size:14px;">Add Individual from this batch</strong>' +
+    '<p style="color:#888;font-size:12px;margin:2px 0 6px;">Each add decrements the batch count by 1.</p>' +
+    '<p id="beRemaining" style="color:#3a7;font-size:13px;font-weight:bold;margin:0 0 6px;">'+b.count+' remaining</p>' +
+    '<input id="beIndivName" placeholder="Name *" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
+    '<div style="display:flex;gap:6px;margin-bottom:6px;">' +
+    '<input id="beIndivTag" placeholder="Tag/ID" style="flex:1;">' +
+    '<input id="beIndivDob" type="date" value="'+bornDateISO+'" style="flex:1;padding:8px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' +
+    '</div>' +
+    '<div style="display:flex;gap:6px;margin-bottom:6px;">' +
+    '<select id="beIndivSex" style="flex:1;padding:8px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">'+sexOpts+'</select>' +
+    (isbird ? '<select id="beIndivFlock" style="flex:1;padding:8px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">'+flockOpts+'</select>' : '') +
+    '</div>' +
+    '<label style="font-size:14px;color:#aaa;">Dam</label>' +
+    '<select id="beIndivDam" style="width:100%;padding:8px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-bottom:6px;">'+indivDamOpts+'</select>' +
+    (isGoat ? '<label style="font-size:14px;color:#aaa;">Sire</label><select id="beIndivSire" style="width:100%;padding:8px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-bottom:6px;">'+indivSireOpts+'</select>' : '') +
+    '<div id="beAddResult" style="font-size:13px;color:#3a7;min-height:18px;margin-bottom:4px;"></div>' +
+    '<button onclick="addAnimalFromBatch()" style="width:100%;margin:0;">⭐ Add Individual</button>' +
+    '</div>';
+
+  modal.style.display = 'block';
+}
+
+function batchAddDam() {
+  var b = batches.find(function(x) { return x.id === _batchEditId; });
+  if (!b) return;
+  var sel = document.getElementById('beDamAdd');
+  var val = sel ? sel.value.trim() : '';
+  if (!val) return;
+  if (!Array.isArray(b.parentDams)) b.parentDams = [];
+  if (b.parentDams.indexOf(val) < 0) { b.parentDams.push(val); b.parentDam = b.parentDams[0]; saveBatches(); }
+  sel.value = '';
+  // Re-render chips only
+  var chipsEl = document.getElementById('beDamChips');
+  if (chipsEl) {
+    var isGoat = b.module === 'goat';
+    chipsEl.innerHTML = b.parentDams.length ? b.parentDams.map(function(d, i) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;background:'+(isGoat?'#2a4a2a':'#4a2a2a')+';border-radius:4px;padding:3px 8px;margin:2px;font-size:13px;">'+d+
+        '<button onclick="batchRemoveDam('+i+')" style="margin:0;padding:0 4px;font-size:11px;background:transparent;color:#c00;min-width:0;">✕</button></span>';
+    }).join('') : '<span style="color:#666;font-size:12px;">None</span>';
+  }
+}
+
+function batchRemoveDam(idx) {
+  var b = batches.find(function(x) { return x.id === _batchEditId; });
+  if (!b || !Array.isArray(b.parentDams)) return;
+  b.parentDams.splice(idx, 1);
+  b.parentDam = b.parentDams[0] || '';
+  saveBatches();
+  openBatchEditModal(_batchEditId); // re-render
+}
+
+function batchAddSire() {
+  var b = batches.find(function(x) { return x.id === _batchEditId; });
+  if (!b) return;
+  var sel = document.getElementById('beSireAdd');
+  var val = sel ? sel.value.trim() : '';
+  if (!val) return;
+  if (!Array.isArray(b.parentSires)) b.parentSires = [];
+  if (b.parentSires.indexOf(val) < 0) { b.parentSires.push(val); b.parentSire = b.parentSires[0]; saveBatches(); }
+  sel.value = '';
+  var chipsEl = document.getElementById('beSireChips');
+  if (chipsEl) {
+    chipsEl.innerHTML = b.parentSires.length ? b.parentSires.map(function(s, i) {
+      return '<span style="display:inline-flex;align-items:center;gap:4px;background:#2a2a4a;border-radius:4px;padding:3px 8px;margin:2px;font-size:13px;">'+s+
+        '<button onclick="batchRemoveSire('+i+')" style="margin:0;padding:0 4px;font-size:11px;background:transparent;color:#c00;min-width:0;">✕</button></span>';
+    }).join('') : '<span style="color:#666;font-size:12px;">None</span>';
+  }
+}
+
+function batchRemoveSire(idx) {
+  var b = batches.find(function(x) { return x.id === _batchEditId; });
+  if (!b || !Array.isArray(b.parentSires)) return;
+  b.parentSires.splice(idx, 1);
+  b.parentSire = b.parentSires[0] || '';
+  saveBatches();
+  openBatchEditModal(_batchEditId);
+}
+
+function saveBatchEdit() {
+  var b = batches.find(function(x) { return x.id === _batchEditId; });
+  if (!b) return;
+  var newLabel   = (document.getElementById('beLabel')   ? document.getElementById('beLabel').value.trim()   : b.label);
+  var newSpecies = (document.getElementById('beSpecies') ? document.getElementById('beSpecies').value.trim() : b.species);
+  var newBreed   = (document.getElementById('beBreed')   ? document.getElementById('beBreed').value.trim()   : b.breed);
+  var newNotes   = (document.getElementById('beNotes')   ? document.getElementById('beNotes').value.trim()   : b.notes);
+  // Mark labelSynced false if label changed after initial sync
+  if (newLabel !== b.label && b.productUUID) b.labelSynced = false;
+  b.label   = newLabel;
+  b.species = newSpecies || b.species;
+  b.breed   = newBreed;
+  b.notes   = newNotes;
+  saveBatches();
+  closeBatchEditModal();
+  if (typeof bd_renderBirds === 'function') bd_renderBirds();
+  if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
+  showToast('✅ Batch saved');
+}
+
+function closeBatchEditModal() {
+  var modal = document.getElementById('batchEditModal');
+  if (modal) modal.style.display = 'none';
+  _batchEditId = null;
+}
+
+function addAnimalFromBatch() {
+  var b = batches.find(function(x) { return x.id === _batchEditId; });
+  if (!b) return;
+  var name = (document.getElementById('beIndivName') ? document.getElementById('beIndivName').value.trim() : '');
+  if (!name) { showToast('⚠️ Name is required'); return; }
+  if (b.count <= 0) { showToast('⚠️ No remaining count in batch'); return; }
+
+  var tag    = document.getElementById('beIndivTag')  ? document.getElementById('beIndivTag').value.trim()  : '';
+  var sex    = document.getElementById('beIndivSex')  ? document.getElementById('beIndivSex').value         : '';
+  var dob    = document.getElementById('beIndivDob')  ? document.getElementById('beIndivDob').value         : '';
+  var dam    = document.getElementById('beIndivDam')  ? document.getElementById('beIndivDam').value         : '';
+  var sire   = document.getElementById('beIndivSire') ? document.getElementById('beIndivSire').value        : '';
+  var flock  = document.getElementById('beIndivFlock')? document.getElementById('beIndivFlock').value       : '';
+
+  if (b.module === 'goat') {
+    if (goats.includes(name)) { showToast('⚠️ Animal already exists'); return; }
+    // Decrement batch
+    promoteFromBatch(b.id);
+    // Add to goats
+    goats.push(name);
+    localStorage.setItem(LS.goats, JSON.stringify(goats));
+    animalProfiles[name] = { sex: sex, birthdate: dob, breed: b.breed, type: b.species, group: '', notes: '', tag: tag, dam: dam, sire: sire };
+    localStorage.setItem(LS.animalProfiles, JSON.stringify(animalProfiles));
+    // Queue purchase-style action so farmOS creates the asset on sync
+    queuePendingAction('purchase', { animalName: name, sex: sex, dob: dob, tag: tag, notes: 'From batch: ' + (b.label || b.species + ' batch') + (dam ? '. Dam: ' + dam : '') + (sire ? '. Sire: ' + sire : '') });
+    if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
+  } else {
+    // Bird — use bd_addBirdDirect
+    bd_addBirdDirect({ name: name, tag: tag, sex: sex, dob: dob, species: b.species, breed: b.breed, flock: flock, dam: dam });
+    promoteFromBatch(b.id);
+    if (typeof bd_renderBirds === 'function') bd_renderBirds();
+  }
+
+  // Update remaining count display
+  var remEl = document.getElementById('beRemaining');
+  if (remEl) remEl.textContent = b.count + ' remaining';
+  var resultEl = document.getElementById('beAddResult');
+  if (resultEl) resultEl.textContent = '✅ ' + name + ' added';
+  // Clear per-animal fields, keep DOB/dam/sire for rapid sibling entry
+  if (document.getElementById('beIndivName')) document.getElementById('beIndivName').value = '';
+  if (document.getElementById('beIndivTag'))  document.getElementById('beIndivTag').value  = '';
+  if (document.getElementById('beIndivSex'))  document.getElementById('beIndivSex').value  = '';
+}
+
+// Bird direct-add — creates bird in bd_birds without opening the full form modal.
+// Used by addAnimalFromBatch to stay inside the batch edit modal.
+function bd_addBirdDirect(fields) {
+  var bird = {
+    _localId: 'bird_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    uuid: null,
+    name:    fields.name    || '',
+    tag:     fields.tag     || '',
+    sex:     fields.sex     || '',
+    species: fields.species || '',
+    breed:   fields.breed   || '',
+    flock:   fields.flock   || '',
+    notes:   fields.notes   || '',
+    status:  'active',
+    synced:  false
+  };
+  if (!Array.isArray(bd_birds)) bd_birds = [];
+  bd_birds.push(bird);
+  localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
+  // Queue farmOS asset creation + flock assignment
+  var pending = JSON.parse(localStorage.getItem(BD_LS.pending) || '[]');
+  pending.push({ action: 'create_bird', bird: bird, id: 'cb_' + Date.now(), synced: false });
+  if (fields.flock) pending.push({ action: 'group_assign', birdUUID: bird._localId, flockName: fields.flock, id: 'ga_' + Date.now(), synced: false });
+  localStorage.setItem(BD_LS.pending, JSON.stringify(pending));
+  // Local history entry noting the birth origin
+  var hist = JSON.parse(localStorage.getItem(BD_LS.history) || '[]');
+  hist.push({ id: 'bh_' + Date.now(), type: 'hatch', ts: new Date().toISOString(), birdId: bird._localId,
+    data: { animal: bird.name || bird.tag, summary: 'Added from batch' + (fields.dam ? ' · Mother: ' + fields.dam : '') }, synced: false });
+  localStorage.setItem(BD_LS.history, JSON.stringify(hist));
 }
 
 async function createPurchaseLog(animalName, details) {
@@ -4725,7 +5043,7 @@ async function breedFieldSupported(token) {
 async function ensureAnimalTypeUUID(typeName, token) {
   if (!typeName) return null;
   var q = apiUrl('/api/taxonomy_term/animal_type?filter[name]=' + encodeURIComponent(typeName) + '&page[limit]=1');
-  var r = await fetch(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+  var r = await fetchWithTimeout(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
   if (r.ok) {
     var d = await r.json();
     if (d.data && d.data[0]) return d.data[0].id;
@@ -4791,7 +5109,7 @@ async function syncBirthKidAssets(l, logUUID, token, headers, logEl) {
         type: 'asset--animal',
         attributes: {
           name: kid.name,
-          ...(kid.sex ? { sex: kid.sex.toLowerCase() === 'm' ? 'male' : kid.sex.toLowerCase() === 'f' ? 'female' : kid.sex.toLowerCase() } : {}),
+          ...(kid.sex ? sexToFarmOS(kid.sex) : {}),
           ...(kid.tag ? { id_tag: [{ id: kid.tag, type: 'tag' }] } : {}),
           birthdate: new Date(parseInt(birthTs) * 1000).toISOString().slice(0, 10)
         },
@@ -4921,7 +5239,7 @@ async function ensureGoatGroupUUID(groupName, token) {
   var grp = goatGroups.filter(function(g) { return g.name === groupName; })[0];
   if (grp && grp.uuid) return grp.uuid;
   var q = apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(groupName) + '&page[limit]=1');
-  var r = await fetch(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+  var r = await fetchWithTimeout(q, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
   if (r.ok) {
     var d = await r.json();
     if (d.data && d.data[0]) {
@@ -5260,7 +5578,7 @@ async function pushAnimalProfileCore(name, fields) {
   try {
     var token = await getToken(cfg);
     var attrs = {};
-    if (fields.sex) attrs.sex = fields.sex.toLowerCase() === 'm' ? 'male' : fields.sex.toLowerCase() === 'f' ? 'female' : fields.sex.toLowerCase();
+    Object.assign(attrs, sexToFarmOS(fields.sex));
     if (fields.birthdate) attrs.birthdate = fields.birthdate;
     if (fields.tag) attrs.id_tag = [{ id: fields.tag, type: 'tag' }];
     // breed: use the real attribute if this farmOS instance has one,
@@ -6319,6 +6637,29 @@ function clearLogs() {
 // ===== SHARED MODULE: farmOS sync — log type mapping, push/pull, config sync =====
 
 // farmOS log type mapping — matches your existing records
+// ===== SHARED: sex mapping helpers =====
+// farmOS stores sex as 'male'/'female' and castration separately.
+// Wethers are sex:'male' + castrated:true — never send 'wether' to farmOS.
+function sexToFarmOS(sex) {
+  if (!sex) return {};
+  var s = sex.toUpperCase();
+  if (s === 'W') return { sex: 'male', castrated: true };
+  if (s === 'M') return { sex: 'male', castrated: false };
+  if (s === 'F') return { sex: 'female', castrated: false };
+  if (s === 'MALE')   return { sex: 'male',   castrated: false };
+  if (s === 'FEMALE') return { sex: 'female',  castrated: false };
+  return {};
+}
+
+// ===== SHARED: parent-eligible animal helpers =====
+// Dam = female only. Sire = intact male only (not wether).
+function getDams()  {
+  return goats.filter(function(g) { return (animalProfiles[g] || {}).sex === 'F'; });
+}
+function getSires() {
+  return goats.filter(function(g) { return (animalProfiles[g] || {}).sex === 'M'; });
+}
+
 const FARMOS_TYPE_MAP = {
   weight:   "observation",
   vitals:   "observation",
@@ -6729,7 +7070,7 @@ async function pullConfig(token) {
     "Accept": "application/vnd.api+json"
   };
   // Search for the config log by name
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     apiUrl("/api/log/activity?filter[name]=" + encodeURIComponent(CONFIG_LOG_NAME) + "&page[limit]=1"),
     { headers: authHeaders }
   );
@@ -6858,7 +7199,7 @@ async function fetchAnimalUUIDs(silent = false) {
     let animalRows = [], typeNames = {}, groupNames = {};
     let aUrl = apiUrl("/api/asset/animal?include=animal_type,image,group&page[limit]=100");
     while (aUrl) {
-      const animalRes = await fetch(aUrl, { headers: authHeaders });
+      const animalRes = await fetchWithTimeout(aUrl, { headers: authHeaders });
       if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
       const animalData = await animalRes.json();
       animalRows = animalRows.concat(animalData.data || []);
@@ -6923,7 +7264,7 @@ async function fetchAnimalUUIDs(silent = false) {
         fetchedNotes = rawNotes.replace(/^Breed: .*$/m, "").replace(/\n{2,}/g, "\n").trim();
       }
       animalProfiles[name] = {
-        sex:       a.attributes.sex || "",
+        sex:       a.attributes.castrated ? 'W' : (a.attributes.sex === 'male' ? 'M' : a.attributes.sex === 'female' ? 'F' : ''),
         birthdate: a.attributes.birthdate || "",
         breed:     fetchedBreed,
         type:      typeName ? (typeName.charAt(0).toUpperCase()+typeName.slice(1)) : "",
@@ -6964,7 +7305,7 @@ async function fetchAnimalUUIDs(silent = false) {
       if (p.photoUrl && !p.photoId) {
         try {
           var u = p.photoUrl.indexOf("http") === 0 ? p.photoUrl : (cfgSaved.url + p.photoUrl);
-          var r = await fetch(u, { headers: { "Authorization": "Bearer " + token } });
+          var r = await fetchWithTimeout(u, { headers: { "Authorization": "Bearer " + token } });
           if (r.ok) {
             var blob = await r.blob();
             var full = await new Promise(function(res){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.readAsDataURL(blob); });
@@ -7255,7 +7596,7 @@ async function fetchAnimalUUIDs(silent = false) {
         if (l.data?.photoUrl && !l.data.photoId) {
           try {
             const u = l.data.photoUrl.indexOf("http") === 0 ? l.data.photoUrl : (cfgSaved.url + l.data.photoUrl);
-            const r = await fetch(u, { headers: { "Authorization": "Bearer " + token } });
+            const r = await fetchWithTimeout(u, { headers: { "Authorization": "Bearer " + token } });
             if (r.ok) {
               const blob = await r.blob();
               const full = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
@@ -7426,7 +7767,7 @@ async function pushPurchaseAnimal(payload, token) {
       type: 'asset--animal',
       attributes: Object.assign(
         { name: payload.animalName },
-        payload.sex ? { sex: payload.sex.toLowerCase() === 'm' ? 'male' : payload.sex.toLowerCase() === 'f' ? 'female' : payload.sex.toLowerCase() } : {},
+        payload.sex ? sexToFarmOS(payload.sex) : {},
         payload.dob ? { birthdate: payload.dob } : {},
         payload.tag ? { id_tag: [{ id: payload.tag, type: 'tag' }] } : {}
       ),
@@ -7539,10 +7880,212 @@ async function processPendingBatchActions(token, logFn) {
   return { ok: ok, skipped: skipped, fail: fail };
 }
 
+// ===== MED MATERIAL HELPERS =====
+// GET search for asset--material by name. Returns UUID or null.
+async function getOrCreateMedMaterial(medName, token) {
+  try {
+    var h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    var res = await fetchWithTimeout(apiUrl('/api/asset/material?filter[name]=' + encodeURIComponent(medName) + '&page[limit]=1'), { headers: h });
+    if (res.ok) {
+      var d = await res.json();
+      if (d.data && d.data.length > 0) return d.data[0].id;
+    }
+  } catch(e) { /* offline-safe — return null */ }
+  return null;
+}
+
+// Opens the med material dialog. Returns a Promise that resolves with
+// a UUID (material created/found) or 'skip' (user skipped this med).
+function openMedMaterialDialog(medName, token) {
+  return new Promise(function(resolve) {
+    var modal = document.getElementById('medMaterialModal');
+    if (!modal) { resolve('skip'); return; }
+
+    // Populate category select from StockDesk taxonomy cache
+    var cfg = JSON.parse(localStorage.getItem('farmdesk_cfg') || '{}');
+    var tax = JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}');
+    var cats = tax.cats || [];
+    var catHTML = '';
+    var hasTax = cats.length > 0;
+    var hasFarmOS = !!(cfg.url && cfg.user);
+
+    if (hasTax) {
+      // Pre-select Medical category if it exists
+      catHTML = cats.map(function(c) {
+        var sel = /medical|med|vet|veterinary/i.test(c.name) ? ' selected' : '';
+        return '<option value="' + c.uuid + '"' + sel + '>' + c.name + '</option>';
+      }).join('');
+      document.getElementById('medMatCatRow').innerHTML =
+        '<label>Category</label>' +
+        '<select id="medMatCat" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' + catHTML + '</select>';
+    } else if (hasFarmOS) {
+      document.getElementById('medMatCatRow').innerHTML =
+        '<p style="color:#c90;font-size:13px;margin:4px 0;">⚠️ Fetch Stock inventory first to load categories.</p>' +
+        '<label>Category (text)</label>' +
+        '<input id="medMatCat" placeholder="e.g. Medical" style="width:100%;box-sizing:border-box;">';
+    } else {
+      // Local-only
+      document.getElementById('medMatCatRow').innerHTML =
+        '<label>Category (text)</label>' +
+        '<input id="medMatCat" placeholder="e.g. Medical" style="width:100%;box-sizing:border-box;">';
+    }
+
+    // Pre-fill med name and unit from formula if available
+    var formula = formulas[medName] || {};
+    document.getElementById('medMatName').value    = medName;
+    document.getElementById('medMatUnit').value    = formula.unit || 'ml';
+    document.getElementById('medMatQty').value     = '';
+    document.getElementById('medMatNotes').value   = '';
+    document.getElementById('medMatResult').textContent = '';
+
+    // Wire buttons
+    document.getElementById('medMatAddBtn').onclick = async function() {
+      var nameVal  = (document.getElementById('medMatName').value || '').trim();
+      var unitVal  = (document.getElementById('medMatUnit').value || 'ml').trim();
+      var qtyVal   = parseFloat(document.getElementById('medMatQty').value) || 0;
+      var notesVal = (document.getElementById('medMatNotes').value || '').trim();
+      var catEl    = document.getElementById('medMatCat');
+      var catId    = hasTax ? (catEl ? catEl.value : '') : null;
+      var catName  = !hasTax ? (catEl ? catEl.value.trim() : '') : '';
+
+      document.getElementById('medMatResult').textContent = 'Creating…';
+      try {
+        var uuid = await createMedMaterial(nameVal, catId, catName, qtyVal, unitVal, notesVal, token);
+        if (uuid) {
+          document.getElementById('medMatResult').textContent = '✅ Created: ' + nameVal;
+          modal.style.display = 'none';
+          resolve(uuid);
+        } else {
+          document.getElementById('medMatResult').textContent = '❌ Create failed — check connection';
+        }
+      } catch(e) {
+        document.getElementById('medMatResult').textContent = '❌ ' + e.message;
+      }
+    };
+    document.getElementById('medMatSkipBtn').onclick = function() {
+      modal.style.display = 'none';
+      resolve('skip');
+    };
+
+    modal.style.display = 'block';
+  });
+}
+
+// Creates asset--material in farmOS, optionally with an initial quantity reset.
+// catId = taxonomy_term UUID (if taxonomy fetched), catName = plain text fallback.
+async function createMedMaterial(name, catId, catName, qty, unit, notes, token) {
+  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var payload = { data: {
+    type: 'asset--material',
+    attributes: Object.assign(
+      { name: name },
+      notes ? { notes: { value: notes, format: 'default' } } : {}
+    ),
+    relationships: catId
+      ? { material_type: { data: { type: 'taxonomy_term--material_type', id: catId } } }
+      : {}
+  }};
+  var res = await fetchWithTimeout(apiUrl('/api/asset/material'), { method: 'POST', headers: h, body: JSON.stringify(payload) });
+  if (!res.ok) {
+    var err = await res.json().catch(function() { return {}; });
+    throw new Error(err.errors && err.errors[0] ? err.errors[0].detail : 'HTTP ' + res.status);
+  }
+  var d = await res.json();
+  var uuid = d.data && d.data.id;
+  if (!uuid) return null;
+
+  // Also register locally in StockDesk assets so it shows up without needing a fetch
+  try {
+    var sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+    if (!sdAssets.some(function(a) { return a.uuid === uuid; })) {
+      sdAssets.push({ uuid: uuid, name: name, category: catName || 'Medical', matTypeId: catId || '', measure: 'volume', value: qty || 0, units: unit || 'ml', notes: notes || '', localOnly: false });
+      localStorage.setItem('farmdesk_stock_assets', JSON.stringify(sdAssets));
+    }
+  } catch(e) { /* non-fatal */ }
+
+  // If initial quantity supplied, POST a reset quantity + log--input
+  if (qty > 0) {
+    try {
+      // Find unit UUID from taxonomy cache
+      var tax = JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}');
+      var unitEntry = (tax.units || []).find(function(u) { return u.name.toLowerCase() === unit.toLowerCase(); });
+      var unitId = unitEntry ? unitEntry.uuid : null;
+      var qBody = { data: { type: 'quantity--standard', attributes: {
+        measure: 'volume', value: { numerator: String(Math.round(qty * 100)), denominator: '100' },
+        inventory_adjustment: 'reset'
+      }, relationships: Object.assign(
+        { inventory_asset: { data: { type: 'asset--material', id: uuid } } },
+        unitId ? { units: { data: { type: 'taxonomy_term--unit', id: unitId } } } : {}
+      )}};
+      var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: h, body: JSON.stringify(qBody) });
+      if (qRes.ok) {
+        var qData = await qRes.json();
+        var qUUID = qData.data.id;
+        var qRevId = qData.data.attributes && qData.data.attributes.drupal_internal__revision_id;
+        var lBody = { data: { type: 'log--input', attributes: {
+          name: 'Initial stock: ' + name + ' ' + qty + ' ' + unit,
+          timestamp: String(Math.floor(Date.now() / 1000)),
+          status: 'done'
+        }, relationships: {
+          asset: { data: [{ type: 'asset--material', id: uuid }] },
+          quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] }
+        }}};
+        await fetchWithTimeout(apiUrl('/api/log/input'), { method: 'POST', headers: h, body: JSON.stringify(lBody) });
+      }
+    } catch(e) { /* non-fatal — asset was created, quantity is best-effort */ }
+  }
+  return uuid;
+}
+
+// POST quantity--volume decrement + log--input for a med administration.
+// Called after log--medical succeeds and material UUID is confirmed.
+async function pushMedInputLog(l, matUUID, animalUUID, token) {
+  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var dose = l.data.dose || 0;
+  var unit = l.data.unit || 'ml';
+  var num = Math.round(dose * 100);
+  var den = 100;
+
+  // Find unit taxonomy UUID
+  var tax = JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}');
+  var unitEntry = (tax.units || []).find(function(u) { return u.name.toLowerCase() === unit.toLowerCase(); });
+  var unitId = unitEntry ? unitEntry.uuid : null;
+
+  var qBody = { data: { type: 'quantity--standard', attributes: {
+    measure: 'volume',
+    value: { numerator: String(num), denominator: String(den) },
+    inventory_adjustment: 'decrement'
+  }, relationships: Object.assign(
+    { inventory_asset: { data: { type: 'asset--material', id: matUUID } } },
+    unitId ? { units: { data: { type: 'taxonomy_term--unit', id: unitId } } } : {}
+  )}};
+  var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: h, body: JSON.stringify(qBody) });
+  if (!qRes.ok) throw new Error('Quantity: HTTP ' + qRes.status);
+  var qData = await qRes.json();
+  var qUUID  = qData.data.id;
+  var qRevId = qData.data.attributes && qData.data.attributes.drupal_internal__revision_id;
+
+  var ts = String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000));
+  var animalName = l.goat || '';
+  var lBody = { data: { type: 'log--input', attributes: {
+    name: 'Administer ' + l.data.med + ': ' + dose + ' ' + unit + ' to ' + animalName + ' via ' + (l.data.route || 'Oral'),
+    timestamp: ts,
+    status: 'done',
+    notes: { value: (l.data.notes || '') + (l.loggedBy ? '\nLogged by: ' + l.loggedBy : ''), format: 'default' }
+  }, relationships: {
+    asset: { data: [{ type: 'asset--material', id: matUUID }].concat(animalUUID ? [{ type: 'asset--animal', id: animalUUID }] : []) },
+    quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] }
+  }}};
+  var lRes = await fetchWithTimeout(apiUrl('/api/log/input'), { method: 'POST', headers: h, body: JSON.stringify(lBody) });
+  if (!lRes.ok) throw new Error('log--input: HTTP ' + lRes.status);
+}
+
 async function syncToFarmOS() {
   const cfg = saveFarmOSCfg();
   const logEl = document.getElementById("syncLog");
   logEl.textContent = "Authenticating...\n";
+  // Reset per-sync skip set so the dialog re-prompts next sync
+  window._medMaterialSkipped = new Set();
 
   let token;
   try {
@@ -7581,7 +8124,7 @@ async function syncToFarmOS() {
       const payload = buildFarmOSPayload(l);
       const url = apiUrl("/api/log/" + farmosType);
       try {
-        const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+        const res = await fetchWithTimeout(url, { method: "POST", headers, body: JSON.stringify(payload) });
         if (res.ok) {
           const resData = await res.json();
           const logUUID = resData?.data?.id;
@@ -7594,7 +8137,7 @@ async function syncToFarmOS() {
               const photoRes = await fetch(photoData);
               const blob = await photoRes.blob();
               const photoUrl = apiUrl(`/api/log/${farmosType}/${logUUID}/image`);
-              const photoUpload = await fetch(photoUrl, {
+              const photoUpload = await fetchWithTimeout(photoUrl, {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
@@ -7614,7 +8157,7 @@ async function syncToFarmOS() {
           if (l.data?.fileAttach && logUUID && l.data.fileAttach._blob) {
             try {
               const fileUrl = apiUrl(`/api/log/${farmosType}/${logUUID}/file`);
-              const fileUpload = await fetch(fileUrl, {
+              const fileUpload = await fetchWithTimeout(fileUrl, {
                 method: "POST",
                 headers: {
                   "Content-Type":        "application/octet-stream",
@@ -7639,6 +8182,34 @@ async function syncToFarmOS() {
           l.synced = true;
           ok++;
           logEl.textContent += `✅ ${l.goat} | ${farmosLogName(l)}${l.data?.photoId ? " 📷" : ""}${l.data?.fileAttach ? " 📎" : ""}\n`;
+
+          // ===== MED INPUT LOG (inventory decrement) =====
+          if (l.type === 'med' && l.data && l.data.med) {
+            try {
+              var medName = l.data.med;
+              if (!window._medMaterialSkipped) window._medMaterialSkipped = new Set();
+              if (!window._medMaterialSkipped.has(medName)) {
+                var matUUID = await getOrCreateMedMaterial(medName, token);
+                if (!matUUID) {
+                  var cfg_med = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+                  if (cfg_med.url) {
+                    matUUID = await openMedMaterialDialog(medName, token);
+                  }
+                }
+                if (matUUID === 'skip') {
+                  window._medMaterialSkipped.add(medName);
+                  logEl.textContent += `  ↷ Inventory skipped for ${medName}\n`;
+                } else if (matUUID) {
+                  var animalUUID_med = animalUUIDs[l.goat] || null;
+                  await pushMedInputLog(l, matUUID, animalUUID_med, token);
+                  logEl.textContent += `  💊 Inventory decremented: ${medName} −${l.data.dose || '?'}${l.data.unit || 'ml'}\n`;
+                }
+              }
+            } catch(me) {
+              logEl.textContent += `  ⚠️ Inventory log failed for ${l.data.med}: ${me.message}\n`;
+            }
+          }
+          // ===== END MED INPUT LOG =====
         } else {
           const txt = await res.text();
           fail++;
@@ -7662,7 +8233,7 @@ async function syncToFarmOS() {
       payload.data.id = l.id; // JSON:API PATCH requires id in data object
       const url = apiUrl("/api/log/" + farmosType + "/" + l.id);
       try {
-        const res = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(payload) });
+        const res = await fetchWithTimeout(url, { method: "PATCH", headers, body: JSON.stringify(payload) });
         if (res.ok) {
           // Push the photo too (e.g. after a rotate) — same endpoint as new logs
           if (l.data?.photoId) {
@@ -7977,9 +8548,9 @@ async function openEdit(id) {
       <div id="ed_kidRows"></div>
       <button type="button" onclick="addBirthKidRow(null, true)" style="width:100%;background:#333;font-size:14px;margin-top:4px;">➕ Add Kid</button>
       <label>Dam</label>
-      <select id="ed_dam"><option value="">— select —</option>${goats.map(g=>`<option${g===l.data.dam?" selected":""}>${g}</option>`).join("")}</select>
+      <select id="ed_dam"><option value="">— select —</option>${getDams().map(g=>`<option${g===l.data.dam?" selected":""}>${g}</option>`).join("")}${l.data.dam && !getDams().includes(l.data.dam) ? `<option selected>${l.data.dam}</option>` : ''}</select>
       <label>Sire</label>
-      <select id="ed_sire"><option value="">— unknown —</option>${goats.map(g=>`<option${g===l.data.sire?" selected":""}>${g}</option>`).join("")}</select>
+      <select id="ed_sire"><option value="">— unknown —</option>${getSires().map(g=>`<option${g===l.data.sire?" selected":""}>${g}</option>`).join("")}${l.data.sire && !getSires().includes(l.data.sire) ? `<option selected>${l.data.sire}</option>` : ''}</select>
       <label>Birth type</label>
       <select id="ed_birthtype">
         ${["Natural","Assisted","C-section"].map(s=>`<option${s===l.data.type?" selected":""}>${s}</option>`).join("")}
@@ -8407,7 +8978,7 @@ async function refreshAssets(silent) {
     let url = apiUrl('/api/asset/material?page[limit]=50&filter[archived]=0');
     let all = [];
     while (url) {
-      const res = await fetch(url, { headers: h });
+      const res = await fetchWithTimeout(url, { headers: h });
       if (!res.ok) throw new Error('Fetch failed: HTTP ' + res.status);
       const d = await res.json();
       all = all.concat(d.data || []);
@@ -8446,7 +9017,7 @@ async function refreshAssets(silent) {
       if (!silent) setLoading(true, 'Fetching log history...');
       // Fetch last 100 activity logs that have quantities — filter client-side
       const assetIds = new Set(assets.map(a => a.uuid));
-      const logRes = await fetch(
+      const logRes = await fetchWithTimeout(
         apiUrl('/api/log/activity?page[limit]=100&sort=-timestamp&include=quantity'),
         { headers: h }
       );
@@ -9637,6 +10208,12 @@ function bd_hatchDefaultMode() {
   return localStorage.getItem('farmdesk_bird_hatch_default') || 'batch';
 }
 
+// GoatDesk birth litter default — individual (named kids) or batch (count).
+// Switchable in GoatDesk Settings, overridable per-birth on the form.
+function goatBirthDefaultMode() {
+  return localStorage.getItem('farmdesk_goat_birth_default') || 'individual';
+}
+
 const BD_LS = {
   cfg:      "farmdesk_cfg",
   assets:   "farmdesk_bird_assets",
@@ -9776,10 +10353,6 @@ function bd_updateSyncBadge() {
 }
 
 // ===== AUTH =====
-function bd_saveCfg() {
-  // True no-op. Credentials live only in shared farmdesk_cfg written by goat saveFarmOSCfg().
-  return JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
-}
 
 async function bd_getToken(cfg) {
   var tryAuth = async function(url, scope) {
@@ -10058,7 +10631,7 @@ async function bd_fetchAssets() {
         if (b.photoUrl && !b.photoId) {
           try {
             var u = b.photoUrl.indexOf('http') === 0 ? b.photoUrl : (cfg.url + b.photoUrl);
-            var r = await fetch(u, { headers: { 'Authorization': 'Bearer ' + token } });
+            var r = await fetchWithTimeout(u, { headers: { 'Authorization': 'Bearer ' + token } });
             if (r.ok) {
               var blob = await r.blob();
               var full = await new Promise(function(res) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.readAsDataURL(blob); });
@@ -10187,7 +10760,7 @@ async function bd_fetchLogs(token, cfg) {
       if (l.photoUrl && !l.photoId) {
         try {
           var u = l.photoUrl.indexOf('http') === 0 ? l.photoUrl : (cfg.url + l.photoUrl);
-          var r = await fetch(u, { headers: { 'Authorization': 'Bearer ' + token } });
+          var r = await fetchWithTimeout(u, { headers: { 'Authorization': 'Bearer ' + token } });
           if (r.ok) {
             var blob = await r.blob();
             var full = await new Promise(function(res) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.readAsDataURL(blob); });
@@ -10688,18 +11261,25 @@ function bd_speciesIcon(s) {
 // ===== RENDER BIRDS =====
 // Shared between Bird and Goat list screens.
 function batchCardHTML(b) {
-  var meta = [b.breed, b.parentDam ? ('Dam: ' + b.parentDam) : '', b.groupName].filter(function(x) { return x; }).join(' · ');
+  var displayName = b.label || (b.species + ' batch');
+  var damsStr = Array.isArray(b.parentDams) && b.parentDams.length ? 'Dam(s): ' + b.parentDams.join(', ') : (b.parentDam ? 'Dam: ' + b.parentDam : '');
+  var siresStr = Array.isArray(b.parentSires) && b.parentSires.length ? 'Sire(s): ' + b.parentSires.join(', ') : '';
+  var meta = [b.breed, damsStr, siresStr, b.groupName].filter(function(x) { return x; }).join(' · ');
   var origNote = b.count !== b.originalCount ? (' · ' + b.originalCount + ' original') : '';
+  var syncDot = b.synced ? '' : ' <span style="color:#c90;font-size:11px;">⏳</span>';
   var actions = b.count > 0
     ? '<div style="display:flex;gap:6px;margin:-6px 0 8px;">' +
+        '<button onclick="openBatchEditModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#2a4a6a;margin:0;">✏️ Edit</button>' +
         '<button onclick="openBatchSellModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#8b6500;margin:0;">🏷️ Sell</button>' +
         '<button onclick="openBatchDiedModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#8b0000;margin:0;">💀 Died</button>' +
         '<button onclick="confirmPromoteFromBatch(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#2a5a2a;margin:0;">⭐ Promote</button>' +
       '</div>'
-    : '';
+    : '<div style="display:flex;gap:6px;margin:-6px 0 8px;">' +
+        '<button onclick="openBatchEditModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#2a4a6a;margin:0;">✏️ Edit</button>' +
+      '</div>';
   return '<div class="bird-card" style="border-left:3px solid #3a7;">' +
     '<div class="bird-icon">📦</div>' +
-    '<div class="bird-info"><div class="bird-tag">' + b.count + ' remaining</div><div class="bird-name">' + b.species + ' batch</div><div class="bird-meta">' + meta + origNote + '</div></div>' +
+    '<div class="bird-info"><div class="bird-tag">' + b.count + ' remaining' + syncDot + '</div><div class="bird-name">' + displayName + '</div><div class="bird-meta">' + meta + origNote + '</div></div>' +
     '</div>' + actions;
 }
 
@@ -10859,7 +11439,10 @@ function bd_renderLogFields() {
   } else if (t === 'hatch') {
     var flockOpts = "<option value=''>-- No Flock --</option>" + bd_flocks.map(function(f) { return "<option>" + f.name + "</option>"; }).join('');
     var hatchIndivDefault = bd_hatchDefaultMode() === 'individual';
-    box.innerHTML = "<label style='display:flex;align-items:center;gap:8px;'><input type='checkbox' id='bd-f-hatch-individual'" + (hatchIndivDefault ? ' checked' : '') + " style='width:18px;height:18px;'> Track individually (named birds)</label><p style='color:#888;font-size:12px;margin:2px 0 8px;'>Off = batch count (most offspring). On = creates a named bird per hatchling, like before.</p><label>Species</label><select id='bd-f-hatch-species'><option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option></select><label>Breed</label><input id='bd-f-hatch-breed' placeholder='Breed (optional)'><label>Count</label><input id='bd-f-hatch-count' type='number' min='1' step='1' placeholder='e.g. 8'><label>Parent Tag (optional)</label><input id='bd-f-hatch-parent' placeholder='Mother tag'><label>Flock</label><select id='bd-f-hatch-flock'>" + flockOpts + "</select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'><p id='bd-f-hatch-hint' style='color:#888;font-size:13px;margin-top:8px;'>" + (hatchIndivDefault ? 'Creates placeholder birds. Tag each bird later.' : 'Creates one batch count — sell/promote individuals later from the Birds list.') + "</p>" + bd_photoFieldHTML();
+    var femaleBirds = bd_birds.filter(function(b) { return b.sex === 'F' && b.status !== 'archived'; });
+    var motherOpts = "<option value=''>— unknown —</option>" + femaleBirds.map(function(b) { return "<option value='" + (b.tag||b.name||'') + "'>" + (b.name ? b.name + (b.tag ? ' #'+b.tag : '') : '#'+b.tag) + "</option>"; }).join('');
+    var motherNote = femaleBirds.length === 0 ? "<p style='color:#888;font-size:12px;margin:2px 0;'>No females recorded — add female birds to assign a mother.</p>" : '';
+    box.innerHTML = "<label style='display:flex;align-items:center;gap:8px;'><input type='checkbox' id='bd-f-hatch-individual'" + (hatchIndivDefault ? ' checked' : '') + " style='width:18px;height:18px;'> Track individually (named birds)</label><p style='color:#888;font-size:12px;margin:2px 0 8px;'>Off = batch count (most offspring). On = creates a named bird per hatchling, like before.</p><label>Species</label><select id='bd-f-hatch-species'><option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option></select><label>Breed</label><input id='bd-f-hatch-breed' placeholder='Breed (optional)'><label>Count</label><input id='bd-f-hatch-count' type='number' min='1' step='1' placeholder='e.g. 8'><label>Mother / Broody (optional)</label><select id='bd-f-hatch-parent'>" + motherOpts + "</select>" + motherNote + "<label>Flock</label><select id='bd-f-hatch-flock'>" + flockOpts + "</select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'><p id='bd-f-hatch-hint' style='color:#888;font-size:13px;margin-top:8px;'>" + (hatchIndivDefault ? 'Creates placeholder birds. Tag each bird later.' : 'Creates one batch count — sell/promote individuals later from the Birds list.') + "</p>" + bd_photoFieldHTML();
     var hatchIndivCheck = document.getElementById('bd-f-hatch-individual');
     if (hatchIndivCheck) hatchIndivCheck.onchange = function() {
       var hint = document.getElementById('bd-f-hatch-hint');
@@ -11380,7 +11963,6 @@ async function bd_saveEdit() {
 function bd_closeEditModal(e) { if (!e || e.target === document.getElementById('bd-edit-modal')) { document.getElementById('bd-edit-modal').style.display = 'none'; editCurrentPhoto = null; editCurrentFileAttach = null; } }
 
 // ===== WEBVIEW-SAFE MODAL WRAPPERS =====
-function bd_stopProp() { /* called from onclick — stops bubbling to overlay close */ return false; }
 function bd_closeLogModalOverlay()     { document.getElementById('bd-log-modal').style.display = 'none'; bd_activeTaskId = null; }
 function bd_closeBirdModalOverlay()    { document.getElementById('bd-bird-modal').style.display = 'none'; }
 function bd_closeFlockModalOverlay()   { document.getElementById('bd-flock-modal').style.display = 'none'; }
@@ -12386,7 +12968,7 @@ async function bd_ensureGroupUUID(flockName, token) {
   var flock = bd_flocks.filter(function(f) { return f.name === flockName; })[0];
   if (flock && flock.uuid) return flock.uuid;
   var q = bd_apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(flockName) + '&page[limit]=1');
-  var r = await fetch(q, { headers: bd_authHeaders(token) });
+  var r = await fetchWithTimeout(q, { headers: bd_authHeaders(token) });
   if (r.ok) { var d = await r.json(); if (d.data && d.data[0]) { var id = d.data[0].id; if (flock) { flock.uuid = id; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); } return id; } }
   var payload = { data: { type: 'asset--group', attributes: { name: flockName } } };
   var res = await fetchWithTimeout(bd_apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
@@ -12494,6 +13076,45 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     </div>
   </div>
 </div>
+
+<!-- ===== BATCH EDIT MODAL — shared by Bird and Goat ===== -->
+<div id="batchEditModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10001;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <strong style="font-size:17px;color:#3a7;">✏️ Edit Batch</strong>
+      <button onclick="closeBatchEditModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="batchEditContent"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="saveBatchEdit()" style="flex:1;margin:0;">💾 Save Batch</button>
+      <button onclick="closeBatchEditModal()" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MED MATERIAL MODAL — add medication to farmOS inventory before sync ===== -->
+<div id="medMaterialModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10002;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:440px;border-radius:10px;padding:16px;">
+    <strong style="font-size:17px;color:#c90;">💊 Add to Inventory?</strong>
+    <p style="color:#aaa;font-size:13px;margin:6px 0 10px;">This medication isn't in your farmOS inventory yet. Add it now to track usage, or skip.</p>
+    <label>Medication Name</label>
+    <input id="medMatName" readonly style="width:100%;box-sizing:border-box;background:#1a1a1a;color:#999;">
+    <div id="medMatCatRow" style="margin-top:8px;"></div>
+    <label style="margin-top:8px;">Starting Quantity <span style="color:#888;font-size:12px;">(optional)</span></label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input id="medMatQty" type="number" min="0" step="0.01" placeholder="e.g. 500" style="flex:1;">
+      <input id="medMatUnit" placeholder="ml" style="width:70px;">
+    </div>
+    <label style="margin-top:8px;">Notes <span style="color:#888;font-size:12px;">(optional)</span></label>
+    <textarea id="medMatNotes" rows="2" placeholder="e.g. Dosage, supplier, storage info" style="width:100%;box-sizing:border-box;"></textarea>
+    <div id="medMatResult" style="font-size:13px;color:#3a7;min-height:18px;margin-top:6px;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button id="medMatAddBtn" style="flex:1;margin:0;">Add &amp; Continue Sync</button>
+      <button id="medMatSkipBtn" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 14px;">Skip this med</button>
+    </div>
+  </div>
+</div>
+
 
 
 <!-- ===== MED DEDUCT PROMPT ===== -->
