@@ -3121,7 +3121,11 @@ function makeLogEl(l, showActions = false) {
     ${detail ? `<div class="log-detail log-preview">${detail}</div>` : ""}
     <div class="log-time">${t}${l.loggedBy ? " \u00B7 " + l.loggedBy : ""}${statusTag}</div>
     <div class="log-drawer" style="display:none;">
-      ${l.data && l.data.photoId ? `<img data-photoid="${l.data.photoId}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;background:#333;" onclick="openPhotoViewer(this.src)">` : ""}
+      ${l.data && l.data.photoId
+        ? `<img data-photoid="${l.data.photoId}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;background:#333;" onclick="openPhotoViewer(this.src)">`
+        : (l.data && l.data.photoUrl
+            ? `<img src="" data-photourl="${l.data.photoUrl}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;background:#333;" onclick="openPhotoViewer(this.src)">`
+            : "")}
     </div>
   `;
   lazyLoadPhotos(d); // fill in <img data-photoid> from the Photos store
@@ -4078,11 +4082,32 @@ function assetCardHTML(img, title, detail, onclick, photoId) {
 // Fill any <img data-photoid> within a container from the Photos store
 function lazyLoadPhotos(container) {
   if (!container) return;
+  // Primary path: Photos store by local ID
   var imgs = container.querySelectorAll("img[data-photoid]");
   imgs.forEach(function(im){
     var pid = im.getAttribute("data-photoid");
     im.removeAttribute("data-photoid");
     Photos.load(pid).then(function(data){ if (data) im.src = data; });
+  });
+  // Fallback path: farmOS-hosted URL (log fetched but photo not yet downloaded locally)
+  var urlImgs = container.querySelectorAll("img[data-photourl]");
+  urlImgs.forEach(function(im){
+    var photoUrl = im.getAttribute("data-photourl");
+    im.removeAttribute("data-photourl");
+    if (!photoUrl) return;
+    var cfg = JSON.parse(localStorage.getItem("farmdesk_cfg") || "{}");
+    var token = window._lastAuthToken || null; // best-effort — may not be available
+    var fullUrl = photoUrl.indexOf("http") === 0 ? photoUrl : (cfg.url || "") + photoUrl;
+    var headers = token ? { "Authorization": "Bearer " + token } : {};
+    fetchWithTimeout(fullUrl, { headers: headers })
+      .then(function(r) { return r.ok ? r.blob() : null; })
+      .then(function(blob) {
+        if (!blob) return;
+        var fr = new FileReader();
+        fr.onload = function() { im.src = fr.result; };
+        fr.readAsDataURL(blob);
+      })
+      .catch(function() { /* offline-safe — photo won't show until next fetch */ });
   });
 }
 
@@ -4198,7 +4223,12 @@ function openAnimalProfile(name) {
     '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="flex:1;margin:0;">Log for ' + name + '</button>' +
     '<button onclick="editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
     '</div>' +
-    '<button onclick="closeEdit(); openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>';
+    '<button onclick="closeEdit(); openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>' +
+    '<div style="display:flex;gap:8px;margin-top:8px;">' +
+    '<button onclick="closeEdit(); openSellAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b6500;padding:10px 4px;font-size:13px;">🏷️ Sell</button>' +
+    '<button onclick="closeEdit(); openDeathAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b0000;padding:10px 4px;font-size:13px;">💀 Death</button>' +
+    '<button onclick="closeEdit(); openRetypeAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#555;padding:10px 4px;font-size:13px;">❓ Retype</button>' +
+    '</div>';
   var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
   modal.style.display = "block";
   lazyLoadPhotos(body);
@@ -5648,27 +5678,9 @@ function renderAnimalsScreen() {
       card.appendChild(flagDiv);
     }
     card.onclick = function(){ openAnimalProfile(g); };
-    var actionRow = document.createElement("div");
-    actionRow.style.cssText = "display:flex;gap:6px;margin:0 0 8px 0;";
-    var sellBtn = document.createElement("button");
-    sellBtn.textContent = "🏷️ Sell";
-    sellBtn.style.cssText = "flex:1;padding:6px 4px;font-size:12px;background:#8b6500;margin:0;";
-    sellBtn.onclick = function(e){ e.stopPropagation(); openSellAnimalModal(g); };
-    var deathBtn = document.createElement("button");
-    deathBtn.textContent = "💀 Death";
-    deathBtn.style.cssText = "flex:1;padding:6px 4px;font-size:12px;background:#8b0000;margin:0;";
-    deathBtn.onclick = function(e){ e.stopPropagation(); openDeathAnimalModal(g); };
-    var retypeBtn = document.createElement("button");
-    retypeBtn.textContent = "❓ Retype";
-    retypeBtn.style.cssText = "flex:1;padding:6px 4px;font-size:12px;background:#555;margin:0;";
-    retypeBtn.onclick = function(e){ e.stopPropagation(); openRetypeAnimalModal(g); };
-    actionRow.appendChild(sellBtn);
-    actionRow.appendChild(deathBtn);
-    actionRow.appendChild(retypeBtn);
     al.appendChild(card);
-    al.appendChild(actionRow);
   });
-  lazyLoadPhotos(al); // fill in <img data-photoid> from the file store
+  lazyLoadPhotos(al);
 }
 function addAnimalFromScreen() {
   var name = (document.getElementById("animalsNewName").value || "").trim();
@@ -7153,6 +7165,7 @@ async function fetchAnimalUUIDs(silent = false) {
 
   try {
     const token = await getToken(cfgSaved);
+    window._lastAuthToken = token; // cache for lazyLoadPhotos photo-url fallback
     const authHeaders = {
       "Authorization": "Bearer " + token,
       "Accept": "application/vnd.api+json"
@@ -8085,6 +8098,7 @@ async function syncToFarmOS() {
   let token;
   try {
     token = await getToken(cfg);
+    window._lastAuthToken = token; // cache for lazyLoadPhotos photo-url fallback
     logEl.textContent += "✅ Token OK\n";
   } catch(e) {
     logEl.textContent += "❌ Auth failed: " + e.message + "\n";
@@ -11424,7 +11438,7 @@ function bd_renderBirds() {
         var id = b.uuid || b._localId;
         var meta = [b.breed, b.sex === 'F' ? 'Female' : b.sex === 'M' ? 'Male' : '', b.flock ? b.flock : ''].filter(function(x) { return x; }).join(' - ');
         var thumb = b.photoId
-          ? '<img data-photoid="' + b.photoId + '" class="bird-thumb" style="background:#333;" onclick="bd_openPhotoViewer(this.src)">'
+          ? '<img data-photoid="' + b.photoId + '" class="bird-thumb" style="background:#333;" onclick="event.stopPropagation();bd_openPhotoViewer(this.src)">'
           : '<div class="bird-icon">' + bd_speciesIcon(b.species) + '</div>';
         return '<div class="bird-card" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;">' +
           thumb +
