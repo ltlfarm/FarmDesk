@@ -390,20 +390,10 @@ header > div:last-child { min-width: 0; }
 <!-- ===== HOME (LOG TAB) ===== -->
 <div id="screen-home" class="screen active">
   <div class="box">
-    <div class="nav-bar">
-      <button onclick="startFlow('weight')">⚖️ Weight</button>
-      <button onclick="startFlow('vitals')">🌡️ Vitals</button>
-      <button onclick="startFlow('med')">💉 Med</button>
-      <button onclick="startFlow('proc')">✂️ Procedure</button>
-      <button onclick="startFlow('hoof')"><svg style="width:18px;height:18px;vertical-align:middle;margin-right:4px;" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="22" cy="28" rx="8" ry="11" fill="white" transform="rotate(-10 22 28)"/><ellipse cx="38" cy="26" rx="8" ry="11" fill="white" transform="rotate(10 38 26)"/><ellipse cx="30" cy="42" rx="9" ry="6" fill="white"/><line x1="30" y1="17" x2="30" y2="38" stroke="#3a7733" stroke-width="2.5" stroke-linecap="round"/></svg>Hoof</button>
-      <button onclick="startFlow('obs')">👁️ Observe</button>
-      <button onclick="startFlow('birth')">🐐🍼 Birth</button>
-      <button onclick="startFlow('activity')">📝 Activity</button>
-    </div>
-    <div class="nav-bar" style="margin-top:6px;">
-      <button onclick="startFlow('wv')" class="secondary">Weight + Vitals</button>
-      <button onclick="startFlow('wvm')" class="secondary">Weight + Vitals + Med</button>
-    </div>
+    <!-- Log type buttons populated from GOAT_LOG_TYPES config in FARM CONFIG section -->
+    <div class="nav-bar" id="gd-log-buttons"></div>
+    <!-- Multi-step flow buttons populated from GOAT_FLOWS config -->
+    <div class="nav-bar" id="gd-flow-buttons" style="margin-top:6px;"></div>
   </div>
 
   <div class="box" id="pendingBox" style="display:none;">
@@ -457,15 +447,7 @@ header > div:last-child { min-width: 0; }
     <label style="display:flex;align-items:center;gap:6px;">Type <span onclick="showHint('Filter by log type — Weight, Med, Vitals, etc. Leave blank for all types.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterType">
       <option value="">All Types</option>
-      <option value="weight">Weight</option>
-      <option value="vitals">Vitals</option>
-      <option value="med">Med</option>
-      <option value="proc">Procedure</option>
-      <option value="hoof">Hoof</option>
-      <option value="obs">Observation</option>
-      <option value="birth">Birth</option>
-      <option value="sale">Sale</option>
-      <option value="activity">Activity</option>
+      <!-- populated from GOAT_LOG_TYPES by renderHistory() -->
     </select>
 
     <label>Sort</label>
@@ -1278,148 +1260,6 @@ header > div:last-child { min-width: 0; }
   <div id="bd-sync-log" style="font-size:13px;color:#888;padding:10px;white-space:pre-wrap;"></div>
 </div>
 
-<!-- LOG MODAL -->
-<div id="bd-log-modal" class="bd-modal" onclick="bd_closeLogModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3 id="bd-log-modal-title">Log</h3>
-    <label>Log Type</label>
-    <select id="bd-log-type" onchange="bd_renderLogFields()">
-      <option value="weight">Weight</option>
-      <option value="med">Med / Treatment</option>
-      <option value="obs">Observation</option>
-      <option value="proc">Procedure</option>
-      <option value="mortality">Mortality</option>
-      <option value="hatch">Hatch</option>
-      <option value="feed">Feed</option>
-    </select>
-    <label>Time</label>
-    <div style="display:flex;gap:6px;margin-top:4px;">
-      <input type="datetime-local" id="bd-log-time" style="flex:1;">
-      <button onclick="bd_setLogNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
-    </div>
-    <div id="bd-log-fields" style="margin-top:4px;"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button onclick="bd_saveLog()" style="flex:1;">Save</button>
-      <button class="secondary" onclick="bd_closeLogModal()" style="flex:0 0 auto;">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<!-- ADD/EDIT BIRD MODAL -->
-<!-- BIRD PROFILE MODAL -->
-<div id="bd-profile-modal" class="bd-modal" onclick="bd_closeBirdProfile()" style="display:none;">
-  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div id="bd-profile-modal-content"></div>
-    <button class="secondary wide" onclick="bd_closeBirdProfile()" style="margin-top:10px;">Close</button>
-  </div>
-</div>
-
-<div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3 id="bd-bird-modal-title">Add Bird</h3>
-    <label>Tag / ID</label>
-    <input id="bd-bird-tag" placeholder="Tag number or ID">
-    <label>Name (optional)</label>
-    <input id="bd-bird-name" placeholder="Name">
-    <label>Species</label>
-    <select id="bd-bird-species" onchange="bd_updateBreedList()">
-      <option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option>
-    </select>
-    <label>Custom Species (if Other)</label>
-    <input id="bd-bird-species-custom" placeholder="e.g. Turkey, Quail">
-    <label>Breed</label>
-    <select id="bd-bird-breed"></select>
-    <label>Custom Breed</label>
-    <input id="bd-bird-breed-custom" placeholder="Enter breed if not listed">
-    <label>Sex</label>
-    <select id="bd-bird-sex">
-      <option value="">Unknown</option><option value="F">Female</option><option value="M">Male</option>
-    </select>
-    <label>Flock</label>
-    <select id="bd-bird-flock"></select>
-    <label>Notes</label>
-    <input id="bd-bird-notes" placeholder="Optional notes">
-    <label style="margin-top:12px;">Profile Photo (optional)</label>
-    <div style="display:flex;gap:6px;margin-top:4px;">
-      <button type="button" onclick="bd_birdTakeCamera()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Camera</button>
-      <button type="button" onclick="bd_birdOpenGallery()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Gallery</button>
-      <button type="button" id="bd-bird-clear-photo" onclick="bd_birdClearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">Clear</button>
-    </div>
-    <input type="file" id="bd-bird-gallery" accept="image/*" style="display:none;" onchange="bd_birdHandlePhoto(this)">
-    <input type="file" id="bd-bird-camera" accept="image/*" capture="environment" style="display:none;" onchange="bd_birdHandlePhoto(this)">
-    <div id="bd-bird-photo-preview" style="margin-top:6px;"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button onclick="bd_saveBird()" style="flex:1;">Save</button>
-      <button class="secondary" onclick="bd_closeBirdModal()" style="flex:0 0 auto;">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<!-- FLOCK MANAGER MODAL -->
-<div id="bd-flock-modal" class="bd-modal" onclick="bd_closeFlockModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3>Flock &amp; Nest Box Manager</h3>
-    <div id="bd-flock-list"></div>
-    <div class="box" style="margin-top:10px;">
-      <strong>Add Flock</strong>
-      <label>Flock Name</label>
-      <input id="bd-new-flock-name" placeholder="e.g. Layer Hens">
-      <label>Species Mix</label>
-      <input id="bd-new-flock-species" placeholder="e.g. Chicken, Duck">
-      <button onclick="bd_addFlock()" class="wide" style="margin-top:8px;">+ Add Flock</button>
-    </div>
-    <button class="wide secondary" onclick="bd_closeFlockModal()" style="margin-top:8px;">Close</button>
-  </div>
-</div>
-
-<!-- SPECIES MANAGER MODAL -->
-<div id="bd-species-modal" class="bd-modal" onclick="bd_closeSpeciesModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3>Species &amp; Breed Manager</h3>
-    <div id="bd-species-list"></div>
-    <button class="wide secondary" onclick="bd_closeSpeciesModal()" style="margin-top:8px;">Close</button>
-  </div>
-</div>
-
-<!-- BIRD MED FORMULA MANAGER -->
-<div id="bd-formula-modal" class="bd-modal" onclick="bd_closeFormulaModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3>Bird Med Formula Manager</h3>
-    <p style="color:#888;font-size:13px;">Dose, unit, and route used to pre-fill the Med log form. Separate from Goat's formulas — different species, different dosing.</p>
-    <div id="bd-formula-list"></div>
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <input id="bd-new-med-name" placeholder="Med name" style="flex:1;margin:0;">
-      <input id="bd-new-med-dose" placeholder="dose" type="number" step="0.01" style="width:90px;margin:0;">
-      <button onclick="bd_addFormula()" style="margin:0;padding:10px;">Add</button>
-    </div>
-    <button class="wide secondary" onclick="bd_closeFormulaModal()" style="margin-top:8px;">Close</button>
-  </div>
-</div>
-
-<!-- CONFIRM MODAL -->
-<div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3 id="bd-confirm-title">Confirm</h3>
-    <div id="bd-confirm-body"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button id="bd-confirm-ok" style="flex:1;background:#8b0000;">Confirm</button>
-      <button class="secondary" onclick="bd_closeConfirmModal()" style="flex:0 0 auto;">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<!-- EDIT LOG MODAL -->
-<div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3 id="bd-edit-title">Edit Log</h3>
-    <div id="bd-edit-fields"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button id="bd-edit-save" onclick="bd_saveEdit()" style="flex:1;">Save</button>
-      <button class="secondary" onclick="bd_closeEditModal()" style="flex:0 0 auto;">Cancel</button>
-    </div>
-  </div>
-</div>
-
 <!-- PHOTO VIEWER -->
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav bd-bottom-nav">
@@ -1433,6 +1273,91 @@ header > div:last-child { min-width: 0; }
 
 
 <script>
+// ============================================================
+// A. FARM CONFIG
+// Edit this section to customize FarmDesk for your farm.
+// Adding a new log type: add one entry to GOAT_LOG_TYPES or
+// BIRD_LOG_TYPES below. It will appear in the log buttons,
+// history filters, and scheduler automatically.
+// ============================================================
+
+// Goat log types — each entry defines one button on the log screen.
+// id:           internal key, matches farmOS log bundle logic in saveStep()
+// label:        button label shown to the user
+// icon:         emoji prefix on the button
+// followup:     true = show "Schedule Follow-up" selector after fields
+// photo:        true = show Camera / Gallery / File buttons
+// farmosBundle: farmOS log type this maps to (log--observation, log--medical, etc.)
+const GOAT_LOG_TYPES = [
+  { id: 'weight',   label: 'Weight',    icon: '⚖️',  followup: false, photo: false, farmosBundle: 'log--observation' },
+  { id: 'vitals',   label: 'Vitals',    icon: '🌡️', followup: false, photo: false, farmosBundle: 'log--observation' },
+  { id: 'med',      label: 'Med',       icon: '💉',  followup: true,  photo: false, farmosBundle: 'log--medical'     },
+  { id: 'proc',     label: 'Procedure', icon: '✂️',  followup: true,  photo: true,  farmosBundle: 'log--activity'    },
+  { id: 'hoof',     label: 'Hoof',      icon: '🐾',  followup: true,  photo: true,  farmosBundle: 'log--activity'    },
+  { id: 'obs',      label: 'Observe',   icon: '👁️', followup: true,  photo: true,  farmosBundle: 'log--observation' },
+  { id: 'birth',    label: 'Birth',     icon: '🍼',  followup: false, photo: true,  farmosBundle: 'log--birth'       },
+  { id: 'activity', label: 'Activity',  icon: '📝',  followup: false, photo: false, farmosBundle: 'log--activity'    },
+];
+
+// Bird log types — same structure as above
+const BIRD_LOG_TYPES = [
+  { id: 'weight',    label: 'Weight',    icon: '⚖️',  followup: false, photo: true,  farmosBundle: 'log--observation' },
+  { id: 'med',       label: 'Med',       icon: '💉',  followup: false, photo: true,  farmosBundle: 'log--medical'     },
+  { id: 'obs',       label: 'Observe',   icon: '👁️', followup: false, photo: true,  farmosBundle: 'log--observation' },
+  { id: 'proc',      label: 'Procedure', icon: '✂️',  followup: false, photo: true,  farmosBundle: 'log--activity'    },
+  { id: 'mortality', label: 'Mortality', icon: '💀',  followup: false, photo: true,  farmosBundle: 'log--activity'    },
+  { id: 'hatch',     label: 'Hatch',     icon: '🥚',  followup: false, photo: true,  farmosBundle: 'log--birth'       },
+  { id: 'feed',      label: 'Feed',      icon: '🌾',  followup: false, photo: false, farmosBundle: 'log--activity'    },
+];
+
+// Goat multi-step flows — combine log types into one session
+// Key = flow name used in startFlow(), value = array of log type ids
+const GOAT_FLOWS = {
+  weight:   ['weight'],
+  vitals:   ['vitals'],
+  med:      ['med'],
+  proc:     ['proc'],
+  hoof:     ['hoof'],
+  obs:      ['obs'],
+  birth:    ['birth'],
+  activity: ['activity'],
+  wv:       ['weight', 'vitals'],
+  wvm:      ['weight', 'vitals', 'med'],
+};
+
+// Goat hoof condition options — edit to match your grading system
+const HOOF_CONDITIONS = ['Good', 'Trimmed', 'Overgrown', 'Rot', 'Crack', 'Injury'];
+
+// Goat procedure defaults — users can type their own, these appear as suggestions
+const PROC_DEFAULTS     = ['Band', 'Disbud', 'Ear Tag', 'Tattoo', 'Wean'];
+const PROC_METHOD_DEFAULTS = ['California Bander', 'Elastrator', 'Hot Iron', 'Paste', 'Knife', 'Manual'];
+
+// Med route options — used in both Goat and Bird med forms
+const MED_ROUTES = ['Oral', 'SQ', 'IM', 'Topical', 'IV'];
+
+// Bird species — shown in the Add Bird form and filter chips
+// Add your own species here; breeds are managed in Settings > Bird Desk
+const BIRD_SPECIES_DEFAULTS = ['Chicken', 'Duck', 'Goose', 'Other'];
+
+// Bird mortality cause options
+const BIRD_MORTALITY_CAUSES = ['Unknown', 'Predator', 'Disease', 'Injury', 'Natural', 'Culled', 'Other'];
+
+// Follow-up schedule options — used across goat log types
+const FOLLOWUP_OPTIONS = [
+  { value: '',       label: 'None' },
+  { value: '3',      label: 'In 3 days' },
+  { value: '7',      label: 'In 1 week' },
+  { value: '14',     label: 'In 2 weeks' },
+  { value: '21',     label: 'In 3 weeks' },
+  { value: '30',     label: 'In 1 month' },
+  { value: '60',     label: 'In 2 months' },
+  { value: 'custom', label: 'Custom date' },
+];
+
+// ============================================================
+// END FARM CONFIG — everything below is app logic
+// ============================================================
+
 // ===========================
 // ===== GOATDESK MODULE =====
 // ===========================
@@ -1465,7 +1390,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782237482"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782251659"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1654,29 +1579,13 @@ function show(id) {
 // ===== FLOW =====
 let flow = [], step = 0, herdIndex = 0;
 
-const FLOWS = {
-  weight:   ["weight"],
-  vitals:   ["vitals"],
-  med:      ["med"],
-  proc:     ["proc"],
-  hoof:     ["hoof"],
-  obs:      ["obs"],
-  birth:    ["birth"],
-  activity: ["activity"],
-  wv:       ["weight","vitals"],
-  wvm:      ["weight","vitals","med"]
-};
-
-const TYPE_LABELS = {
-  weight:   "⚖️ Weight",
-  vitals:   "❤️ Vitals",
-  med:      "💊 Medication",
-  proc:     "🔧 Procedure",
-  hoof:     "Hoof",
-  obs:      "👁️ Observation",
-  birth:    "🐣 Birth",
-  activity: "📝 Activity"
-};
+// FLOWS and TYPE_LABELS are now derived from FARM CONFIG above
+// Edit GOAT_FLOWS and GOAT_LOG_TYPES in the config section to change these
+const FLOWS = GOAT_FLOWS;
+const TYPE_LABELS = GOAT_LOG_TYPES.reduce(function(acc, t) {
+  acc[t.id] = t.icon + ' ' + t.label;
+  return acc;
+}, {});
 
 function startFlow(type) {
   flow = FLOWS[type] || [type];
@@ -1760,6 +1669,44 @@ function getTimestamp() {
 }
 
 // ===== RENDER STEP =====
+// ===== SHARED RENDER HELPERS =====
+// These build reusable HTML chunks used across log type renderers.
+// photoKey: short string used to build unique file input IDs (e.g. 'hoof', 'obs', 'proc')
+
+function renderPhotoBlockHTML(photoKey) {
+  return '<label>Photo / File</label>' +
+    '<div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">' +
+      '<button type="button" onclick="takeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>' +
+      '<button type="button" onclick="document.getElementById(\'f_' + photoKey + 'photo\').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>' +
+      '<button type="button" onclick="document.getElementById(\'f_' + photoKey + 'file\').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📎 File</button>' +
+      '<button type="button" id="clearPhotoBtn" onclick="clearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>' +
+    '</div>' +
+    '<input type="file" id="f_' + photoKey + 'camera" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)">' +
+    '<input type="file" id="f_' + photoKey + 'photo" accept="image/*" style="display:none;" onchange="handlePhoto(this)">' +
+    '<input type="file" id="f_' + photoKey + 'file" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleFileAttach(this)">' +
+    '<div id="photoPreview" style="margin-top:8px;"></div>';
+}
+
+function renderFollowupHTML() {
+  return '<label>Schedule Follow-up</label>' +
+    '<select id="f_followup">' +
+    FOLLOWUP_OPTIONS.map(function(o) { return '<option value="' + o.value + '">' + o.label + '</option>'; }).join('') +
+    '</select>' +
+    '<input id="f_followup_date" type="date" style="display:none;margin-top:6px;">' +
+    '<input id="f_followup_note" placeholder="Follow-up note (optional)" style="margin-top:6px;">';
+}
+
+function setupFollowupHandler() {
+  var sel = document.getElementById("f_followup");
+  if (sel) sel.onchange = function() {
+    var dateEl = document.getElementById("f_followup_date");
+    if (dateEl) dateEl.style.display = this.value === "custom" ? "block" : "none";
+  };
+}
+
+// takeCameraBridge fallback IDs — built from photo keys used in renderPhotoBlockHTML
+var _photoCameraFallbackIds = ['f_proccamera','f_hoofcamera','f_obscamera','f_birthcamera'];
+
 function renderStep() {
   window.scrollTo(0, 0);
   const t = flow[step];
@@ -1891,7 +1838,7 @@ function renderStep() {
 
       <label>Route</label>
       <select id="f_route">
-        ${["Oral","SQ","IM","Topical","IV"].map(r=>`<option${r===(activeFormula.route||lastRoute)?" selected":""}>${r}</option>`).join("")}
+        ${MED_ROUTES.map(r=>`<option${r===(activeFormula.route||lastRoute)?" selected":""}>${r}</option>`).join("")}
       </select>
 
       <label>Notes</label>
@@ -1943,257 +1890,61 @@ function renderStep() {
   }
 
   if (t === "hoof") {
-    box.innerHTML = `
-      <label>Condition</label>
-      <select id="f_hoof">
-        <option>Good</option>
-        <option>Trimmed</option>
-        <option>Overgrown</option>
-        <option>Rot</option>
-        <option>Crack</option>
-        <option>Injury</option>
-      </select>
-      <label>Notes</label>
-      <input id="f_hoofnotes" placeholder="Optional notes">
-
-      <label>Photo / File</label>
-      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
-        <button type="button" onclick="takeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>
-        <button type="button" onclick="document.getElementById('f_hoofphoto').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>
-        <button type="button" onclick="document.getElementById('f_hooffile').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📎 File</button>
-        <button type="button" id="clearPhotoBtn" onclick="clearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>
-      </div>
-      <input type="file" id="f_hoofcamera" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_hoofphoto" accept="image/*" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_hooffile" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleFileAttach(this)">
-      <div id="photoPreview" style="margin-top:8px;"></div>
-
-      <label>Schedule Follow-up</label>
-      <select id="f_followup">
-        <option value="">None</option>
-        <option value="7">In 1 week</option>
-        <option value="14">In 2 weeks</option>
-        <option value="30">In 1 month</option>
-        <option value="60">In 2 months</option>
-        <option value="custom">Custom date</option>
-      </select>
-      <input id="f_followup_date" type="date" style="display:none;margin-top:6px;">
-      <input id="f_followup_note" placeholder="Follow-up note (optional)" style="margin-top:6px;">
-    `;
-    document.getElementById("f_hoof").onchange = () => {
-      const v = document.getElementById("f_hoof").value;
-      const el = document.getElementById("f_hoof");
-      el.className = (v==="Rot"||v==="Injury") ? "bad" : (v==="Overgrown"||v==="Crack") ? "warn" : "good";
+    box.innerHTML =
+      '<label>Condition</label>' +
+      '<select id="f_hoof">' + HOOF_CONDITIONS.map(function(c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
+      '<label>Notes</label><input id="f_hoofnotes" placeholder="Optional notes">' +
+      renderPhotoBlockHTML('hoof') +
+      renderFollowupHTML();
+    document.getElementById("f_hoof").onchange = function() {
+      var v = document.getElementById("f_hoof").value;
+      document.getElementById("f_hoof").className = (v==="Rot"||v==="Injury") ? "bad" : (v==="Overgrown"||v==="Crack") ? "warn" : "good";
     };
-    document.getElementById("f_followup").onchange = () => {
-      const v = document.getElementById("f_followup").value;
-      document.getElementById("f_followup_date").style.display = v === "custom" ? "block" : "none";
-    };
+    setupFollowupHandler();
   }
 
   if (t === "obs") {
-    box.innerHTML = `
-      <label>Title</label>
-      <input id="f_obstitle" placeholder="Brief title (shows as log name in farmOS)">
-
-      <label>Observation</label>
-      <textarea id="f_obs" rows="3" placeholder="Describe what you observed"></textarea>
-
-      <label>Severity</label>
-      <select id="f_sev">
-        <option>Low</option>
-        <option>Moderate</option>
-        <option>High</option>
-        <option>Urgent</option>
-      </select>
-
-      <label>Photo / File</label>
-      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
-        <button type="button" onclick="takeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>
-        <button type="button" onclick="document.getElementById('f_obsphoto').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>
-        <button type="button" onclick="document.getElementById('f_obsfile').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📎 File</button>
-        <button type="button" id="clearPhotoBtn" onclick="clearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>
-      </div>
-      <input type="file" id="f_obscamera" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_obsphoto" accept="image/*" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_obsfile" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleFileAttach(this)">
-      <div id="photoPreview" style="margin-top:8px;"></div>
-
-      <label>Schedule Follow-up</label>
-      <select id="f_followup">
-        <option value="">None</option>
-        <option value="3">In 3 days</option>
-        <option value="7">In 1 week</option>
-        <option value="14">In 2 weeks</option>
-        <option value="30">In 1 month</option>
-        <option value="custom">Custom date</option>
-      </select>
-      <input id="f_followup_date" type="date" style="display:none;margin-top:6px;">
-      <input id="f_followup_note" placeholder="Follow-up note (optional)" style="margin-top:6px;">
-    `;
-    document.getElementById("f_sev").onchange = () => {
-      const v = document.getElementById("f_sev").value;
-      document.getElementById("f_sev").className =
-        (v==="Urgent"||v==="High") ? "bad" : v==="Moderate" ? "warn" : "good";
+    box.innerHTML =
+      '<label>Title</label><input id="f_obstitle" placeholder="Brief title (shows as log name in farmOS)">' +
+      '<label>Observation</label><textarea id="f_obs" rows="3" placeholder="Describe what you observed"></textarea>' +
+      '<label>Severity</label><select id="f_sev"><option>Low</option><option>Moderate</option><option>High</option><option>Urgent</option></select>' +
+      renderPhotoBlockHTML('obs') +
+      renderFollowupHTML();
+    document.getElementById("f_sev").onchange = function() {
+      var v = document.getElementById("f_sev").value;
+      document.getElementById("f_sev").className = (v==="Urgent"||v==="High") ? "bad" : v==="Moderate" ? "warn" : "good";
     };
-    document.getElementById("f_followup").onchange = () => {
-      const v = document.getElementById("f_followup").value;
-      document.getElementById("f_followup_date").style.display = v === "custom" ? "block" : "none";
-    };
-  }
-
-  if (t === "birth") {
-    box.innerHTML = `
-      <label style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" id="f_birth_batch" style="width:18px;height:18px;" onchange="toggleBirthBatchMode(this.checked)">
-        Track as batch (not individually named)
-      </label>
-      <p style="color:#888;font-size:12px;margin:2px 0 8px;">Off = name each kid (default). On = just a count, for kids not being individually kept.</p>
-
-      <div id="f_birth_individual_fields">
-        <label>Kids</label>
-        <div id="f_kidRows"></div>
-        <button type="button" onclick="addBirthKidRow()" style="width:100%;background:#333;font-size:14px;margin-top:4px;">➕ Add Kid</button>
-      </div>
-      <div id="f_birth_batch_fields" style="display:none;">
-        <label>How many kids</label>
-        <input id="f_birth_batch_count" type="number" min="1" step="1" placeholder="e.g. 3">
-      </div>
-
-      <label style="margin-top:10px;">Dam (mother)</label>
-      <select id="f_dam">
-        <option value="">— select —</option>
-        ${getDams().length ? getDams().map(g => `<option>${g}</option>`).join("") : '<option disabled style="color:#888;">No females recorded</option>'}
-      </select>
-
-      <label>Sire (father)</label>
-      <select id="f_sire">
-        <option value="">— unknown —</option>
-        ${getSires().length ? getSires().map(g => `<option>${g}</option>`).join("") : '<option disabled style="color:#888;">No intact males recorded</option>'}
-      </select>
-
-      <label>Birth type</label>
-      <select id="f_birthtype">
-        <option>Natural</option>
-        <option>Assisted</option>
-        <option>C-section</option>
-      </select>
-
-      <label>Notes</label>
-      <textarea id="f_birthnotes" rows="2" placeholder="Optional notes"></textarea>
-
-      <label>Photo / File</label>
-      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
-        <button type="button" onclick="takeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>
-        <button type="button" onclick="document.getElementById('f_birthphoto').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>
-        <button type="button" onclick="document.getElementById('f_birthfile').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📎 File</button>
-        <button type="button" id="clearPhotoBtn" onclick="clearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>
-      </div>
-      <input type="file" id="f_birthcamera" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_birthphoto" accept="image/*" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_birthfile" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleFileAttach(this)">
-      <div id="photoPreview" style="margin-top:8px;"></div>
-    `;
-    addBirthKidRow(); // start with one empty row
-    // Apply birth litter default from settings
-    if (goatBirthDefaultMode() === 'batch') {
-      var batchChk = document.getElementById('f_birth_batch');
-      if (batchChk) { batchChk.checked = true; toggleBirthBatchMode(true); }
-    }
-    // Pre-select the active animal as Dam only if she is female
-    setTimeout(function() {
-      var damSel = document.getElementById('f_dam');
-      var activeName = goats[herdIndex];
-      if (damSel && activeName && (animalProfiles[activeName] || {}).sex === 'F') {
-        damSel.value = activeName;
-      }
-    }, 0);
+    setupFollowupHandler();
   }
 
   if (t === "activity") {
-    // Build list of previously used activity titles for autocomplete
-    const prevTitles = [...new Set(
-      logs.filter(l => l.type === "activity" && l.data.title)
-          .map(l => l.data.title)
-    )];
-
-    box.innerHTML = `
-      <label>Title</label>
-      <input id="f_actitle" list="activityTitles" placeholder="What activity?">
-      <datalist id="activityTitles">
-        ${prevTitles.map(t => `<option value="${t}">`).join("")}
-      </datalist>
-
-      <label>Description</label>
-      <textarea id="f_acdesc" rows="4" placeholder="Details..."></textarea>
-    `;
+    var prevTitles = [...new Set(logs.filter(function(l) { return l.type === "activity" && l.data.title; }).map(function(l) { return l.data.title; }))];
+    box.innerHTML =
+      '<label>Title</label><input id="f_actitle" list="activityTitles" placeholder="What activity?">' +
+      '<datalist id="activityTitles">' + prevTitles.map(function(x) { return '<option value="' + x + '">'; }).join('') + '</datalist>' +
+      '<label>Description</label><textarea id="f_acdesc" rows="4" placeholder="Details..."></textarea>';
   }
 
   if (t === "proc") {
-    const prevProcs = [...new Set(
-      logs.filter(l => l.type === "proc" && l.data.proc).map(l => l.data.proc)
-    )];
-    const defaultProcs = ["Band","Disbud","Ear Tag","Tattoo","Wean"];
-    const allProcs = [...new Set([...defaultProcs, ...prevProcs])];
-
-    const prevMethods = [...new Set(
-      logs.filter(l => l.type === "proc" && l.data.method).map(l => l.data.method)
-    )];
-    const defaultMethods = ["California Bander","Elastrator","Hot Iron","Paste","Knife","Manual"];
-    const allMethods = [...new Set([...defaultMethods, ...prevMethods])];
-
-    box.innerHTML = `
-      <label>Procedure</label>
-      <input id="f_proc" list="procList" placeholder="Select or type procedure">
-      <datalist id="procList">
-        ${allProcs.map(p => `<option value="${p}">`).join("")}
-      </datalist>
-
-      <label>Method</label>
-      <input id="f_procmethod" list="methodList" placeholder="Select or type method">
-      <datalist id="methodList">
-        ${allMethods.map(m => `<option value="${m}">`).join("")}
-      </datalist>
-
-      <label>Notes</label>
-      <textarea id="f_procnotes" rows="3" placeholder="Optional notes"></textarea>
-
-      <label>Photo / File</label>
-      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
-        <button type="button" onclick="takeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>
-        <button type="button" onclick="document.getElementById('f_procphoto').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">🖼️ Gallery</button>
-        <button type="button" onclick="document.getElementById('f_procfile').click()" style="flex:1;margin:0;padding:10px;font-size:14px;">📎 File</button>
-        <button type="button" id="clearPhotoBtn" onclick="clearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">✕</button>
-      </div>
-      <input type="file" id="f_proccamera" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_procphoto" accept="image/*" style="display:none;" onchange="handlePhoto(this)">
-      <input type="file" id="f_procfile" accept=".pdf,.doc,.docx,.txt,.csv" style="display:none;" onchange="handleFileAttach(this)">
-      <div id="photoPreview" style="margin-top:8px;"></div>
-
-      <label>Schedule Follow-up</label>
-      <select id="f_followup">
-        <option value="">None</option>
-        <option value="7">In 1 week</option>
-        <option value="14">In 2 weeks</option>
-        <option value="21">In 3 weeks</option>
-        <option value="30">In 1 month</option>
-        <option value="custom">Custom date</option>
-      </select>
-      <input id="f_followup_date" type="date" style="display:none;margin-top:6px;">
-      <input id="f_followup_note" placeholder="Follow-up note (optional)" style="margin-top:6px;">
-
-      <label style="margin-top:10px;display:block;">📦 Supplies Used</label>
-      <p style="color:#888;font-size:13px;margin:2px 0 6px;">Bands, gauze, vet wrap, etc. Auto-deducts from inventory on save.</p>
-      <div id="procSuppliesList" style="margin-top:4px;"></div>
-      <button type="button" onclick="procAddSupplyRow()" style="margin-top:4px;width:calc(100% - 10px);background:#333;font-size:15px;">➕ Add Supply Item</button>
-    `;
-    // Pre-add one empty row if stock items exist
-    const _sdCheck = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+    var prevProcs = [...new Set(logs.filter(function(l) { return l.type === "proc" && l.data.proc; }).map(function(l) { return l.data.proc; }))];
+    var allProcs = [...new Set([...PROC_DEFAULTS, ...prevProcs])];
+    var prevMethods = [...new Set(logs.filter(function(l) { return l.type === "proc" && l.data.method; }).map(function(l) { return l.data.method; }))];
+    var allMethods = [...new Set([...PROC_METHOD_DEFAULTS, ...prevMethods])];
+    box.innerHTML =
+      '<label>Procedure</label><input id="f_proc" list="procList" placeholder="Select or type procedure">' +
+      '<datalist id="procList">' + allProcs.map(function(p) { return '<option value="' + p + '">'; }).join('') + '</datalist>' +
+      '<label>Method</label><input id="f_procmethod" list="methodList" placeholder="Select or type method">' +
+      '<datalist id="methodList">' + allMethods.map(function(m) { return '<option value="' + m + '">'; }).join('') + '</datalist>' +
+      '<label>Notes</label><textarea id="f_procnotes" rows="3" placeholder="Optional notes"></textarea>' +
+      renderPhotoBlockHTML('proc') +
+      renderFollowupHTML() +
+      '<label style="margin-top:10px;display:block;">📦 Supplies Used</label>' +
+      '<p style="color:#888;font-size:13px;margin:2px 0 6px;">Bands, gauze, vet wrap, etc. Auto-deducts from inventory on save.</p>' +
+      '<div id="procSuppliesList" style="margin-top:4px;"></div>' +
+      '<button type="button" onclick="procAddSupplyRow()" style="margin-top:4px;width:calc(100% - 10px);background:#333;font-size:15px;">➕ Add Supply Item</button>';
+    var _sdCheck = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
     if (_sdCheck.length > 0) procAddSupplyRow();
-    document.getElementById("f_followup").onchange = () => {
-      const v = document.getElementById("f_followup").value;
-      document.getElementById("f_followup_date").style.display = v === "custom" ? "block" : "none";
-    };
+    setupFollowupHandler();
   }
 
   // Focus first input
@@ -2212,10 +1963,9 @@ function takeCameraBridge() {
   if (window.AndroidBridge && window.AndroidBridge.takePhoto) {
     window.AndroidBridge.takePhoto("onAndroidPhoto");
   } else {
-    // Fallback: try capture input if bridge not available (PWA/browser)
-    const inputs = ["f_proccamera","f_hoofcamera","f_obscamera","f_birthcamera"];
-    for (const id of inputs) {
-      const el = document.getElementById(id);
+    // Fallback: try any visible capture input (PWA/browser)
+    for (var i = 0; i < _photoCameraFallbackIds.length; i++) {
+      var el = document.getElementById(_photoCameraFallbackIds[i]);
       if (el) { el.click(); break; }
     }
   }
@@ -3334,8 +3084,21 @@ function logSevRank(l) {
 }
 
 function renderHistory() {
+  // Populate type filter from config if not already done
+  var ftSel = document.getElementById("filterType");
+  if (ftSel && ftSel.options.length <= 1) {
+    GOAT_LOG_TYPES.forEach(function(lt) {
+      var o = document.createElement('option');
+      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      ftSel.appendChild(o);
+    });
+    // Sale is a lifecycle event not in GOAT_LOG_TYPES — add manually
+    var saleOpt = document.createElement('option');
+    saleOpt.value = 'sale'; saleOpt.textContent = '🏷️ Sale';
+    ftSel.appendChild(saleOpt);
+  }
   const gf = document.getElementById("filterGoat").value;
-  const tf = document.getElementById("filterType").value;
+  const tf = ftSel ? ftSel.value : '';
   const sf = document.getElementById("sortOrder").value;
   const search = (document.getElementById("historySearch") ? document.getElementById("historySearch").value : "").toLowerCase().trim();
 
@@ -3820,7 +3583,7 @@ function renderSettings() {
     routeSel.setAttribute("data-med", name);
     routeSel.setAttribute("data-field", "route");
     routeSel.style.cssText = "padding:6px;font-size:14px;";
-    ["Oral","SQ","IM","Topical","IV"].forEach(r => {
+    MED_ROUTES.forEach(r => {
       const opt = document.createElement("option");
       opt.value = r; opt.textContent = r;
       if (r === routeVal) opt.selected = true;
@@ -4287,9 +4050,9 @@ async function setAnimalFlag(name, flag, on) {
 
 function openAnimalProfile(name) {
   var p = animalProfiles[name] || {};
-  var modal = document.getElementById("goat-profile-modal");
-  var body  = document.getElementById("goat-profile-content");
-  var title = document.getElementById("goat-profile-title");
+  var modal = document.getElementById("profile-modal");
+  var body  = document.getElementById("profile-modal-content");
+  var title = document.getElementById("profile-modal-title");
   if (!modal || !body) return;
   if (title) title.textContent = name;
 
@@ -4332,22 +4095,22 @@ function openAnimalProfile(name) {
     row("Location", locText) + row("Notes", p.notes) +
     flagsHTML +
     '<div style="display:flex;gap:8px;margin-top:12px;">' +
-      '<button onclick="closeGoatProfile();startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;">📋 Log for ' + name + '</button>' +
-      '<button onclick="closeGoatProfile();editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
+      '<button onclick="closeProfile();startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;">📋 Log for ' + name + '</button>' +
+      '<button onclick="closeProfile();editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
     '</div>' +
-    '<button onclick="closeGoatProfile();openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>' +
+    '<button onclick="closeProfile();openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>' +
     '<div style="display:flex;gap:8px;margin-top:8px;">' +
-      '<button onclick="closeGoatProfile();openSellAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b6500;padding:10px 4px;font-size:13px;">🏷️ Sell</button>' +
-      '<button onclick="closeGoatProfile();openDeathAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b0000;padding:10px 4px;font-size:13px;">💀 Death</button>' +
-      '<button onclick="closeGoatProfile();openRetypeAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#555;padding:10px 4px;font-size:13px;">❓ Retype</button>' +
+      '<button onclick="closeProfile();openSellAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b6500;padding:10px 4px;font-size:13px;">🏷️ Sell</button>' +
+      '<button onclick="closeProfile();openDeathAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b0000;padding:10px 4px;font-size:13px;">💀 Death</button>' +
+      '<button onclick="closeProfile();openRetypeAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#555;padding:10px 4px;font-size:13px;">❓ Retype</button>' +
     '</div>';
 
   modal.style.display = 'flex';
   lazyLoadPhotos(body);
 }
 
-function closeGoatProfile() {
-  var modal = document.getElementById('goat-profile-modal');
+function closeProfile() {
+  var modal = document.getElementById('profile-modal');
   if (modal) modal.style.display = 'none';
 }
 
@@ -6988,9 +6751,12 @@ function logout() {
     localStorage.removeItem(BD_LS.lastSync);
     localStorage.removeItem(BD_LS.excluded);
     localStorage.removeItem(BD_LS.flocks);
+    localStorage.removeItem(BATCHES_LS_KEY);
+    localStorage.removeItem(PENDING_ACTIONS_LS_KEY);
     logs = []; weights = {}; goats = [...DEFAULT_ANIMALS]; excludedAnimals = [];
     assets = []; pending = []; adjHistory = [];
     bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = []; bd_excluded = [];
+    batches = []; pendingActions = [];
     bd_updateSyncBadge();
     saveBtn.textContent = "💾 Save";
     saveBtn.style.background = "";
@@ -8797,7 +8563,7 @@ async function openEdit(id) {
       <input id="ed_medweight" type="number" step="0.1" value="${l.data.weight||""}">
       <label>Route</label>
       <select id="ed_route">
-        ${["Oral","SQ","IM","Topical","IV"].map(r=>`<option${r===l.data.route?" selected":""}>${r}</option>`).join("")}
+        ${MED_ROUTES.map(r=>`<option${r===l.data.route?" selected":""}>${r}</option>`).join("")}
       </select>
       <label>Notes</label>
       <textarea id="ed_mednotes" rows="4">${l.data.notes||""}</textarea>
@@ -9588,7 +9354,7 @@ function quickAdj(uuid, delta) {
 function openItemProfile(uuid) {
   const a = assets.find(x => x.uuid === uuid);
   if (!a) return;
-  const modal = document.getElementById('sd-item-profile-modal');
+  const modal = document.getElementById('profile-modal');
   if (!modal) return;
 
   function row(k, v) { return v !== undefined && v !== '' ? `<div style="margin:5px 0;"><strong style="color:#9c9;">${k}:</strong> ${v}</div>` : ''; }
@@ -9617,7 +9383,7 @@ function openItemProfile(uuid) {
   }
 
   const ul = a.units || '';
-  document.getElementById('sd-item-profile-content').innerHTML =
+  document.getElementById('profile-modal-content').innerHTML =
     `<h3 style="margin:0 0 4px;color:#3a7;">${a.name}</h3>` +
     `<div style="font-size:13px;color:#888;margin-bottom:10px;">${a.category || ''}</div>` +
     photoHTML +
@@ -9625,19 +9391,15 @@ function openItemProfile(uuid) {
     row('Category', a.category) +
     row('Notes', a.notes ? a.notes.replace(/\n/g, '<br>') : '') +
     `<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">` +
-      `<button onclick="closeItemProfile();openAdjust('${uuid}');" style="flex:1;margin:0;min-width:80px;">📝 Adjust</button>` +
-      `<button onclick="closeItemProfile();openEditItem('${uuid}');" class="secondary" style="flex:1;margin:0;min-width:80px;">✏️ Edit</button>` +
+      `<button onclick="closeProfile();openAdjust('${uuid}');" style="flex:1;margin:0;min-width:80px;">📝 Adjust</button>` +
+      `<button onclick="closeProfile();openEditItem('${uuid}');" class="secondary" style="flex:1;margin:0;min-width:80px;">✏️ Edit</button>` +
     `</div>` +
     histHTML;
 
-  lazyLoadPhotos(document.getElementById('sd-item-profile-content'));
+  lazyLoadPhotos(document.getElementById('profile-modal-content'));
   modal.style.display = 'flex';
 }
 
-function closeItemProfile() {
-  const modal = document.getElementById('sd-item-profile-modal');
-  if (modal) modal.style.display = 'none';
-}
 
 async function openAdjust(uuid) {
   adjustAsset = assets.find(a => a.uuid === uuid);
@@ -11822,7 +11584,7 @@ function bd_closeBirdProfile() {
 function openBatchProfile(batchId) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return;
-  var modal = document.getElementById('bd-batch-profile-modal');
+  var modal = document.getElementById('profile-modal');
   if (!modal) return;
 
   function row(k, v) { return v ? '<div style="margin:5px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
@@ -11859,12 +11621,12 @@ function openBatchProfile(batchId) {
   var actionsHTML = isComplete
     ? '<p style="color:#666;font-size:13px;margin-top:12px;text-align:center;">Batch complete — all animals accounted for.</p>'
     : '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
-        '<button onclick="closeBatchProfile();openBatchSellModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b6500;min-width:80px;">🏷️ Sell</button>' +
-        '<button onclick="closeBatchProfile();openBatchDiedModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b0000;min-width:80px;">💀 Died</button>' +
-        '<button onclick="closeBatchProfile();confirmPromoteFromBatch(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a5a2a;min-width:80px;">⭐ Promote</button>' +
+        '<button onclick="closeProfile();openBatchSellModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b6500;min-width:80px;">🏷️ Sell</button>' +
+        '<button onclick="closeProfile();openBatchDiedModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b0000;min-width:80px;">💀 Died</button>' +
+        '<button onclick="closeProfile();confirmPromoteFromBatch(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a5a2a;min-width:80px;">⭐ Promote</button>' +
       '</div>';
 
-  document.getElementById('bd-batch-profile-content').innerHTML =
+  document.getElementById('profile-modal-content').innerHTML =
     '<h3 style="margin:0 0 4px;color:#3a7;">' + (b.label || b.species + ' batch') + '</h3>' +
     '<div style="font-size:13px;color:#888;margin-bottom:10px;">' + syncBadge + '</div>' +
     '<div style="font-size:36px;text-align:center;margin:8px 0 12px;">' + (b.module === 'goat' ? '🐐' : (typeof bd_speciesIcon === 'function' ? bd_speciesIcon(b.species) : '📦')) + '</div>' +
@@ -11882,24 +11644,29 @@ function openBatchProfile(batchId) {
     actionsHTML +
     histHTML +
     '<div style="display:flex;gap:8px;margin-top:14px;">' +
-      '<button onclick="closeBatchProfile();openBatchEditModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a4a6a;">✏️ Edit Batch</button>' +
+      '<button onclick="closeProfile();openBatchEditModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a4a6a;">✏️ Edit Batch</button>' +
     '</div>';
 
   modal.style.display = 'flex';
 }
 
-function closeBatchProfile() {
-  var modal = document.getElementById('bd-batch-profile-modal');
-  if (modal) modal.style.display = 'none';
-}
 
 // ===== LOG MODAL =====
 function bd_openLogSheet(id) {
-  bd_activeTaskId = null; // plain new log, not completing a scheduled task
+  bd_activeTaskId = null;
   bd_currentBirdId = id;
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
   document.getElementById('bd-log-modal-title').textContent = 'Log - ' + (bird ? (bird.tag || bird.name || 'Bird') : 'Bird');
-  document.getElementById('bd-log-type').value = 'weight';
+  // Populate type select from BIRD_LOG_TYPES config
+  var typeSel = document.getElementById('bd-log-type');
+  if (typeSel && typeSel.options.length === 0) {
+    BIRD_LOG_TYPES.forEach(function(lt) {
+      var o = document.createElement('option');
+      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      typeSel.appendChild(o);
+    });
+  }
+  if (typeSel) typeSel.value = 'weight';
   var now = new Date(); now.setSeconds(0,0);
   document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16);
   bd_currentPhoto = null; bd_renderLogFields();
@@ -11945,6 +11712,7 @@ function bd_closeLogModal(e) { if (!e || e.target === document.getElementById('b
 function bd_renderLogFields() {
   var t = document.getElementById('bd-log-type').value;
   var box = document.getElementById('bd-log-fields');
+  var routeOpts = MED_ROUTES.map(function(r) { return "<option>" + r + "</option>"; }).join('');
   if (t === 'weight') {
     box.innerHTML = "<label>Weight</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-weight' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-weight-unit' style='width:90px;margin:0;'><option>lbs</option><option>g</option><option>kg</option></select></div><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
   } else if (t === 'med') {
@@ -11952,20 +11720,22 @@ function bd_renderLogFields() {
     var medFormulaSelect = medFormulaNames.length
       ? "<select id='bd-f-med-formula' onchange=\"bd_applyMedFormula(this.value)\"><option value=''>-- choose a formula or type below --</option>" + medFormulaNames.map(function(n) { return "<option>" + n + "</option>"; }).join('') + "</select>"
       : "";
-    box.innerHTML = "<label>Medication</label>" + medFormulaSelect + "<input id='bd-f-med' placeholder='Med name' style='margin-top:6px;'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-dose' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-dose-unit' style='width:90px;margin:0;'><option>ml</option><option>cc</option><option>mg</option><option>tablet</option></select></div><label>Route</label><select id='bd-f-route'><option>Oral</option><option>SQ</option><option>IM</option><option>Topical</option></select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
+    box.innerHTML = "<label>Medication</label>" + medFormulaSelect + "<input id='bd-f-med' placeholder='Med name' style='margin-top:6px;'><label>Dose</label><div style='display:flex;gap:6px;margin-top:4px;'><input id='bd-f-dose' type='number' step='0.01' placeholder='0.00' style='flex:1;'><select id='bd-f-dose-unit' style='width:90px;margin:0;'><option>ml</option><option>cc</option><option>mg</option><option>tablet</option></select></div><label>Route</label><select id='bd-f-route'>" + routeOpts + "</select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'>" + bd_photoFieldHTML();
   } else if (t === 'obs') {
     box.innerHTML = "<label>Observation</label><input id='bd-f-obs-title' placeholder='Brief title'><label>Details</label><textarea id='bd-f-notes' rows='3'></textarea>" + bd_photoFieldHTML();
   } else if (t === 'proc') {
     box.innerHTML = "<label>Procedure</label><input id='bd-f-proc' placeholder='e.g. Banding'><label>Notes</label><textarea id='bd-f-notes' rows='2'></textarea>" + bd_photoFieldHTML();
   } else if (t === 'mortality') {
-    box.innerHTML = "<label>Cause</label><select id='bd-f-cause'><option>Unknown</option><option>Predator</option><option>Disease</option><option>Injury</option><option>Natural</option><option>Culled</option><option>Other</option></select><label>Notes</label><textarea id='bd-f-notes' rows='2'></textarea><p style='color:#c90;font-size:13px;margin-top:8px;'>This will archive the bird in farmOS on sync.</p>" + bd_photoFieldHTML();
+    var causeOpts = BIRD_MORTALITY_CAUSES.map(function(c) { return "<option>" + c + "</option>"; }).join('');
+    box.innerHTML = "<label>Cause</label><select id='bd-f-cause'>" + causeOpts + "</select><label>Notes</label><textarea id='bd-f-notes' rows='2'></textarea><p style='color:#c90;font-size:13px;margin-top:8px;'>This will archive the bird in farmOS on sync.</p>" + bd_photoFieldHTML();
   } else if (t === 'hatch') {
     var flockOpts = "<option value=''>-- No Flock --</option>" + bd_flocks.map(function(f) { return "<option>" + f.name + "</option>"; }).join('');
     var hatchIndivDefault = bd_hatchDefaultMode() === 'individual';
     var femaleBirds = bd_birds.filter(function(b) { return b.sex === 'F' && b.status !== 'archived'; });
     var motherOpts = "<option value=''>— unknown —</option>" + femaleBirds.map(function(b) { return "<option value='" + (b.tag||b.name||'') + "'>" + (b.name ? b.name + (b.tag ? ' #'+b.tag : '') : '#'+b.tag) + "</option>"; }).join('');
     var motherNote = femaleBirds.length === 0 ? "<p style='color:#888;font-size:12px;margin:2px 0;'>No females recorded — add female birds to assign a mother.</p>" : '';
-    box.innerHTML = "<label style='display:flex;align-items:center;gap:8px;'><input type='checkbox' id='bd-f-hatch-individual'" + (hatchIndivDefault ? ' checked' : '') + " style='width:18px;height:18px;'> Track individually (named birds)</label><p style='color:#888;font-size:12px;margin:2px 0 8px;'>Off = batch count (most offspring). On = creates a named bird per hatchling, like before.</p><label>Species</label><select id='bd-f-hatch-species'><option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option></select><label>Breed</label><input id='bd-f-hatch-breed' placeholder='Breed (optional)'><label>Count</label><input id='bd-f-hatch-count' type='number' min='1' step='1' placeholder='e.g. 8'><label>Mother / Broody (optional)</label><select id='bd-f-hatch-parent'>" + motherOpts + "</select>" + motherNote + "<label>Flock</label><select id='bd-f-hatch-flock'>" + flockOpts + "</select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'><p id='bd-f-hatch-hint' style='color:#888;font-size:13px;margin-top:8px;'>" + (hatchIndivDefault ? 'Creates placeholder birds. Tag each bird later.' : 'Creates one batch count — sell/promote individuals later from the Birds list.') + "</p>" + bd_photoFieldHTML();
+    var speciesOpts = BIRD_SPECIES_DEFAULTS.map(function(s) { return "<option>" + s + "</option>"; }).join('');
+    box.innerHTML = "<label style='display:flex;align-items:center;gap:8px;'><input type='checkbox' id='bd-f-hatch-individual'" + (hatchIndivDefault ? ' checked' : '') + " style='width:18px;height:18px;'> Track individually (named birds)</label><p style='color:#888;font-size:12px;margin:2px 0 8px;'>Off = batch count (most offspring). On = creates a named bird per hatchling, like before.</p><label>Species</label><select id='bd-f-hatch-species'>" + speciesOpts + "</select><label>Breed</label><input id='bd-f-hatch-breed' placeholder='Breed (optional)'><label>Count</label><input id='bd-f-hatch-count' type='number' min='1' step='1' placeholder='e.g. 8'><label>Mother / Broody (optional)</label><select id='bd-f-hatch-parent'>" + motherOpts + "</select>" + motherNote + "<label>Flock</label><select id='bd-f-hatch-flock'>" + flockOpts + "</select><label>Notes</label><input id='bd-f-notes' placeholder='Optional'><p id='bd-f-hatch-hint' style='color:#888;font-size:13px;margin-top:8px;'>" + (hatchIndivDefault ? 'Creates placeholder birds. Tag each bird later.' : 'Creates one batch count — sell/promote individuals later from the Birds list.') + "</p>" + bd_photoFieldHTML();
     var hatchIndivCheck = document.getElementById('bd-f-hatch-individual');
     if (hatchIndivCheck) hatchIndivCheck.onchange = function() {
       var hint = document.getElementById('bd-f-hatch-hint');
@@ -12126,7 +11896,9 @@ async function bd_openAddBird() {
   bd_editBirdId = null;
   document.getElementById('bd-bird-modal-title').textContent = 'Add Bird';
   ['bd-bird-tag','bd-bird-name','bd-bird-species-custom','bd-bird-breed-custom','bd-bird-notes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
-  document.getElementById('bd-bird-species').value = 'Chicken';
+  // Populate species from BIRD_SPECIES_DEFAULTS config
+  var speciesSel = document.getElementById('bd-bird-species');
+  if (speciesSel) { speciesSel.innerHTML = BIRD_SPECIES_DEFAULTS.map(function(s) { return '<option>' + s + '</option>'; }).join(''); speciesSel.value = BIRD_SPECIES_DEFAULTS[0] || 'Chicken'; }
   document.getElementById('bd-bird-sex').value = '';
   bd_updateBreedList(); bd_populateFlock('bd-bird-flock'); await bd_birdShowPhoto(null);
   document.getElementById('bd-bird-modal').style.display = 'block';
@@ -13434,33 +13206,30 @@ function updateFarmNameSubtitle() {
 // Used by both the in-app back press (popstate) and the Android hardware back
 // button so behaviour is identical everywhere: close popup first, else navigate.
 function closeTopOverlay() {
-  var pv = document.getElementById('photoViewer');
-  if (pv && pv.classList.contains('open')) { pv.classList.remove('open'); return true; }
-  var em = document.getElementById('editModal');
-  if (em && em.style.display === 'block') { closeEdit(); return true; }
-  var mm = document.getElementById('moveModal');
-  if (mm && mm.style.display === 'block') { closeMoveModal(); return true; }
-  var gm = document.getElementById('groupModal');
-  if (gm && gm.style.display === 'block') { closeGroupModal(); return true; }
-  var sm = document.getElementById('sd-editModal');
-  if (sm && sm.style.display === 'block') { sd_closeEdit(); return true; }
-  // New modals — batch, item profile, med material
-  var batchEdit = document.getElementById('batchEditModal');
-  if (batchEdit && batchEdit.style.display === 'block') { closeBatchEditModal(); return true; }
-  var batchAct = document.getElementById('batchActionModal');
-  if (batchAct && batchAct.style.display === 'block') { closeBatchActionModal(); return true; }
-  var batchProf = document.getElementById('bd-batch-profile-modal');
-  if (batchProf && batchProf.style.display === 'flex') { closeBatchProfile(); return true; }
-  var itemProf = document.getElementById('sd-item-profile-modal');
-  if (itemProf && itemProf.style.display === 'flex') { closeItemProfile(); return true; }
-  var medMat = document.getElementById('medMaterialModal');
-  if (medMat && medMat.style.display === 'block') { medMat.style.display = 'none'; return true; }
-  var goatProf = document.getElementById('goat-profile-modal');
-  if (goatProf && goatProf.style.display === 'flex') { closeGoatProfile(); return true; }
-  var bdModals = ['bd-profile-modal','bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
-  for (var i = 0; i < bdModals.length; i++) {
-    var bm = document.getElementById(bdModals[i]);
-    if (bm && (bm.style.display === 'block' || bm.style.display === 'flex')) { bm.style.display = 'none'; return true; }
+  // Check each modal in z-index order — highest first
+  var checks = [
+    { id: 'photoViewer',       test: function(el) { return el.classList.contains('open'); }, close: function(el) { el.classList.remove('open'); } },
+    { id: 'medMaterialModal',  test: function(el) { return el.style.display === 'block'; }, close: function(el) { el.style.display = 'none'; } },
+    { id: 'medDeductModal',    test: function(el) { return el.style.display === 'block'; }, close: function(el) { el.style.display = 'none'; } },
+    { id: 'batchEditModal',    test: function(el) { return el.style.display === 'block'; }, close: function() { closeBatchEditModal(); } },
+    { id: 'batchActionModal',  test: function(el) { return el.style.display === 'block'; }, close: function() { closeBatchActionModal(); } },
+    { id: 'editModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { closeEdit(); } },
+    { id: 'moveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { closeMoveModal(); } },
+    { id: 'groupModal',        test: function(el) { return el.style.display === 'block'; }, close: function() { closeGroupModal(); } },
+    { id: 'sd-editModal',      test: function(el) { return el.style.display === 'block'; }, close: function() { sd_closeEdit(); } },
+    { id: 'profile-modal',     test: function(el) { return el.style.display === 'flex' || el.style.display === 'block'; }, close: function() { closeProfile(); } },
+    { id: 'bd-profile-modal',  test: function(el) { return el.style.display === 'flex' || el.style.display === 'block'; }, close: function() { bd_closeBirdProfile(); } },
+    { id: 'bd-log-modal',      test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeLogModal(); } },
+    { id: 'bd-bird-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeBirdModal(); } },
+    { id: 'bd-flock-modal',    test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFlockModal(); } },
+    { id: 'bd-species-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeSpeciesModal(); } },
+    { id: 'bd-confirm-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeConfirmModal(); } },
+    { id: 'bd-edit-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeEditModal(); } },
+    { id: 'bd-formula-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFormulaModal(); } }
+  ];
+  for (var i = 0; i < checks.length; i++) {
+    var el = document.getElementById(checks[i].id);
+    if (el && checks[i].test(el)) { checks[i].close(el); return true; }
   }
   return false;
 }
@@ -13498,6 +13267,31 @@ window.addEventListener('popstate', function(e) {
   // Re-arm a state for this position so a subsequent back press fires popstate again
   history.pushState({ navIndex: navStack.length - 1 }, '');
 });
+
+// ===== INIT: populate GoatDesk home buttons from FARM CONFIG =====
+(function initGoatHomeButtons() {
+  var logBtns = document.getElementById('gd-log-buttons');
+  if (logBtns) {
+    GOAT_LOG_TYPES.forEach(function(lt) {
+      var btn = document.createElement('button');
+      btn.textContent = lt.icon + ' ' + lt.label;
+      btn.setAttribute('onclick', "startFlow('" + lt.id + "')");
+      logBtns.appendChild(btn);
+    });
+  }
+  var flowBtns = document.getElementById('gd-flow-buttons');
+  if (flowBtns) {
+    // Multi-step flows: any GOAT_FLOWS entry with more than one step
+    var multiFlows = { wv: 'Weight + Vitals', wvm: 'Weight + Vitals + Med' };
+    Object.keys(multiFlows).forEach(function(key) {
+      var btn = document.createElement('button');
+      btn.textContent = multiFlows[key];
+      btn.className = 'secondary';
+      btn.setAttribute('onclick', "startFlow('" + key + "')");
+      flowBtns.appendChild(btn);
+    });
+  }
+})();
 
 renderCatTabs();
 renderNewItemCatOptions();
@@ -13848,29 +13642,153 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 
 </script>
 
-<!-- ===== PROFILE MODALS — body level, accessible from any module ===== -->
-<div id="goat-profile-modal" class="bd-modal" onclick="closeGoatProfile()" style="display:none;">
+<!-- ===== SHARED PROFILE MODAL — body level, used by all modules ===== -->
+<!-- openProfile({title, content, onClose}) / closeProfile() -->
+<div id="profile-modal" class="bd-modal" onclick="closeProfile()" style="display:none;">
   <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <strong id="goat-profile-title" style="font-size:18px;color:#3a7;"></strong>
-      <button onclick="closeGoatProfile()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+      <strong id="profile-modal-title" style="font-size:18px;color:#3a7;"></strong>
+      <button onclick="closeProfile()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
     </div>
-    <div id="goat-profile-content"></div>
-    <button class="secondary wide" onclick="closeGoatProfile()" style="margin-top:10px;">Close</button>
+    <div id="profile-modal-content"></div>
+    <button class="secondary wide" onclick="closeProfile()" style="margin-top:10px;">Close</button>
   </div>
 </div>
 
-<div id="bd-batch-profile-modal" class="bd-modal" onclick="closeBatchProfile()" style="display:none;">
-  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div id="bd-batch-profile-content"></div>
-    <button class="secondary wide" onclick="closeBatchProfile()" style="margin-top:10px;">Close</button>
+<!-- ===== BIRDDESK MODALS — body level (moved from module-birddesk) ===== -->
+<!-- LOG MODAL -->
+<div id="bd-log-modal" class="bd-modal" onclick="bd_closeLogModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-log-modal-title">Log</h3>
+    <label>Log Type</label>
+    <select id="bd-log-type" onchange="bd_renderLogFields()">
+      <!-- populated from BIRD_LOG_TYPES config by bd_openLogSheet() -->
+    </select>
+    <label>Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="bd-log-time" style="flex:1;">
+      <button onclick="bd_setLogNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+    <div id="bd-log-fields" style="margin-top:4px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="bd_saveLog()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="bd_closeLogModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
   </div>
 </div>
 
-<div id="sd-item-profile-modal" class="bd-modal" onclick="closeItemProfile()" style="display:none;">
+<!-- BIRD PROFILE MODAL -->
+<div id="bd-profile-modal" class="bd-modal" onclick="bd_closeBirdProfile()" style="display:none;">
   <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div id="sd-item-profile-content"></div>
-    <button class="secondary wide" onclick="closeItemProfile()" style="margin-top:10px;">Close</button>
+    <div id="bd-profile-modal-content"></div>
+    <button class="secondary wide" onclick="bd_closeBirdProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
+<!-- ADD/EDIT BIRD MODAL -->
+<div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-bird-modal-title">Add Bird</h3>
+    <label>Tag / ID</label>
+    <input id="bd-bird-tag" placeholder="Tag number or ID">
+    <label>Name (optional)</label>
+    <input id="bd-bird-name" placeholder="Name">
+    <label>Species</label>
+    <select id="bd-bird-species" onchange="bd_updateBreedList()">
+      <option>Chicken</option><option>Duck</option><option>Goose</option><option>Other</option>
+    </select>
+    <label>Custom Species (if Other)</label>
+    <input id="bd-bird-species-custom" placeholder="e.g. Turkey, Quail">
+    <label>Breed</label>
+    <select id="bd-bird-breed"></select>
+    <label>Custom Breed</label>
+    <input id="bd-bird-breed-custom" placeholder="Enter breed if not listed">
+    <label>Sex</label>
+    <select id="bd-bird-sex">
+      <option value="">Unknown</option><option value="F">Female</option><option value="M">Male</option>
+    </select>
+    <label>Flock</label>
+    <select id="bd-bird-flock"></select>
+    <label>Notes</label>
+    <input id="bd-bird-notes" placeholder="Optional notes">
+    <label style="margin-top:12px;">Profile Photo (optional)</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <button type="button" onclick="bd_birdTakeCamera()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Camera</button>
+      <button type="button" onclick="bd_birdOpenGallery()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Gallery</button>
+      <button type="button" id="bd-bird-clear-photo" onclick="bd_birdClearPhoto()" style="display:none;margin:0;padding:10px;font-size:14px;background:#8b0000;">Clear</button>
+    </div>
+    <input type="file" id="bd-bird-gallery" accept="image/*" style="display:none;" onchange="bd_birdHandlePhoto(this)">
+    <input type="file" id="bd-bird-camera" accept="image/*" capture="environment" style="display:none;" onchange="bd_birdHandlePhoto(this)">
+    <div id="bd-bird-photo-preview" style="margin-top:6px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="bd_saveBird()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="bd_closeBirdModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- FLOCK MANAGER MODAL -->
+<div id="bd-flock-modal" class="bd-modal" onclick="bd_closeFlockModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3>Flock &amp; Nest Box Manager</h3>
+    <div id="bd-flock-list"></div>
+    <div class="box" style="margin-top:10px;">
+      <strong>Add Flock</strong>
+      <label>Flock Name</label>
+      <input id="bd-new-flock-name" placeholder="e.g. Layer Hens">
+      <label>Species Mix</label>
+      <input id="bd-new-flock-species" placeholder="e.g. Chicken, Duck">
+      <button onclick="bd_addFlock()" class="wide" style="margin-top:8px;">+ Add Flock</button>
+    </div>
+    <button class="wide secondary" onclick="bd_closeFlockModal()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
+<!-- SPECIES MANAGER MODAL -->
+<div id="bd-species-modal" class="bd-modal" onclick="bd_closeSpeciesModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3>Species &amp; Breed Manager</h3>
+    <div id="bd-species-list"></div>
+    <button class="wide secondary" onclick="bd_closeSpeciesModal()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
+<!-- BIRD MED FORMULA MANAGER -->
+<div id="bd-formula-modal" class="bd-modal" onclick="bd_closeFormulaModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3>Bird Med Formula Manager</h3>
+    <p style="color:#888;font-size:13px;">Dose, unit, and route used to pre-fill the Med log form. Separate from Goat's formulas — different species, different dosing.</p>
+    <div id="bd-formula-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <input id="bd-new-med-name" placeholder="Med name" style="flex:1;margin:0;">
+      <input id="bd-new-med-dose" placeholder="dose" type="number" step="0.01" style="width:90px;margin:0;">
+      <button onclick="bd_addFormula()" style="margin:0;padding:10px;">Add</button>
+    </div>
+    <button class="wide secondary" onclick="bd_closeFormulaModal()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-confirm-title">Confirm</h3>
+    <div id="bd-confirm-body"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="bd-confirm-ok" style="flex:1;background:#8b0000;">Confirm</button>
+      <button class="secondary" onclick="bd_closeConfirmModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT LOG MODAL -->
+<div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModalOverlay()">
+  <div class="bd-modal-box" onclick="event.stopPropagation()">
+    <h3 id="bd-edit-title">Edit Log</h3>
+    <div id="bd-edit-fields"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="bd-edit-save" onclick="bd_saveEdit()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="bd_closeEditModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
   </div>
 </div>
 
