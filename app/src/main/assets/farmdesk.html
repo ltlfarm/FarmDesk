@@ -1467,7 +1467,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782181710"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782181972"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4414,8 +4414,10 @@ let batches = JSON.parse(localStorage.getItem(BATCHES_LS_KEY) || '[]');
 function saveBatches() { localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(batches)); }
 
 // One-time migration: add label, parentDams[], parentSires[] to existing batches.
+// Also fix module assignment — batches with bird species names set to 'goat' or vice versa.
 (function migrateBatches() {
   var changed = false;
+  var BIRD_SPECIES_LIST = ['chicken','duck','goose','turkey','quail','guinea','pheasant'];
   batches.forEach(function(b) {
     if (!b.label) { b.label = ''; changed = true; }
     if (!Array.isArray(b.parentDams)) {
@@ -4425,6 +4427,13 @@ function saveBatches() { localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(bat
     if (!Array.isArray(b.parentSires)) {
       b.parentSires = b.parentSire ? [b.parentSire] : [];
       changed = true;
+    }
+    // Fix module from species if clearly wrong
+    var sl = (b.species || '').toLowerCase();
+    if (BIRD_SPECIES_LIST.indexOf(sl) >= 0 && b.module !== 'bird') {
+      b.module = 'bird'; changed = true;
+    } else if (sl === 'goat' && b.module !== 'goat') {
+      b.module = 'goat'; changed = true;
     }
   });
   if (changed) localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(batches));
@@ -7795,18 +7804,12 @@ async function fetchBatchesFromFarmOS(token, logFn) {
       var archived = p.attributes && p.attributes.archived;
       if (archived) return;
 
-      // Determine module from species
+      // Determine module from species — explicit goat species names always → goat
       var speciesLower = species.toLowerCase();
-      var module = (BD_ANIMAL_TYPES && BD_ANIMAL_TYPES.indexOf(speciesLower) >= 0) ? 'bird' : 'goat';
-
-      // Current inventory count from farmOS (inventory field is computed)
-      var currentCount = 0;
-      if (p.attributes && p.attributes.inventory && p.attributes.inventory.length) {
-        p.attributes.inventory.forEach(function(inv) {
-          if (inv.measure === 'count') currentCount += parseFloat(inv.value) || 0;
-        });
-      }
-      currentCount = Math.max(0, Math.round(currentCount));
+      var GOAT_SPECIES = ['goat', 'nigerian dwarf', 'boer', 'nubian', 'alpine', 'lamancha', 'oberhasli', 'saanen', 'toggenburg', 'kiko', 'pygmy'];
+      var isBirdSpecies = BD_ANIMAL_TYPES && BD_ANIMAL_TYPES.indexOf(speciesLower) >= 0;
+      var isGoatSpecies = GOAT_SPECIES.indexOf(speciesLower) >= 0;
+      var module = isBirdSpecies ? 'bird' : 'goat'; // default to goat for any unrecognized species
 
       // Check if we already have this batch locally by productUUID
       var existing = batches.find(function(b) { return b.productUUID === uuid; });
@@ -7816,6 +7819,7 @@ async function fetchBatchesFromFarmOS(token, logFn) {
           existing.count = currentCount;
           changed = true;
         }
+        // Never overwrite module — trust what was set locally when batch was created
         existing.synced = true;
         existing.label  = existing.label || label;
         changed = true;
@@ -11827,7 +11831,7 @@ function openBatchProfile(batchId) {
   document.getElementById('bd-batch-profile-content').innerHTML =
     '<h3 style="margin:0 0 4px;color:#3a7;">' + (b.label || b.species + ' batch') + '</h3>' +
     '<div style="font-size:13px;color:#888;margin-bottom:10px;">' + syncBadge + '</div>' +
-    '<div style="font-size:36px;text-align:center;margin:8px 0 12px;">' + (typeof bd_speciesIcon === 'function' ? bd_speciesIcon(b.species) : '📦') + '</div>' +
+    '<div style="font-size:36px;text-align:center;margin:8px 0 12px;">' + (b.module === 'goat' ? '🐐' : (typeof bd_speciesIcon === 'function' ? bd_speciesIcon(b.species) : '📦')) + '</div>' +
     '<div style="font-size:22px;font-weight:bold;color:' + (isComplete ? '#666' : '#3a7') + ';margin-bottom:8px;">' +
       (isComplete ? 'Completed' : b.count + ' remaining') +
     '</div>' +
