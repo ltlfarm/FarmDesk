@@ -1443,7 +1443,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782193538"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782194278"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9161,17 +9161,31 @@ function setLoading(on, msg) {
   else     { el.classList.remove('show'); }
 }
 
-// ===== PENDING BADGE =====
+// ===== PENDING BADGE — unified across all modules =====
 function updateSyncBadge() {
-  const count = pending.filter(p => !p.synced).length;
+  // Stock nav badge
+  const sdCount = pending.filter(p => !p.synced).length;
   const badge = document.getElementById('syncBadge');
-  if (count > 0) {
-    badge.textContent = count;
-    badge.style.display = 'inline-block';
-  } else {
-    badge.style.display = 'none';
-  }
+  if (badge) { badge.textContent = sdCount; badge.style.display = sdCount > 0 ? 'inline-block' : 'none'; }
+  const sdEl = document.getElementById('sd-unsyncedCount');
+  if (sdEl) sdEl.textContent = sdCount;
+
+  // Goat sync screen count
+  const gdCount = (typeof logs !== 'undefined' ? logs.filter(l => !l.synced).length : 0);
+  const gdEl = document.getElementById('unsyncedCount');
+  if (gdEl) gdEl.textContent = gdCount;
+  const gdNav = document.getElementById('gd-nav-sync');
+  if (gdNav) gdNav.innerHTML = '🔄<br>Sync' + (gdCount > 0 ? '<span class="pending-badge" style="display:inline-block;">' + gdCount + '</span>' : '');
+
+  // Bird nav and sync screen count
+  const bdCount = (typeof bd_pending !== 'undefined' ? bd_pending.filter(p => !p.synced).length : 0);
+  const bdNav = document.getElementById('bd-nav-sync');
+  if (bdNav) bdNav.textContent = bdCount > 0 ? '\u{1F504} Sync (' + bdCount + ')' : '\u{1F504} Sync';
+  const bdPc = document.getElementById('bd-pending-count');
+  if (bdPc) bdPc.textContent = bdCount;
 }
+// Alias — Bird code calls bd_updateSyncBadge; both now do the same thing
+function bd_updateSyncBadge() { updateSyncBadge(); }
 
 // getToken — shared, defined in GoatDesk module above
 
@@ -10690,14 +10704,6 @@ function bd_setLoading(on, msg) {
 function bd_toast(msg) { showToast(msg); }
 
 function bd_localISO(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString(); }
-
-function bd_updateSyncBadge() {
-  var count = bd_pending.filter(function(p) { return !p.synced; }).length;
-  var el = document.getElementById('bd-nav-sync');
-  if (el) el.textContent = count > 0 ? '\u{1F504} Sync (' + count + ')' : '\u{1F504} Sync';
-  var pc = document.getElementById('bd-pending-count');
-  if (pc) pc.textContent = count;
-}
 
 // ===== AUTH =====
 // Bird uses shared getToken() and apiUrl() — defined in the shared module section above.
