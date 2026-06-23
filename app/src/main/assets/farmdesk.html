@@ -463,6 +463,7 @@ header > div:last-child { min-width: 0; }
       <option value="hoof">Hoof</option>
       <option value="obs">Observation</option>
       <option value="birth">Birth</option>
+      <option value="sale">Sale</option>
       <option value="activity">Activity</option>
     </select>
 
@@ -1460,7 +1461,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782175699"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782179312"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3101,14 +3102,14 @@ function makeLogEl(l, showActions = false) {
     if (e.target.closest("button") || e.target.closest("input")) return;
     toggleLogDrawer(this);
   };
-  const t = l.time ? (new Date(l.time).toString() !== "Invalid Date" ? new Date(l.time).toLocaleString() : "unknown time") : "unknown time";
+  const t = (l.time || l.ts) ? (new Date(l.time || l.ts).toString() !== "Invalid Date" ? new Date(l.time || l.ts).toLocaleString() : "unknown time") : "unknown time";
   const statusTag = l.status === "pending"
     ? (l.synced ? " \u23F0 scheduled" : " \u23F0 scheduled \u00B7 \u23F3 not in farmOS yet")
     : (l.synced ? " \u2713 synced" : "");
   const detail = formatLog(l);
 
   const animalName = l.goat || (l.data && l.data.animal) || '';
-  const animalClickable = !!l.goat; // only goat entries can open a profile
+  const animalClickable = !!l.goat && !l._batchLabel; // don't open profile for batch labels
 
   // Collapsed header — always visible
   d.innerHTML = `
@@ -3134,28 +3135,43 @@ function makeLogEl(l, showActions = false) {
     const drawer = d.querySelector(".log-drawer");
     const actions = document.createElement("div");
     actions.style.cssText = "display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;";
-    if (l.status === "pending") {
-      const openBtn = document.createElement("button");
-      openBtn.textContent = "📋 Log It";
-      openBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#1b5e8e;";
-      openBtn.onclick = () => openTaskForm(l.id);
-      actions.appendChild(openBtn);
+    if (l._synthetic) {
+      // Batch-derived entries — managed from the Batch profile, not editable here
+      const synthNote = document.createElement("span");
+      synthNote.style.cssText = "font-size:12px;color:#888;padding:4px 0;";
+      synthNote.textContent = "📦 From batch";
+      actions.appendChild(synthNote);
+      if (l._batchId) {
+        const vbBtn = document.createElement("button");
+        vbBtn.textContent = "View Batch";
+        vbBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#2a4a6a;";
+        vbBtn.onclick = function(e) { e.stopPropagation(); openBatchProfile(l._batchId); };
+        actions.appendChild(vbBtn);
+      }
+    } else {
+      if (l.status === "pending") {
+        const openBtn = document.createElement("button");
+        openBtn.textContent = "📋 Log It";
+        openBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#1b5e8e;";
+        openBtn.onclick = () => openTaskForm(l.id);
+        actions.appendChild(openBtn);
+      }
+      const editBtn = document.createElement("button");
+      editBtn.textContent = "\u270F\uFE0F Edit";
+      editBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;";
+      editBtn.onclick = () => openEdit(l.id);
+      const cloneBtn = document.createElement("button");
+      cloneBtn.textContent = "⧉ Clone";
+      cloneBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#4a3a7a;";
+      cloneBtn.onclick = () => cloneLog(l.id);
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "🗑️ Delete";
+      delBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#8b0000;";
+      delBtn.onclick = () => deleteLog(l.id);
+      actions.appendChild(editBtn);
+      actions.appendChild(cloneBtn);
+      actions.appendChild(delBtn);
     }
-    const editBtn = document.createElement("button");
-    editBtn.textContent = "\u270F\uFE0F Edit";
-    editBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;";
-    editBtn.onclick = () => openEdit(l.id);
-    const cloneBtn = document.createElement("button");
-    cloneBtn.textContent = "⧉ Clone";
-    cloneBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#4a3a7a;";
-    cloneBtn.onclick = () => cloneLog(l.id);
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "🗑️ Delete";
-    delBtn.style.cssText = "padding:6px 12px;font-size:13px;margin:0;background:#8b0000;";
-    delBtn.onclick = () => deleteLog(l.id);
-    actions.appendChild(editBtn);
-    actions.appendChild(cloneBtn);
-    actions.appendChild(delBtn);
     drawer.appendChild(actions);
   }
   return d;
@@ -3190,18 +3206,87 @@ function renderPending() {
 
 // ===== RECENT =====
 function timeVal(l) {
-  if (!l.time) return 0;
-  const v = new Date(l.time).getTime();
+  const t = l.time || l.ts;
+  if (!t) return 0;
+  const v = new Date(t).getTime();
   return isNaN(v) ? 0 : v;
+}
+
+// Builds synthetic log entries from local batches + pendingActions for
+// display in GoatDesk Log and History screens. Mirrors bd_batchHistoryLogs exactly.
+function goatBatchHistoryLogs() {
+  var entries = [];
+  // Birth events — one entry per goat batch
+  batches.forEach(function(b) {
+    if (b.module !== 'goat') return;
+    entries.push({
+      id: b.id + '_birth',
+      type: 'birth',
+      goat: b.label || b.species + ' batch',
+      _batchLabel: true,
+      data: {
+        animal: b.label || b.species + ' batch',
+        kids: b.originalCount + ' ' + b.species,
+        dam: (b.parentDams && b.parentDams[0]) || b.parentDam || '',
+        sire: (b.parentSires && b.parentSires[0]) || b.parentSire || '',
+        summary: 'Batch of ' + b.originalCount + ' ' + b.species + (b.breed ? ' (' + b.breed + ')' : '')
+      },
+      time: b.bornDate,
+      ts: b.bornDate,
+      status: 'done',
+      synced: b.synced,
+      _synthetic: true,
+      _batchId: b.id
+    });
+  });
+  // Sell / died / promote actions
+  pendingActions.forEach(function(a) {
+    if (['batchSell','batchDied','batchPromote'].indexOf(a.type) < 0) return;
+    var b = batches.find(function(x) { return x.id === a.payload.batchId; });
+    if (!b || b.module !== 'goat') return;
+    var label = b.label || b.species + ' batch';
+    var typeMap = { batchSell: 'sale', batchDied: 'obs', batchPromote: 'obs' };
+    var summaryMap = {
+      batchSell:    'Batch sale: ' + (a.payload.count || 1) + ' ' + b.species + (a.payload.unitPrice ? ' @ $' + a.payload.unitPrice + '/head' : ''),
+      batchDied:    'Batch death: ' + (a.payload.count || 1) + ' ' + b.species,
+      batchPromote: 'Promoted 1 ' + b.species + ' from batch to individual'
+    };
+    entries.push({
+      id: a.id + '_action',
+      type: typeMap[a.type],
+      goat: label,
+      _batchLabel: true,
+      data: {
+        animal: label,
+        summary: summaryMap[a.type],
+        count: a.payload.count || 1,
+        unitPrice: a.payload.unitPrice || '',
+        notes: a.payload.notes || '',
+        sev: ''
+      },
+      time: a.createdAt,
+      ts: a.createdAt,
+      status: 'done',
+      synced: a.synced,
+      _synthetic: true,
+      _batchId: b.id,
+      _count: a.payload.count || 1,
+      _price: a.payload.unitPrice || null
+    });
+  });
+  return entries;
 }
 
 function renderRecent() {
   const box = document.getElementById("recent");
   box.innerHTML = "";
-  // Always render pending first so Scheduled Tasks box clears correctly even when no active logs
   renderPending();
-  // Exclude pending tasks from recent — they show in Scheduled Tasks section
-  const active = logs.filter(l => l.status !== "pending");
+  // Merge real logs + synthetic batch entries
+  const synthBatch = goatBatchHistoryLogs();
+  const existingIds = {};
+  logs.forEach(function(l) { existingIds[l.id] = true; });
+  const combined = logs.slice().concat(synthBatch.filter(function(s) { return !existingIds[s.id]; }));
+  const active = combined.filter(l => l.status !== "pending");
   if (!active.length) { box.innerHTML = "<div style='color:#666;padding:8px;'>No logs yet</div>"; return; }
   active.slice().sort((a,b) => timeVal(b) - timeVal(a))
     .slice(0, 15)
@@ -3234,9 +3319,19 @@ function renderHistory() {
   const tf = document.getElementById("filterType").value;
   const sf = document.getElementById("sortOrder").value;
 
-  let filtered = logs.filter(l =>
-    l.goat && (!gf || l.goat === gf) && (!tf || l.type === tf)
-  );
+  // Merge real logs + synthetic batch entries, deduped by id
+  const synthBatch = goatBatchHistoryLogs();
+  const existingIds = {};
+  logs.forEach(function(l) { existingIds[l.id] = true; });
+  const combined = logs.slice().concat(synthBatch.filter(function(s) { return !existingIds[s.id]; }));
+
+  let filtered = combined.filter(l => {
+    const name = l.goat || (l.data && l.data.animal) || '';
+    if (!name) return false;
+    if (gf && l.goat !== gf && name !== gf) return false;
+    if (tf && l.type !== tf) return false;
+    return true;
+  });
 
   if (sf === "desc") filtered.sort((a,b) => timeVal(b) - timeVal(a));
   else if (sf === "asc")  filtered.sort((a,b) => timeVal(a) - timeVal(b));
@@ -12701,7 +12796,13 @@ function renderDashboardScreen() {
   let recentItems = [];
   if (enabled.includes('goats')) {
     const goatLogs = JSON.parse(localStorage.getItem(LS.logs) || '[]').filter(l => l.status !== 'pending');
-    goatLogs.forEach(l => recentItems.push({ mod: 'goats', time: l.time, text: (l.goat||'Goat') + ' — ' + (l.type||''), id: l.id, goat: l.goat }));
+    // Add synthetic batch entries
+    const batchEntries = goatBatchHistoryLogs();
+    const combined = goatLogs.concat(batchEntries);
+    combined.forEach(l => {
+      const name = l.goat || (l.data && l.data.animal) || 'Goat';
+      recentItems.push({ mod: 'goats', time: l.time || l.ts, text: name + ' — ' + (l.type||''), id: l.id, goat: l.goat });
+    });
   }
   if (enabled.includes('birds')) {
     const birdLogs = JSON.parse(localStorage.getItem(BD_LS.history) || '[]');
