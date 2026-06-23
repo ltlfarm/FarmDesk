@@ -1296,6 +1296,18 @@ header > div:last-child { min-width: 0; }
   </div>
 </div>
 
+<!-- ===== GOAT PROFILE MODAL ===== -->
+<div id="goat-profile-modal" class="bd-modal" onclick="closeGoatProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <strong id="goat-profile-title" style="font-size:18px;color:#3a7;"></strong>
+      <button onclick="closeGoatProfile()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="goat-profile-content"></div>
+    <button class="secondary wide" onclick="closeGoatProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
 <div id="bd-batch-profile-modal" class="bd-modal" onclick="closeBatchProfile()" style="display:none;">
   <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
     <div id="bd-batch-profile-content"></div>
@@ -1894,6 +1906,9 @@ function renderStep() {
 
       <label>Notes</label>
       <input id="f_mednotes" placeholder="Optional notes">
+
+      <label>Veterinarian <span style="color:#888;font-size:12px;">(optional — who performed this)</span></label>
+      <input id="f_vet" placeholder="e.g. Dr. Smith, Self, Jess">
 
       <label>Schedule Follow-up / Redose</label>
       <select id="f_followup">
@@ -2814,6 +2829,7 @@ function saveStep() {
       route:  document.getElementById("f_route")?.value || "Oral",
       weight: w,
       notes:  parts.join("\n"),
+      vet:    document.getElementById("f_vet")?.value?.trim() || "",
       sessionRate: sessionDoseRate
     };
     lastMed   = entry.data.med;
@@ -3054,7 +3070,7 @@ function formatLog(l) {
     if (l.data.famacha) parts.push("FAMACHA:" + l.data.famacha);
     out = parts.join("  ") || "vitals recorded";
   }
-  else if (l.type === "med")  out = (l.data.med || "") + " " + (l.data.dose || "") + " " + (l.data.unit || "ml") + " via " + (l.data.route || "");
+  else if (l.type === "med")  out = (l.data.med || "") + " " + (l.data.dose || "") + " " + (l.data.unit || "ml") + " via " + (l.data.route || "") + (l.data.vet ? " · Vet: " + l.data.vet : "");
   else if (l.type === "proc") out = (l.data.proc || "Procedure") + (l.data.method ? " — " + l.data.method : "");
   else if (l.type === "hoof") out = l.data.state || "";
   else if (l.type === "obs") {
@@ -4279,12 +4295,13 @@ async function setAnimalFlag(name, flag, on) {
 
 function openAnimalProfile(name) {
   var p = animalProfiles[name] || {};
-  var sex = p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : "\u2014";
-  var modal = document.getElementById("editModal");
-  var body  = document.getElementById("editFields");
-  var title = document.getElementById("editTitle");
+  var modal = document.getElementById("goat-profile-modal");
+  var body  = document.getElementById("goat-profile-content");
+  var title = document.getElementById("goat-profile-title");
   if (!modal || !body) return;
   if (title) title.textContent = name;
+
+  var sex = p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : p.sex === "W" ? "Wether" : "—";
   var img = p.photo
     ? '<img src="' + p.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;">'
     : (p.photoId
@@ -4292,20 +4309,18 @@ function openAnimalProfile(name) {
         : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>');
   function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ""; }
 
-  // Build flags section — active flags (tappable to remove) + available flags to add
-  var activeFlags = Array.isArray(p.flags) ? p.flags : [];
-  var allFlags = JSON.parse(localStorage.getItem(LS.flagSchema) || '[]');
+  // Flags
+  var activeFlags  = Array.isArray(p.flags) ? p.flags : [];
+  var allFlags     = JSON.parse(localStorage.getItem(LS.flagSchema) || '[]');
   var inactiveFlags = allFlags.filter(function(f){ return !activeFlags.includes(f); });
   var flagsHTML = '';
   if (allFlags.length) {
     flagsHTML = '<div style="margin:10px 0 4px;"><strong style="color:#9c9;">Flags:</strong></div>';
-    if (activeFlags.length) {
-      flagsHTML += '<div style="margin-bottom:4px;">' + flagBadgesHTML(activeFlags, true, name) + '</div>';
-    }
+    if (activeFlags.length) flagsHTML += '<div style="margin-bottom:4px;">' + flagBadgesHTML(activeFlags, true, name) + '</div>';
     if (inactiveFlags.length) {
       flagsHTML += '<div>' + inactiveFlags.map(function(f){
         var label = f.replace(/_/g,' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
-        return '<span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#333;color:#888;margin:2px;cursor:pointer;" onclick="setAnimalFlag(' + JSON.stringify(name) + ',' + JSON.stringify(f) + ',true)">+ ' + label + '</span>';
+        return '<span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#333;color:#888;margin:2px;cursor:pointer;" onclick="setAnimalFlag(' + JSON.stringify(name) + ',' + JSON.stringify(f) + ',true)">' + '+ ' + label + '</span>';
       }).join('') + '</div>';
     }
   }
@@ -4315,10 +4330,7 @@ function openAnimalProfile(name) {
   var locText = '';
   if (loc && loc.locationName) {
     var when = '';
-    try {
-      var d = new Date(loc.timestamp * 1000 || loc.timestamp);
-      if (!isNaN(d)) when = ' (' + d.toLocaleDateString() + ')';
-    } catch(e) {}
+    try { var d = new Date(loc.timestamp * 1000 || loc.timestamp); if (!isNaN(d)) when = ' (' + d.toLocaleDateString() + ')'; } catch(e) {}
     locText = '📍 ' + loc.locationName + when;
   }
 
@@ -4328,19 +4340,23 @@ function openAnimalProfile(name) {
     row("Location", locText) + row("Notes", p.notes) +
     flagsHTML +
     '<div style="display:flex;gap:8px;margin-top:12px;">' +
-    '<button onclick="closeEdit(); startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="wide" style="flex:1;margin:0;">Log for ' + name + '</button>' +
-    '<button onclick="editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
+      '<button onclick="closeGoatProfile();startFlowForAnimal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;">📋 Log for ' + name + '</button>' +
+      '<button onclick="closeGoatProfile();editAnimalProfile(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">✏️ Edit</button>' +
     '</div>' +
-    '<button onclick="closeEdit(); openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>' +
+    '<button onclick="closeGoatProfile();openMoveScreen([this.dataset.nm])" data-nm="' + name.replace(/"/g,"&quot;") + '" class="secondary wide" style="margin-top:8px;">📍 Move to Location</button>' +
     '<div style="display:flex;gap:8px;margin-top:8px;">' +
-    '<button onclick="closeEdit(); openSellAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b6500;padding:10px 4px;font-size:13px;">🏷️ Sell</button>' +
-    '<button onclick="closeEdit(); openDeathAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b0000;padding:10px 4px;font-size:13px;">💀 Death</button>' +
-    '<button onclick="closeEdit(); openRetypeAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#555;padding:10px 4px;font-size:13px;">❓ Retype</button>' +
+      '<button onclick="closeGoatProfile();openSellAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b6500;padding:10px 4px;font-size:13px;">🏷️ Sell</button>' +
+      '<button onclick="closeGoatProfile();openDeathAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#8b0000;padding:10px 4px;font-size:13px;">💀 Death</button>' +
+      '<button onclick="closeGoatProfile();openRetypeAnimalModal(this.dataset.nm)" data-nm="' + name.replace(/"/g,"&quot;") + '" style="flex:1;margin:0;background:#555;padding:10px 4px;font-size:13px;">❓ Retype</button>' +
     '</div>';
-  var sb = document.getElementById("modalSaveBtn"); if (sb) sb.style.display = "none";
-  var cb = document.getElementById("modalCancelBtn"); if (cb) cb.textContent = "Close";
-  modal.style.display = "block";
+
+  modal.style.display = 'flex';
   lazyLoadPhotos(body);
+}
+
+function closeGoatProfile() {
+  var modal = document.getElementById('goat-profile-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 // ===== SHARED MODULE: animal lifecycle — purchase, sale, death =====
@@ -7634,13 +7650,23 @@ async function fetchAnimalUUIDs(silent = false) {
                   // live in relationships (asset/mother), not text to regex apart.
                   if (isBirth) {
                     const notesText = attrs.notes?.value || "";
-                    const sireMatch = notesText.match(/Sire:\s*(.+)/);
+                    const kidsMatch  = notesText.match(/^Kids:\s*(.+)$/m);
+                    const damMatch   = notesText.match(/^Dam:\s*(.+)$/m);
+                    const sireMatch  = notesText.match(/^Sire:\s*(.+)$/m);
+                    const notesMatch = notesText.match(/^(?!Kids:|Dam:|Sire:|Logged by:)(.+)$/m);
+                    // Build kids array from notes Kids: line or from linked animals
+                    const kidsFromNotes = kidsMatch
+                      ? kidsMatch[1].split(',').map(n => ({ name: n.trim(), sex: '', tag: '' })).filter(k => k.name)
+                      : [];
+                    const kidsArr = linkedAnimals.length
+                      ? linkedAnimals.map(n => ({ name: n, sex: '', tag: '' }))
+                      : kidsFromNotes;
                     const parsed = {
-                      kids:  linkedAnimals.map(n => ({ name: n, sex: '', tag: '' })),
-                      dam:   goatLinks[0] || "",
+                      kids:  kidsArr,
+                      dam:   damMatch ? damMatch[1].trim() : (goatLinks[0] || ""),
                       sire:  sireMatch ? sireMatch[1].trim() : "",
                       type:  "Natural",
-                      notes: notesText
+                      notes: notesMatch ? notesMatch[1].trim() : ""
                     };
                     const imageRel = log.relationships?.image?.data;
                     const imageArr = Array.isArray(imageRel) ? imageRel : (imageRel ? [imageRel] : []);
@@ -7648,6 +7674,10 @@ async function fetchAnimalUUIDs(silent = false) {
                     return parsed;
                   }
                   const parsed = parseFarmOSNotes(log.type, attrs.name, attrs.notes?.value || "", attrs.quantity || []);
+                  // Read veterinarian field from medical logs
+                  if (log.type === 'log--medical' && attrs.veterinarian) {
+                    parsed.vet = attrs.veterinarian;
+                  }
                   // Attach first image URL if one was uploaded with this log
                   const imageRel = log.relationships?.image?.data;
                   const imageArr = Array.isArray(imageRel) ? imageRel : (imageRel ? [imageRel] : []);
@@ -7808,10 +7838,17 @@ async function fetchBatchesFromFarmOS(token, logFn) {
       var speciesLower = species.toLowerCase();
       var GOAT_SPECIES = ['goat', 'nigerian dwarf', 'boer', 'nubian', 'alpine', 'lamancha', 'oberhasli', 'saanen', 'toggenburg', 'kiko', 'pygmy'];
       var isBirdSpecies = BD_ANIMAL_TYPES && BD_ANIMAL_TYPES.indexOf(speciesLower) >= 0;
-      var isGoatSpecies = GOAT_SPECIES.indexOf(speciesLower) >= 0;
-      var module = isBirdSpecies ? 'bird' : 'goat'; // default to goat for any unrecognized species
+      var module = isBirdSpecies ? 'bird' : 'goat';
 
-      // Check if we already have this batch locally by productUUID
+      // Current inventory count from farmOS computed attribute
+      var currentCount = 0;
+      var inventory = p.attributes && p.attributes.inventory;
+      if (Array.isArray(inventory) && inventory.length) {
+        inventory.forEach(function(inv) {
+          if (inv.measure === 'count' || !inv.measure) currentCount += parseFloat(inv.value) || 0;
+        });
+      }
+      currentCount = Math.max(0, Math.round(currentCount));
       var existing = batches.find(function(b) { return b.productUUID === uuid; });
       if (existing) {
         // Update count from farmOS — farmOS is source of truth for inventory
@@ -7942,12 +7979,36 @@ function buildFarmOSPayload(l) {
         timestamp: String(Math.floor((new Date(l.time).getTime() || Date.now()) / 1000)),
         status:    l.status === "pending" ? "pending" : "done",
         notes: {
-          value:  formatLog(l) + (l.loggedBy ? `\nLogged by: ${l.loggedBy}` : "") + (l.type === 'birth' && l.data.sire ? `\nSire: ${l.data.sire}` : ""),
+          value: (function() {
+            if (l.type === 'birth') {
+              // Structured birth notes — parsed back cleanly on fetch
+              const kidNames = Array.isArray(l.data.kids)
+                ? l.data.kids.map(k => k.name || '?').filter(Boolean).join(', ')
+                : (l.data.kids || '');
+              const parts = [];
+              if (kidNames) parts.push('Kids: ' + kidNames);
+              if (l.data.dam)  parts.push('Dam: '  + l.data.dam);
+              if (l.data.sire) parts.push('Sire: ' + l.data.sire);
+              if (l.data.notes) parts.push(l.data.notes);
+              if (l.loggedBy)  parts.push('Logged by: ' + l.loggedBy);
+              return parts.join('\n');
+            }
+            if (l.type === 'med') {
+              // Vet field maps to farmOS attributes.veterinarian — keep notes clean
+              return formatLog(l) + (l.loggedBy ? `\nLogged by: ${l.loggedBy}` : '');
+            }
+            return formatLog(l) + (l.loggedBy ? `\nLogged by: ${l.loggedBy}` : "");
+          })(),
           format: "default"
         }
       }
     }
   };
+
+  // Add veterinarian field for medical logs
+  if (l.type === 'med' && l.data && l.data.vet) {
+    payload.data.attributes.veterinarian = l.data.vet;
+  }
 
   // Link to animal asset if UUID is known
   if (l.type === 'birth') {
@@ -8748,6 +8809,8 @@ async function openEdit(id) {
       </select>
       <label>Notes</label>
       <textarea id="ed_mednotes" rows="4">${l.data.notes||""}</textarea>
+      <label>Veterinarian <span style="color:#888;font-size:12px;">(optional)</span></label>
+      <input id="ed_vet" value="${l.data.vet||""}" placeholder="e.g. Dr. Smith, Self">
     `;
   }
   if (l.type === "hoof") {
@@ -8863,6 +8926,7 @@ async function saveEdit() {
     l.data.weight = parseFloat(document.getElementById("ed_medweight").value) || null;
     l.data.route  = document.getElementById("ed_route").value;
     l.data.notes  = document.getElementById("ed_mednotes").value;
+    l.data.vet    = (document.getElementById("ed_vet")?.value || "").trim();
   }
   if (l.type === "hoof") {
     l.data.state = document.getElementById("ed_hoof").value;
@@ -8950,10 +9014,12 @@ async function saveEdit() {
 function closeEdit() {
   document.getElementById("editModal").style.display = "none";
   const saveBtn = document.getElementById("modalSaveBtn");
-  saveBtn.textContent = "💾 Save";
-  saveBtn.style.background = "";
-  saveBtn.style.display = "";
-  saveBtn.onclick = saveEdit;
+  if (saveBtn) {
+    saveBtn.textContent = "💾 Save";
+    saveBtn.style.background = "";
+    saveBtn.style.display = "";
+    saveBtn.onclick = saveEdit;
+  }
   const cancelBtn = document.getElementById("modalCancelBtn");
   if (cancelBtn) cancelBtn.textContent = "Cancel";
   editingId = null;
@@ -13207,6 +13273,8 @@ function closeTopOverlay() {
   if (itemProf && itemProf.style.display === 'flex') { closeItemProfile(); return true; }
   var medMat = document.getElementById('medMaterialModal');
   if (medMat && medMat.style.display === 'block') { medMat.style.display = 'none'; return true; }
+  var goatProf = document.getElementById('goat-profile-modal');
+  if (goatProf && goatProf.style.display === 'flex') { closeGoatProfile(); return true; }
   var bdModals = ['bd-profile-modal','bd-log-modal','bd-bird-modal','bd-flock-modal','bd-species-modal','bd-confirm-modal','bd-edit-modal'];
   for (var i = 0; i < bdModals.length; i++) {
     var bm = document.getElementById(bdModals[i]);
