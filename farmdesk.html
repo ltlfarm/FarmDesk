@@ -13215,58 +13215,48 @@ async function ledgerFetch() {
   try {
     var token = await getToken(cfg);
     var h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
-    // Fetch both sale and purchase logs with asset and quantity included
-    var [saleRes, purchRes] = await Promise.all([
-      fetchWithTimeout(apiUrl('/api/log/sale?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }),
-      fetchWithTimeout(apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h })
-    ]);
 
     var farmoEntries = [];
+
     function parseLogRes(res, logType) {
-      if (!res.ok) return;
+      if (!res || !res.ok) return Promise.resolve();
       return res.json().then(function(d) {
         var included = d.included || [];
-        // Build UUID → name map for assets
         var assetNames = {};
         included.forEach(function(inc) {
-          if (inc.type && inc.type.startsWith('asset--')) assetNames[inc.id] = inc.attributes && inc.attributes.name || '';
+          if (inc.type && inc.type.startsWith('asset--')) {
+            assetNames[inc.id] = (inc.attributes && inc.attributes.name) || '';
+          }
         });
-        // Build UUID → quantity map
         var quantities = {};
         included.forEach(function(inc) {
           if (inc.type === 'quantity--standard') {
             var attrs = inc.attributes || {};
             var val = attrs.value ? (parseFloat(attrs.value.numerator) / parseFloat(attrs.value.denominator)) : null;
-            var unitPriceCents = attrs.unit_price ? (parseFloat(attrs.unit_price.numerator) / parseFloat(attrs.unit_price.denominator)) : null;
-            var totalPriceCents = attrs.total_price ? (parseFloat(attrs.total_price.numerator) / parseFloat(attrs.total_price.denominator)) : null;
-            quantities[inc.id] = {
-              count: val,
-              unitPrice: unitPriceCents != null ? unitPriceCents / 100 : null,
-              totalPrice: totalPriceCents != null ? totalPriceCents / 100 : null
-            };
+            var up = attrs.unit_price ? (parseFloat(attrs.unit_price.numerator) / parseFloat(attrs.unit_price.denominator) / 100) : null;
+            var tp = attrs.total_price ? (parseFloat(attrs.total_price.numerator) / parseFloat(attrs.total_price.denominator) / 100) : null;
+            quantities[inc.id] = { count: val, unitPrice: up, totalPrice: tp };
           }
         });
         (d.data || []).forEach(function(log) {
           var attrs = log.attributes || {};
-          var ts = attrs.timestamp;
-          var time = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
-          // Asset names
+          var ts = parseInt(attrs.timestamp);
+          // Guard against epoch 0 — use current time as fallback for bad timestamps
+          var time = (ts && ts > 0) ? new Date(ts * 1000).toISOString() : null;
           var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
           var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
           var names = assetArr.map(function(a) { return assetNames[a.id] || ''; }).filter(Boolean);
-          // Quantities
           var qRel = log.relationships && log.relationships.quantity && log.relationships.quantity.data;
           var qArr = Array.isArray(qRel) ? qRel : (qRel ? [qRel] : []);
           var count = 1, unitPrice = null, totalPrice = null;
           qArr.forEach(function(q) {
-            var qData = quantities[q.id];
-            if (qData) {
-              if (qData.count != null) count = qData.count;
-              if (qData.unitPrice != null) unitPrice = qData.unitPrice;
-              if (qData.totalPrice != null) totalPrice = qData.totalPrice;
+            var qd = quantities[q.id];
+            if (qd) {
+              if (qd.count != null) count = qd.count;
+              if (qd.unitPrice != null) unitPrice = qd.unitPrice;
+              if (qd.totalPrice != null) totalPrice = qd.totalPrice;
             }
           });
-          var notes = (attrs.notes && attrs.notes.value) || '';
           farmoEntries.push({
             id: log.id,
             logType: logType,
@@ -13274,7 +13264,7 @@ async function ledgerFetch() {
             count: count,
             unitPrice: unitPrice,
             totalPrice: totalPrice,
-            notes: notes,
+            notes: (attrs.notes && attrs.notes.value) || '',
             time: time,
             synced: true,
             source: 'farmOS'
@@ -13283,14 +13273,21 @@ async function ledgerFetch() {
       });
     }
 
-    await Promise.all([parseLogRes(saleRes, 'sale'), parseLogRes(purchRes, 'purchase')]);
+    var saleRes, purchRes;
+    try { saleRes = await fetchWithTimeout(apiUrl('/api/log/sale?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }); } catch(e) {}
+    try { purchRes = await fetchWithTimeout(apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }); } catch(e) {}
+    await parseLogRes(saleRes, 'sale');
+    await parseLogRes(purchRes, 'purchase');
 
-    // Merge: farmOS entries replace matching local ones by name+type+approximate date
+    // Dedup by farmOS UUID — remove any local entry whose farmosUUID matches
+    var farmoIds = new Set(farmoEntries.map(function(e) { return e.id; }));
     var localOnly = _ledgerEntries.filter(function(l) {
-      return l.source === 'local' && !l.synced;
+      return l.source === 'local' && !l.synced && !farmoIds.has(l.farmosUUID);
     });
     _ledgerEntries = farmoEntries.concat(localOnly);
-    _ledgerEntries.sort(function(a, b) { return new Date(b.time) - new Date(a.time); });
+    _ledgerEntries.sort(function(a, b) {
+      return new Date(b.time || 0) - new Date(a.time || 0);
+    });
     if (statusEl) statusEl.textContent = 'Fetched ' + farmoEntries.length + ' records from farmOS.';
     ledgerRender();
   } catch(e) {
@@ -13334,7 +13331,7 @@ function ledgerRender() {
 
   list.innerHTML = entries.map(function(e) {
     var d = new Date(e.time);
-    var dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    var dateStr = (e.time && !isNaN(d) && d.getFullYear() > 1970) ? d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'Date unknown';
     var typeLabel = e.logType === 'sale' ? '🏷️ Sale' : '📥 Purchase';
     var typeColor = e.logType === 'sale' ? '#3a7' : '#c66';
     var priceStr = '';
