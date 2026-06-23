@@ -1461,7 +1461,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782179312"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782180117"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7728,6 +7728,11 @@ async function fetchAnimalUUIDs(silent = false) {
     renderPending();
     applyPhotoSrcs();
 
+    // Pull batches back from farmOS product assets — restores after reinstall
+    try {
+      await fetchBatchesFromFarmOS(token, null);
+    } catch(e) { /* best-effort */ }
+
   } catch(e) {
     if (!silent) {
       const el = document.getElementById("farmosTestResult");
@@ -7737,6 +7742,97 @@ async function fetchAnimalUUIDs(silent = false) {
       const statusEl = document.getElementById("syncStatus");
       if (statusEl) statusEl.textContent = "Offline";
     }
+  }
+}
+
+// ===== SHARED: fetch batches from farmOS product assets =====
+// Batches are pushed as asset--product. On reinstall localStorage is wiped,
+// so we pull them back from farmOS to restore the local batch list.
+// Matches by productUUID if known, or by name pattern if new device.
+async function fetchBatchesFromFarmOS(token, logFn) {
+  try {
+    var h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    // Fetch all product assets — include quantity for current inventory count
+    var res = await fetchWithTimeout(
+      apiUrl('/api/asset/product?page[limit]=100&sort=-created'),
+      { headers: h }
+    );
+    if (!res.ok) return;
+    var d = await res.json();
+    var products = d.data || [];
+    var changed = false;
+
+    products.forEach(function(p) {
+      var name = (p.attributes && p.attributes.name) || '';
+      // Only import products that match our batch naming convention
+      // Format: "{label} - {species} Batch - {YYYY-MM-DD}"  or  "{species} Batch - {YYYY-MM-DD}"
+      var batchMatch = name.match(/^(?:(.+) - )?(.+?) Batch - (\d{4}-\d{2}-\d{2})/i);
+      if (!batchMatch) return;
+
+      var label    = batchMatch[1] || '';
+      var species  = batchMatch[2] || '';
+      var dateStr  = batchMatch[3] || '';
+      var uuid     = p.id;
+      var archived = p.attributes && p.attributes.archived;
+      if (archived) return;
+
+      // Determine module from species
+      var speciesLower = species.toLowerCase();
+      var module = (BD_ANIMAL_TYPES && BD_ANIMAL_TYPES.indexOf(speciesLower) >= 0) ? 'bird' : 'goat';
+
+      // Current inventory count from farmOS (inventory field is computed)
+      var currentCount = 0;
+      if (p.attributes && p.attributes.inventory && p.attributes.inventory.length) {
+        p.attributes.inventory.forEach(function(inv) {
+          if (inv.measure === 'count') currentCount += parseFloat(inv.value) || 0;
+        });
+      }
+      currentCount = Math.max(0, Math.round(currentCount));
+
+      // Check if we already have this batch locally by productUUID
+      var existing = batches.find(function(b) { return b.productUUID === uuid; });
+      if (existing) {
+        // Update count from farmOS — farmOS is source of truth for inventory
+        if (existing.count !== currentCount) {
+          existing.count = currentCount;
+          changed = true;
+        }
+        existing.synced = true;
+        existing.label  = existing.label || label;
+        changed = true;
+      } else {
+        // New batch — reconstruct from farmOS product name
+        var newBatch = {
+          id: 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+          module: module,
+          label: label,
+          species: species,
+          breed: '',
+          parentDam: '', parentSire: '',
+          parentDams: [], parentSires: [],
+          groupName: '',
+          bornDate: new Date(dateStr).toISOString(),
+          originalCount: currentCount, // best we have without the birth log
+          count: currentCount,
+          notes: '',
+          productUUID: uuid,
+          logUUID: null,
+          labelSynced: true,
+          synced: true
+        };
+        batches.push(newBatch);
+        changed = true;
+        if (logFn) logFn('📦 Restored batch: ' + name + ' (' + currentCount + ' remaining)\n');
+      }
+    });
+
+    if (changed) {
+      saveBatches();
+      if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
+      if (typeof bd_renderBirds === 'function') bd_renderBirds();
+    }
+  } catch(e) {
+    if (logFn) logFn('⚠️ Batch fetch failed: ' + e.message + '\n');
   }
 }
 
@@ -8452,6 +8548,14 @@ async function syncToFarmOS() {
     } catch(e) {
       logEl.textContent += '⚠️ Batch sync error: ' + e.message + '\n';
     }
+  }
+
+  // Pull batches back from farmOS — restores any lost on reinstall
+  try {
+    logEl.textContent += '\nFetching batches from farmOS...\n';
+    await fetchBatchesFromFarmOS(token, function(msg) { logEl.textContent += msg; });
+  } catch(e) {
+    logEl.textContent += '⚠️ Batch fetch error: ' + e.message + '\n';
   }
 
   // ===== STEP 6: Process queued offline-first actions (sell/death/move/
@@ -10396,6 +10500,29 @@ let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
   localStorage.setItem(LS.logs, JSON.stringify(logs));
   localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
 })();
+
+// ===== CLEANUP: remove bad hatch entries fetched from other modules =====
+// bd_fetchLogs previously imported all log--birth records including goat
+// births, which have no valid timestamp (epoch 0 = 12/31/1969). Remove them.
+(function cleanBadHatchEntries() {
+  var before = bd_history.length;
+  bd_history = bd_history.filter(function(l) {
+    if (l.type !== 'hatch') return true;
+    // Keep entries with valid non-zero timestamp
+    var t = l.timeISO || l.ts || l.time;
+    if (!t) return false;
+    var d = new Date(t);
+    if (isNaN(d.getTime()) || d.getFullYear() < 2000) return false;
+    // Keep entries that match our hatch log name format or have a birdId
+    if (l.birdId) return true;
+    if (l.logName && /^Hatch - /i.test(l.logName)) return true;
+    if (l.hatchCount && l.hatchSpecies) return true;
+    return false;
+  });
+  if (bd_history.length !== before) {
+    localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
+  }
+})();
 // Bird's own med formula list — separate from Goat's (different species,
 // different dosing). Seeded empty rather than guessing poultry dosing
 // numbers; add real ones via Settings > Bird Desk > Manage Med Formulas.
@@ -10803,6 +10930,11 @@ async function bd_fetchAssets() {
       await bd_fetchLogs(token, cfg);
     } catch(e) { /* log fetch is best-effort — birds already fetched successfully above */ }
 
+    // Pull batches back from farmOS product assets — restores after reinstall
+    try {
+      await fetchBatchesFromFarmOS(token, null);
+    } catch(e) { /* best-effort */ }
+
     // Update last sync time here too — previously only the push path did
     // this, so a fetch-only sync left the Dashboard showing "Never synced"
     // despite real, successful activity.
@@ -10884,6 +11016,19 @@ async function bd_fetchLogs(token, cfg) {
     }
     // Skip logs with no asset link AND no recognizable log name — true noise
     if (!bird && ['obs','weight','med','proc','mortality'].indexOf(localType) >= 0) return;
+    // For hatch/egg/feed — only import if log name matches our format OR has a linked bird.
+    // This prevents goat birth logs (log--birth named "Birth - ...") from appearing in bird history.
+    if (localType === 'hatch' && !bird) {
+      if (!logName.match(/^Hatch - /i)) return; // not our hatch format — skip
+    }
+    if (localType === 'egg' && !bird) {
+      if (!logName.match(/^Eggs - /i)) return;
+    }
+    if (localType === 'feed' && !bird) {
+      if (!logName.match(/^Feed - /i)) return;
+    }
+    // Skip logs with invalid/zero timestamp — epoch 0 means no real timestamp
+    if (!ts || parseInt(ts) <= 0) return;
 
     var imageRel = log.relationships && log.relationships.image && log.relationships.image.data;
     var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length-1].id : null) : (imageRel && imageRel.id);
