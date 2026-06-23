@@ -1289,6 +1289,21 @@ header > div:last-child { min-width: 0; }
   </div>
 </div>
 
+<div id="bd-batch-profile-modal" class="bd-modal" onclick="closeBatchProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div id="bd-batch-profile-content"></div>
+    <button class="secondary wide" onclick="closeBatchProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
+<!-- ===== STOCK ITEM PROFILE MODAL ===== -->
+<div id="sd-item-profile-modal" class="bd-modal" onclick="closeItemProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div id="sd-item-profile-content"></div>
+    <button class="secondary wide" onclick="closeItemProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
 <div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
   <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-bird-modal-title">Add Bird</h3>
@@ -1445,7 +1460,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782170613"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782173680"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2838,7 +2853,8 @@ function saveStep() {
       var batchDam   = document.getElementById("f_dam")?.value || "";
       var batchSire  = document.getElementById("f_sire")?.value || "";
       var batchNotes = document.getElementById("f_birthnotes")?.value || "";
-      createBatch('goat', 'Goat', '', batchCount, batchDam, batchSire, '', batchNotes);
+      var batchSpecies = (animalProfiles[goats[herdIndex]] && animalProfiles[goats[herdIndex]].type) || 'Goat';
+      createBatch('goat', batchSpecies, (animalProfiles[goats[herdIndex]] && animalProfiles[goats[herdIndex]].breed) || '', batchCount, batchDam, batchSire, '', batchNotes);
       currentPhoto = null;
       currentFileAttach = null;
       showToast('✅ Batch of ' + batchCount + ' kids recorded');
@@ -4544,29 +4560,10 @@ function confirmBatchAction() {
 async function confirmPromoteFromBatch(batchId) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return;
-  var ok = await promoteFromBatch(batchId);
-  if (!ok) return;
-  if (typeof bd_renderBirds === 'function') bd_renderBirds();
-  if (b.module === 'bird' && typeof bd_openAddBird === 'function') {
-    bd_openAddBird();
-    setTimeout(function() {
-      var spEl = document.getElementById('bd-bird-species'); if (spEl && b.species) spEl.value = b.species;
-      var brEl = document.getElementById('bd-bird-breed-custom'); if (brEl && b.breed) brEl.value = b.breed;
-      var flEl = document.getElementById('bd-bird-flock'); if (flEl && b.groupName) flEl.value = b.groupName;
-    }, 50);
-  } else if (b.module === 'goat') {
-    show('animals');
-    setTimeout(function() {
-      var spEl = document.getElementById('animalsNewSpecies'); if (spEl) spEl.value = b.species || '';
-      var brEl = document.getElementById('animalsNewBreed'); if (brEl) brEl.value = b.breed || '';
-      // Pre-fill dam from batch parentDams if exactly one female known
-      var dams = b.parentDams || [];
-      if (dams.length === 1) {
-        var damEl = document.getElementById('animalsNewDam'); if (damEl) damEl.value = dams[0];
-      }
-    }, 50);
-    showToast('Now in Animals — fill in the name to finish');
-  }
+  if (b.count <= 0) { showToast('⚠️ No remaining count in this batch'); return; }
+  // Open batch edit modal pre-focused on the Add Individual section
+  // — same flow for both goat and bird, consistent UX
+  openBatchEditModal(batchId);
 }
 
 // ===== BATCH EDIT MODAL =====
@@ -4788,15 +4785,13 @@ function addAnimalFromBatch() {
 
   if (b.module === 'goat') {
     if (goats.includes(name)) { showToast('⚠️ Animal already exists'); return; }
-    // Decrement batch
+    // Decrement batch count + queue batchPromote for farmOS
     promoteFromBatch(b.id);
-    // Add to goats
+    // Add to goats locally
     goats.push(name);
     localStorage.setItem(LS.goats, JSON.stringify(goats));
-    animalProfiles[name] = { sex: sex, birthdate: dob, breed: b.breed, type: b.species, group: '', notes: '', tag: tag, dam: dam, sire: sire };
+    animalProfiles[name] = { sex: sex, birthdate: dob, breed: b.breed, type: b.species, group: '', notes: 'From batch: ' + (b.label || b.species + ' batch') + (dam ? '. Dam: ' + dam : '') + (sire ? '. Sire: ' + sire : ''), tag: tag, dam: dam, sire: sire };
     localStorage.setItem(LS.animalProfiles, JSON.stringify(animalProfiles));
-    // Queue purchase-style action so farmOS creates the asset on sync
-    queuePendingAction('purchase', { animalName: name, sex: sex, dob: dob, tag: tag, notes: 'From batch: ' + (b.label || b.species + ' batch') + (dam ? '. Dam: ' + dam : '') + (sire ? '. Sire: ' + sire : '') });
     if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
   } else {
     // Bird — use bd_addBirdDirect
@@ -5617,7 +5612,7 @@ function startFlowForAnimal(name) {
 function renderAnimalsScreen() {
   const al = document.getElementById("animalsAnimalList");
   al.innerHTML = "";
-  const goatBatches = batches.filter(function(b) { return b.module === 'goat' && b.count > 0; });
+  const goatBatches = batches.filter(function(b) { return b.module === 'goat'; });
   if (goatBatches.length) {
     var batchHeader = document.createElement('div');
     batchHeader.className = 'species-header';
@@ -9244,24 +9239,16 @@ function renderDashboard() {
     const subtitle = a.notes ? a.notes.split('\n')[0] : '';
     const primaryId = a.photoIds && a.photoIds[0];
     const thumb    = primaryId ? `<img data-photoid="${primaryId}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;cursor:zoom-in;background:#333;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : '';
-    return `<div class="stock-card ${cls}" onclick="toggleCardDrawer(this)">
+    return `<div class="stock-card ${cls}" onclick="openItemProfile('${a.uuid}')">
       <div class="card-top">
         ${thumb}
         <div class="item-info" style="flex:1;">
-          <div class="item-name">${a.name} <span class="card-arrow">▼</span></div>
+          <div class="item-name">${a.name} <span style="color:#555;font-size:16px;float:right;">›</span></div>
           <div class="item-qty">${a.value}${ul ? ' ' + ul : ''}</div>
           ${subtitle ? `<div style="color:#888;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;">${subtitle}</div>` : ''}
         </div>
         <button class="adj-btn secondary" onclick="event.stopPropagation();quickAdj('${a.uuid}',-1)">−</button>
         <button class="adj-btn"           onclick="event.stopPropagation();quickAdj('${a.uuid}', 1)">+</button>
-      </div>
-      <div class="card-drawer" id="drawer-${a.uuid}">
-        ${primaryId ? `<img data-photoid="${primaryId}" style="width:100%;min-height:120px;border-radius:6px;object-fit:contain;cursor:zoom-in;margin-bottom:8px;background:#333;" onclick="event.stopPropagation();sd_openPhotoViewer('${a.uuid}')">` : ''}
-        ${a.notes ? `<div style="color:#aaa;font-size:13px;margin-bottom:8px;">${a.notes.replace(/\n/g,'<br>')}</div>` : ''}
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button onclick="event.stopPropagation();openAdjust('${a.uuid}')" style="flex:1;margin:0;padding:12px;font-size:14px;">📝 Adjust</button>
-          <button onclick="event.stopPropagation();openEditItem('${a.uuid}')" class="secondary" style="margin:0;padding:12px;font-size:14px;">✏️ Edit Item</button>
-        </div>
       </div>
     </div>`;
   }).join('');
@@ -9287,6 +9274,60 @@ function quickAdj(uuid, delta) {
 }
 
 // ===== OPEN ADJUST SCREEN =====
+function openItemProfile(uuid) {
+  const a = assets.find(x => x.uuid === uuid);
+  if (!a) return;
+  const modal = document.getElementById('sd-item-profile-modal');
+  if (!modal) return;
+
+  function row(k, v) { return v !== undefined && v !== '' ? `<div style="margin:5px 0;"><strong style="color:#9c9;">${k}:</strong> ${v}</div>` : ''; }
+
+  const primaryId = a.photoIds && a.photoIds[0];
+  const photoHTML = primaryId
+    ? `<img data-photoid="${primaryId}" style="width:100%;max-height:200px;border-radius:8px;object-fit:cover;margin-bottom:12px;cursor:zoom-in;background:#333;" onclick="sd_openPhotoViewer('${uuid}')">`
+    : `<div style="width:100%;height:60px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:12px;">📦</div>`;
+
+  // Last 10 adjustments for this item
+  const sdHistory = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
+  const itemHistory = sdHistory.filter(e => e.uuid === uuid || e.id === uuid).slice(0, 10);
+  let histHTML = '';
+  if (itemHistory.length) {
+    histHTML = '<div style="margin-top:12px;border-top:1px solid #383838;padding-top:10px;">' +
+      '<strong style="font-size:14px;color:#eee;">Recent Adjustments</strong>';
+    itemHistory.forEach(function(e) {
+      const sign = e.action === 'increment' ? '+' : e.action === 'decrement' ? '−' : '=';
+      const color = e.action === 'increment' ? '#3a7' : e.action === 'decrement' ? '#c66' : '#888';
+      const ts = e.ts ? new Date(e.ts).toLocaleString() : '';
+      histHTML += `<div style="font-size:13px;color:#bbb;margin-top:6px;display:flex;justify-content:space-between;">` +
+        `<span><span style="color:${color};font-weight:bold;">${sign}${e.amount}</span>${e.notes ? ' · ' + e.notes : ''}</span>` +
+        `<span style="color:#666;font-size:11px;">${ts}</span></div>`;
+    });
+    histHTML += '</div>';
+  }
+
+  const ul = a.units || '';
+  document.getElementById('sd-item-profile-content').innerHTML =
+    `<h3 style="margin:0 0 4px;color:#3a7;">${a.name}</h3>` +
+    `<div style="font-size:13px;color:#888;margin-bottom:10px;">${a.category || ''}</div>` +
+    photoHTML +
+    `<div style="font-size:26px;font-weight:bold;color:#3a7;margin-bottom:8px;">${a.value}${ul ? ' ' + ul : ''}</div>` +
+    row('Category', a.category) +
+    row('Notes', a.notes ? a.notes.replace(/\n/g, '<br>') : '') +
+    `<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">` +
+      `<button onclick="closeItemProfile();openAdjust('${uuid}');" style="flex:1;margin:0;min-width:80px;">📝 Adjust</button>` +
+      `<button onclick="closeItemProfile();openEditItem('${uuid}');" class="secondary" style="flex:1;margin:0;min-width:80px;">✏️ Edit</button>` +
+    `</div>` +
+    histHTML;
+
+  lazyLoadPhotos(document.getElementById('sd-item-profile-content'));
+  modal.style.display = 'flex';
+}
+
+function closeItemProfile() {
+  const modal = document.getElementById('sd-item-profile-modal');
+  if (modal) modal.style.display = 'none';
+}
+
 async function openAdjust(uuid) {
   adjustAsset = assets.find(a => a.uuid === uuid);
   if (!adjustAsset) return;
@@ -11355,26 +11396,18 @@ function batchCardHTML(b) {
   var meta = [b.breed, damsStr, siresStr, b.groupName].filter(function(x) { return x; }).join(' · ');
   var origNote = b.count !== b.originalCount ? (' · ' + b.originalCount + ' original') : '';
   var syncDot = b.synced ? '' : ' <span style="color:#c90;font-size:11px;">⏳</span>';
-  var actions = b.count > 0
-    ? '<div style="display:flex;gap:6px;margin:-6px 0 8px;">' +
-        '<button onclick="openBatchEditModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#2a4a6a;margin:0;">✏️ Edit</button>' +
-        '<button onclick="openBatchSellModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#8b6500;margin:0;">🏷️ Sell</button>' +
-        '<button onclick="openBatchDiedModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#8b0000;margin:0;">💀 Died</button>' +
-        '<button onclick="confirmPromoteFromBatch(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#2a5a2a;margin:0;">⭐ Promote</button>' +
-      '</div>'
-    : '<div style="display:flex;gap:6px;margin:-6px 0 8px;">' +
-        '<button onclick="openBatchEditModal(\'' + b.id + '\')" style="flex:1;padding:6px 4px;font-size:12px;background:#2a4a6a;margin:0;">✏️ Edit</button>' +
-      '</div>';
-  return '<div class="bird-card" style="border-left:3px solid #3a7;">' +
+  var countLabel = b.count > 0 ? b.count + ' remaining' : '<span style="color:#666;">completed</span>';
+  return '<div class="bird-card" style="border-left:3px solid #3a7;cursor:pointer;" onclick="openBatchProfile(\'' + b.id + '\')">' +
     '<div class="bird-icon">📦</div>' +
-    '<div class="bird-info"><div class="bird-tag">' + b.count + ' remaining' + syncDot + '</div><div class="bird-name">' + displayName + '</div><div class="bird-meta">' + meta + origNote + '</div></div>' +
-    '</div>' + actions;
+    '<div class="bird-info"><div class="bird-tag">' + countLabel + syncDot + '</div><div class="bird-name">' + displayName + '</div><div class="bird-meta">' + meta + origNote + '</div></div>' +
+    '<div style="color:#555;font-size:18px;padding-left:8px;">›</div>' +
+    '</div>';
 }
 
 function bd_renderBirds() {
   var list = document.getElementById('bd-bird-list'); if (!list) return;
   var search = (document.getElementById('bd-search') ? document.getElementById('bd-search').value : '').toLowerCase();
-  var birdBatches = batches.filter(function(b) { return b.module === 'bird' && b.count > 0; });
+  var birdBatches = batches.filter(function(b) { return b.module === 'bird'; });
   var batchHTML = birdBatches.length ? "<div class='species-header'>📦 Batches</div>" + birdBatches.map(batchCardHTML).join('') : '';
   var birds = bd_birds.filter(function(b) { return b.type !== 'feeder' && b.status !== 'archived' && bd_excluded.indexOf(b.species) < 0; });
   if (bd_speciesFilterActive) birds = birds.filter(function(b) { return b.species === bd_speciesFilterActive; });
@@ -11393,10 +11426,10 @@ function bd_renderBirds() {
         var thumb = b.photoId
           ? '<img data-photoid="' + b.photoId + '" class="bird-thumb" style="background:#333;" onclick="bd_openPhotoViewer(this.src)">'
           : '<div class="bird-icon">' + bd_speciesIcon(b.species) + '</div>';
-        return '<div class="bird-card">' +
+        return '<div class="bird-card" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;">' +
           thumb +
-          '<div class="bird-info" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
-          '<button onclick="bd_openEditBird(\'' + id + '\')" style="margin:0;padding:10px 14px;font-size:16px;background:#333;">Edit</button>' +
+          '<div class="bird-info"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
+          '<div style="color:#555;font-size:18px;padding-left:8px;">›</div>' +
           '</div>';
       }).join('');
   }).join('');
@@ -11455,6 +11488,80 @@ function bd_openHatchForBird(id) {
 
 function bd_closeBirdProfile() {
   var modal = document.getElementById('bd-profile-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function openBatchProfile(batchId) {
+  var b = batches.find(function(x) { return x.id === batchId; });
+  if (!b) return;
+  var modal = document.getElementById('bd-batch-profile-modal');
+  if (!modal) return;
+
+  function row(k, v) { return v ? '<div style="margin:5px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ''; }
+
+  var damsStr  = (b.parentDams  && b.parentDams.length)  ? b.parentDams.join(', ')  : (b.parentDam  || '');
+  var siresStr = (b.parentSires && b.parentSires.length) ? b.parentSires.join(', ') : (b.parentSire || '');
+  var bornDate = b.bornDate ? new Date(b.bornDate).toLocaleDateString() : '';
+  var isComplete = b.count <= 0;
+  var syncBadge = b.synced
+    ? '<span style="color:#3a7;font-size:12px;">✓ synced</span>'
+    : '<span style="color:#c90;font-size:12px;">⏳ not synced</span>';
+
+  // Activity log from pendingActions
+  var actions = pendingActions.filter(function(a) { return a.payload && a.payload.batchId === batchId; });
+  var histHTML = '';
+  if (actions.length) {
+    histHTML = '<div style="margin-top:12px;border-top:1px solid #383838;padding-top:10px;">' +
+      '<strong style="font-size:14px;color:#eee;">Activity</strong>';
+    actions.slice().reverse().forEach(function(a) {
+      var label = a.type === 'batchSell'    ? '🏷️ Sold '    + (a.payload.count || 1)
+                : a.type === 'batchDied'    ? '💀 Died '    + (a.payload.count || 1)
+                : a.type === 'batchPromote' ? '⭐ Promoted 1 to individual'
+                : a.type;
+      var ts = a.createdAt ? new Date(a.createdAt).toLocaleString() : '';
+      var sync = a.synced ? ' <span style="color:#3a7;font-size:11px;">✓</span>' : ' <span style="color:#c90;font-size:11px;">⏳</span>';
+      histHTML += '<div style="font-size:13px;color:#bbb;margin-top:6px;">' + label + sync +
+        (ts ? '<br><span style="color:#666;font-size:11px;">' + ts + '</span>' : '') +
+        (a.payload.notes ? '<br><span style="color:#888;font-size:11px;">' + a.payload.notes + '</span>' : '') + '</div>';
+    });
+    histHTML += '</div>';
+  }
+
+  // Action buttons — only if count > 0
+  var actionsHTML = isComplete
+    ? '<p style="color:#666;font-size:13px;margin-top:12px;text-align:center;">Batch complete — all animals accounted for.</p>'
+    : '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">' +
+        '<button onclick="closeBatchProfile();openBatchSellModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b6500;min-width:80px;">🏷️ Sell</button>' +
+        '<button onclick="closeBatchProfile();openBatchDiedModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b0000;min-width:80px;">💀 Died</button>' +
+        '<button onclick="closeBatchProfile();confirmPromoteFromBatch(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a5a2a;min-width:80px;">⭐ Promote</button>' +
+      '</div>';
+
+  document.getElementById('bd-batch-profile-content').innerHTML =
+    '<h3 style="margin:0 0 4px;color:#3a7;">' + (b.label || b.species + ' batch') + '</h3>' +
+    '<div style="font-size:13px;color:#888;margin-bottom:10px;">' + syncBadge + '</div>' +
+    '<div style="font-size:36px;text-align:center;margin:8px 0 12px;">' + (typeof bd_speciesIcon === 'function' ? bd_speciesIcon(b.species) : '📦') + '</div>' +
+    '<div style="font-size:22px;font-weight:bold;color:' + (isComplete ? '#666' : '#3a7') + ';margin-bottom:8px;">' +
+      (isComplete ? 'Completed' : b.count + ' remaining') +
+    '</div>' +
+    row('Species', b.species) +
+    row('Breed', b.breed) +
+    row('Born', bornDate) +
+    row('Original count', String(b.originalCount)) +
+    (b.module === 'goat'
+      ? row('Dam(s)', damsStr) + row('Sire(s)', siresStr)
+      : row('Mother / Broody', damsStr)) +
+    row('Notes', b.notes) +
+    actionsHTML +
+    histHTML +
+    '<div style="display:flex;gap:8px;margin-top:14px;">' +
+      '<button onclick="closeBatchProfile();openBatchEditModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a4a6a;">✏️ Edit Batch</button>' +
+    '</div>';
+
+  modal.style.display = 'flex';
+}
+
+function closeBatchProfile() {
+  var modal = document.getElementById('bd-batch-profile-modal');
   if (modal) modal.style.display = 'none';
 }
 
@@ -11944,7 +12051,7 @@ function bd_makeLogEl(l) {
         var vbBtn = document.createElement('button');
         vbBtn.textContent = 'View Batch';
         vbBtn.style.cssText = 'padding:6px 12px;font-size:13px;margin:0;background:#2a4a6a;';
-        vbBtn.onclick = function(e) { e.stopPropagation(); openBatchEditModal(l._batchId); };
+        vbBtn.onclick = function(e) { e.stopPropagation(); openBatchProfile(l._batchId); };
         actDiv.appendChild(vbBtn);
       }
     } else {
