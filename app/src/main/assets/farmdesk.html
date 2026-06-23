@@ -373,6 +373,7 @@ header > div:last-child { min-width: 0; }
     <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
     <div style="display:flex;gap:6px;align-items:center;">
       <button class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
+      <button class="module-btn" onclick="show('ledger')" title="Ledger">💰</button>
       <div class="module-switcher" id="moduleSwitcher"></div>
       <button class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
     </div>
@@ -755,6 +756,7 @@ header > div:last-child { min-width: 0; }
         <div id="settingsUserInfo" style="color:#888;font-size:14px;margin-bottom:8px;"></div>
         <div id="appVersionLine" style="color:#666;font-size:13px;margin-bottom:8px;"></div>
         <div id="cfgDebugLine" style="color:#666;font-size:11px;margin-bottom:8px;word-break:break-all;"></div>
+        <button onclick="show('ledger')" class="wide secondary" style="margin-bottom:8px;">💰 View Ledger</button>
         <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
       </div>
 
@@ -984,7 +986,27 @@ header > div:last-child { min-width: 0; }
 </div>
 
 
-
+<!-- ===== LEDGER ===== -->
+<div id="screen-ledger" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="settingsHome()">← Home</button>
+    <h3 style="margin:10px 0 4px;">💰 Ledger</h3>
+    <p style="color:#888;font-size:13px;margin:0;">Sales and purchases across all modules.</p>
+  </div>
+  <div class="box">
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button onclick="ledgerFetch()" class="secondary wide" style="margin:0;">⬇️ Fetch from farmOS</button>
+    </div>
+    <div class="filter-chips">
+      <button class="chip active" onclick="ledgerSetFilter('all',this)">All</button>
+      <button class="chip" onclick="ledgerSetFilter('sale',this)">🏷️ Sales</button>
+      <button class="chip" onclick="ledgerSetFilter('purchase',this)">📥 Purchases</button>
+    </div>
+  </div>
+  <div id="ledger-summary" class="box" style="display:none;"></div>
+  <div id="ledger-list"></div>
+  <div id="ledger-status" style="font-size:13px;color:#888;padding:10px;text-align:center;"></div>
+</div>
 
 </div><!-- end app-screens -->
 
@@ -1443,7 +1465,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782194278"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782235861"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1581,7 +1603,10 @@ history.pushState({ navIndex: 0 }, '');
 function showAppScreenInternal(id) {
   document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
+  // Hide ALL module containers — not just goatdesk
   document.getElementById('module-goatdesk').style.display = 'none';
+  var sdEl = document.getElementById('module-stockdesk'); if (sdEl) sdEl.style.display = 'none';
+  var bdEl = document.getElementById('module-birddesk'); if (bdEl) bdEl.style.display = 'none';
   document.getElementById('app-screens').style.display = '';
   const screenEl = document.getElementById('screen-' + id);
   if (screenEl) screenEl.classList.add('active');
@@ -1595,6 +1620,7 @@ function showAppScreenInternal(id) {
   if (id === 'standalone') { renderStandaloneScreen(); }
   if (id === 'dashboard') { renderDashboardScreen(); }
   if (id === 'scheduler') { renderScheduler(); }
+  if (id === 'ledger') { show_ledger_init(); }
 }
 
 // Internal: actually display a goat module screen. No stack push.
@@ -1615,7 +1641,7 @@ function showGoatScreenInternal(id) {
 }
 
 function show(id) {
-  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler'];
+  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger'];
   if (appScreenIds.includes(id)) {
     showAppScreenInternal(id);
     pushNav('app', id);
@@ -13111,7 +13137,224 @@ function renderDashboardScreen() {
   }
   html += '</div>';
 
+  // ===== LEDGER SHORTCUT =====
+  html += '<div class="box"><button onclick="show(\'ledger\')" class="secondary wide">💰 View Ledger</button></div>';
+
   box.innerHTML = html;
+}
+
+// ===== LEDGER =====
+let _ledgerFilter = 'all';
+let _ledgerEntries = []; // combined local + farmOS entries
+
+function ledgerSetFilter(f, btn) {
+  _ledgerFilter = f;
+  document.querySelectorAll('#screen-ledger .chip').forEach(function(c) { c.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  ledgerRender();
+}
+
+function show_ledger_init() {
+  // Build from local pendingActions — always available offline
+  _ledgerEntries = [];
+  pendingActions.forEach(function(a) {
+    if (['sell','death','birdSell'].indexOf(a.type) >= 0) {
+      var isSale = (a.type === 'sell' || a.type === 'birdSell');
+      if (!isSale) return;
+      _ledgerEntries.push({
+        id: a.id,
+        logType: 'sale',
+        name: a.payload.animalName || ('Bird: ' + a.payload.birdId),
+        count: 1,
+        unitPrice: a.payload.unitPrice || null,
+        totalPrice: a.payload.unitPrice || null,
+        notes: a.payload.notes || '',
+        time: a.createdAt,
+        synced: a.synced,
+        source: 'local'
+      });
+    } else if (a.type === 'batchSell') {
+      _ledgerEntries.push({
+        id: a.id,
+        logType: 'sale',
+        name: (a.payload.species || '') + ' batch',
+        count: a.payload.count || 1,
+        unitPrice: a.payload.unitPrice || null,
+        totalPrice: a.payload.unitPrice ? (a.payload.unitPrice * (a.payload.count || 1)) : null,
+        notes: a.payload.notes || '',
+        time: a.createdAt,
+        synced: a.synced,
+        source: 'local'
+      });
+    } else if (a.type === 'purchase') {
+      _ledgerEntries.push({
+        id: a.id,
+        logType: 'purchase',
+        name: a.payload.animalName || 'Animal',
+        count: 1,
+        unitPrice: a.payload.unitPrice || null,
+        totalPrice: a.payload.unitPrice || null,
+        notes: a.payload.notes || '',
+        time: a.createdAt,
+        synced: a.synced,
+        source: 'local'
+      });
+    }
+  });
+  ledgerRender();
+}
+
+async function ledgerFetch() {
+  var statusEl = document.getElementById('ledger-status');
+  if (statusEl) statusEl.textContent = 'Fetching from farmOS...';
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) {
+    if (statusEl) statusEl.textContent = '⚠️ Connect to farmOS in Settings first.';
+    return;
+  }
+  try {
+    var token = await getToken(cfg);
+    var h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    // Fetch both sale and purchase logs with asset and quantity included
+    var [saleRes, purchRes] = await Promise.all([
+      fetchWithTimeout(apiUrl('/api/log/sale?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }),
+      fetchWithTimeout(apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h })
+    ]);
+
+    var farmoEntries = [];
+    function parseLogRes(res, logType) {
+      if (!res.ok) return;
+      return res.json().then(function(d) {
+        var included = d.included || [];
+        // Build UUID → name map for assets
+        var assetNames = {};
+        included.forEach(function(inc) {
+          if (inc.type && inc.type.startsWith('asset--')) assetNames[inc.id] = inc.attributes && inc.attributes.name || '';
+        });
+        // Build UUID → quantity map
+        var quantities = {};
+        included.forEach(function(inc) {
+          if (inc.type === 'quantity--standard') {
+            var attrs = inc.attributes || {};
+            var val = attrs.value ? (parseFloat(attrs.value.numerator) / parseFloat(attrs.value.denominator)) : null;
+            var unitPriceCents = attrs.unit_price ? (parseFloat(attrs.unit_price.numerator) / parseFloat(attrs.unit_price.denominator)) : null;
+            var totalPriceCents = attrs.total_price ? (parseFloat(attrs.total_price.numerator) / parseFloat(attrs.total_price.denominator)) : null;
+            quantities[inc.id] = {
+              count: val,
+              unitPrice: unitPriceCents != null ? unitPriceCents / 100 : null,
+              totalPrice: totalPriceCents != null ? totalPriceCents / 100 : null
+            };
+          }
+        });
+        (d.data || []).forEach(function(log) {
+          var attrs = log.attributes || {};
+          var ts = attrs.timestamp;
+          var time = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
+          // Asset names
+          var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+          var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          var names = assetArr.map(function(a) { return assetNames[a.id] || ''; }).filter(Boolean);
+          // Quantities
+          var qRel = log.relationships && log.relationships.quantity && log.relationships.quantity.data;
+          var qArr = Array.isArray(qRel) ? qRel : (qRel ? [qRel] : []);
+          var count = 1, unitPrice = null, totalPrice = null;
+          qArr.forEach(function(q) {
+            var qData = quantities[q.id];
+            if (qData) {
+              if (qData.count != null) count = qData.count;
+              if (qData.unitPrice != null) unitPrice = qData.unitPrice;
+              if (qData.totalPrice != null) totalPrice = qData.totalPrice;
+            }
+          });
+          var notes = (attrs.notes && attrs.notes.value) || '';
+          farmoEntries.push({
+            id: log.id,
+            logType: logType,
+            name: names.join(', ') || attrs.name || '',
+            count: count,
+            unitPrice: unitPrice,
+            totalPrice: totalPrice,
+            notes: notes,
+            time: time,
+            synced: true,
+            source: 'farmOS'
+          });
+        });
+      });
+    }
+
+    await Promise.all([parseLogRes(saleRes, 'sale'), parseLogRes(purchRes, 'purchase')]);
+
+    // Merge: farmOS entries replace matching local ones by name+type+approximate date
+    var localOnly = _ledgerEntries.filter(function(l) {
+      return l.source === 'local' && !l.synced;
+    });
+    _ledgerEntries = farmoEntries.concat(localOnly);
+    _ledgerEntries.sort(function(a, b) { return new Date(b.time) - new Date(a.time); });
+    if (statusEl) statusEl.textContent = 'Fetched ' + farmoEntries.length + ' records from farmOS.';
+    ledgerRender();
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '⚠️ Fetch failed: ' + e.message;
+  }
+}
+
+function ledgerRender() {
+  var list = document.getElementById('ledger-list');
+  var summary = document.getElementById('ledger-summary');
+  if (!list) return;
+
+  var entries = _ledgerEntries.filter(function(e) {
+    if (_ledgerFilter === 'sale') return e.logType === 'sale';
+    if (_ledgerFilter === 'purchase') return e.logType === 'purchase';
+    return true;
+  });
+
+  // Summary totals
+  var totalSales = 0, totalPurchases = 0;
+  _ledgerEntries.forEach(function(e) {
+    var amt = e.totalPrice || (e.unitPrice ? e.unitPrice * (e.count || 1) : 0);
+    if (e.logType === 'sale') totalSales += amt;
+    else if (e.logType === 'purchase') totalPurchases += amt;
+  });
+  var net = totalSales - totalPurchases;
+  if (summary) {
+    summary.style.display = '';
+    summary.innerHTML =
+      '<div style="display:flex;gap:8px;text-align:center;">' +
+      '<div style="flex:1;"><div style="font-size:12px;color:#888;">Sales</div><div style="font-size:18px;color:#3a7;font-weight:bold;">$' + totalSales.toFixed(2) + '</div></div>' +
+      '<div style="flex:1;"><div style="font-size:12px;color:#888;">Purchases</div><div style="font-size:18px;color:#c66;font-weight:bold;">$' + totalPurchases.toFixed(2) + '</div></div>' +
+      '<div style="flex:1;"><div style="font-size:12px;color:#888;">Net</div><div style="font-size:18px;font-weight:bold;color:' + (net >= 0 ? '#3a7' : '#c66') + ';">$' + net.toFixed(2) + '</div></div>' +
+      '</div>';
+  }
+
+  if (!entries.length) {
+    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No records. Tap Fetch to load from farmOS.</div>';
+    return;
+  }
+
+  list.innerHTML = entries.map(function(e) {
+    var d = new Date(e.time);
+    var dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    var typeLabel = e.logType === 'sale' ? '🏷️ Sale' : '📥 Purchase';
+    var typeColor = e.logType === 'sale' ? '#3a7' : '#c66';
+    var priceStr = '';
+    if (e.totalPrice != null) {
+      priceStr = '$' + e.totalPrice.toFixed(2);
+      if (e.count > 1 && e.unitPrice != null) priceStr += ' ($' + e.unitPrice.toFixed(2) + '/ea)';
+    } else if (e.unitPrice != null) {
+      priceStr = '$' + e.unitPrice.toFixed(2) + (e.count > 1 ? ' × ' + e.count : '');
+    }
+    var syncTag = e.synced ? '<span style="color:#3a7;font-size:11px;">✓ synced</span>' : '<span style="color:#c90;font-size:11px;">⏳ pending</span>';
+    var countStr = e.count > 1 ? ' × ' + e.count : '';
+    return '<div class="box">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+        '<strong style="font-size:15px;">' + (e.name || '—') + countStr + '</strong>' +
+        '<span style="color:' + typeColor + ';font-size:14px;font-weight:bold;">' + (priceStr || '—') + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px;color:#888;margin-top:2px;">' + typeLabel + ' · ' + dateStr + ' · ' + syncTag + '</div>' +
+      (e.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + e.notes + '</div>' : '') +
+    '</div>';
+  }).join('');
 }
 
 function openDashboard() {
