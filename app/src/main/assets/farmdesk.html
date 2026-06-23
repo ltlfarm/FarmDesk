@@ -343,8 +343,7 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 .bd-modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:500; overflow-y:auto; padding:20px; }
 .bd-modal-box { background:#2a2a2a; border-radius:10px; padding:18px; max-width:480px; margin:0 auto; }
 .bd-modal-box h3 { margin:0 0 14px; color:#3a7; }
-#bd-photo-viewer { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.95); z-index:600; align-items:center; justify-content:center; }
-#bd-photo-viewer.open { display:flex; }
+
 body { overflow-x: hidden; }
 .module-switcher { overflow-x: auto; flex-wrap: nowrap; max-width: 52vw; scrollbar-width: none; -ms-overflow-style: none; }
 .module-switcher::-webkit-scrollbar { display: none; }
@@ -449,6 +448,7 @@ header > div:last-child { min-width: 0; }
 <div id="screen-history" class="screen">
   <div class="box">
     <h3 style="margin:4px 0 10px;">History</h3>
+    <input id="historySearch" placeholder="Search animal or log..." oninput="renderHistory()" style="width:100%;box-sizing:border-box;margin-bottom:8px;">
 
     <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Filter logs to one animal, or leave as All Animals to see everything.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterGoat"><option value="">All Animals</option></select>
@@ -981,10 +981,6 @@ header > div:last-child { min-width: 0; }
     <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to farmOS</button>
     <div id="syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
   </div>
-
-  <div class="box">
-    <button onclick="logout()" class="wide secondary">🚪 Log Out</button>
-  </div>
 </div>
 
 
@@ -1296,33 +1292,6 @@ header > div:last-child { min-width: 0; }
   </div>
 </div>
 
-<!-- ===== GOAT PROFILE MODAL ===== -->
-<div id="goat-profile-modal" class="bd-modal" onclick="closeGoatProfile()" style="display:none;">
-  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <strong id="goat-profile-title" style="font-size:18px;color:#3a7;"></strong>
-      <button onclick="closeGoatProfile()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
-    </div>
-    <div id="goat-profile-content"></div>
-    <button class="secondary wide" onclick="closeGoatProfile()" style="margin-top:10px;">Close</button>
-  </div>
-</div>
-
-<div id="bd-batch-profile-modal" class="bd-modal" onclick="closeBatchProfile()" style="display:none;">
-  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div id="bd-batch-profile-content"></div>
-    <button class="secondary wide" onclick="closeBatchProfile()" style="margin-top:10px;">Close</button>
-  </div>
-</div>
-
-<!-- ===== STOCK ITEM PROFILE MODAL ===== -->
-<div id="sd-item-profile-modal" class="bd-modal" onclick="closeItemProfile()" style="display:none;">
-  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
-    <div id="sd-item-profile-content"></div>
-    <button class="secondary wide" onclick="closeItemProfile()" style="margin-top:10px;">Close</button>
-  </div>
-</div>
-
 <div id="bd-bird-modal" class="bd-modal" onclick="bd_closeBirdModalOverlay()">
   <div class="bd-modal-box" onclick="event.stopPropagation()">
     <h3 id="bd-bird-modal-title">Add Bird</h3>
@@ -1430,11 +1399,6 @@ header > div:last-child { min-width: 0; }
 </div>
 
 <!-- PHOTO VIEWER -->
-<div id="bd-photo-viewer" onclick="bd_closePhotoViewer()">
-  <span style="position:absolute;top:16px;right:16px;font-size:28px;color:#fff;cursor:pointer;" onclick="bd_closePhotoViewer()">&#x2715;</span>
-  <img id="bd-photo-viewer-img" src="" style="max-width:100%;max-height:100vh;object-fit:contain;">
-</div>
-
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav bd-bottom-nav">
   <button id="bd-nav-birds"   onclick="bd_show('birds')"   class="active">&#x1F413; Birds</button>
@@ -1479,7 +1443,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782189534"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782193538"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3347,6 +3311,7 @@ function renderHistory() {
   const gf = document.getElementById("filterGoat").value;
   const tf = document.getElementById("filterType").value;
   const sf = document.getElementById("sortOrder").value;
+  const search = (document.getElementById("historySearch") ? document.getElementById("historySearch").value : "").toLowerCase().trim();
 
   // Merge real logs + synthetic batch entries, deduped by id
   const synthBatch = goatBatchHistoryLogs();
@@ -3359,6 +3324,7 @@ function renderHistory() {
     if (!name) return false;
     if (gf && l.goat !== gf && name !== gf) return false;
     if (tf && l.type !== tf) return false;
+    if (search && !name.toLowerCase().includes(search) && !formatLog(l).toLowerCase().includes(search)) return false;
     return true;
   });
 
@@ -10692,7 +10658,7 @@ var bd_currentPhoto = null;
 var bd_currentBirdPhoto = null;
 var bd_typeListGlobal = [];
 var bd_editingLogId = null;
-var _bd_useProxy = false;
+
 
 // Internal: actually display a bird module screen. No stack push.
 function bd_showInternal(id) {
@@ -10734,33 +10700,7 @@ function bd_updateSyncBadge() {
 }
 
 // ===== AUTH =====
-
-async function bd_getToken(cfg) {
-  var tryAuth = async function(url, scope) {
-    var body = new URLSearchParams({ grant_type: 'password', client_id: 'farm', username: cfg.user, password: cfg.pass, scope: scope });
-    var controller = new AbortController();
-    var timer = setTimeout(function() { controller.abort(); }, 5000);
-    try {
-      var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body, signal: controller.signal });
-      clearTimeout(timer);
-      if (res.ok) { var data = await res.json(); return data.access_token; }
-    } catch(e) { clearTimeout(timer); }
-    return null;
-  };
-  var attempts = [['/proxy/oauth/token', true], [cfg.url + '/oauth/token', false]];
-  for (var i = 0; i < attempts.length; i++) {
-    try {
-      var token = await tryAuth(attempts[i][0], 'farm_manager');
-      if (token) { _bd_useProxy = attempts[i][1]; return token; }
-    } catch(e) {}
-  }
-  throw new Error('Auth failed — check credentials and URL');
-}
-
-function bd_apiUrl(path) {
-  var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
-  return _bd_useProxy ? '/proxy' + path : (cfg.url || '') + path;
-}
+// Bird uses shared getToken() and apiUrl() — defined in the shared module section above.
 
 function bd_authHeaders(token) { return { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }; }
 function bd_postHeaders(token) { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }; }
@@ -10862,11 +10802,9 @@ function bd_clearPhoto() {
   var clearBtn = document.getElementById('bd-clear-photo-btn'); if (clearBtn) clearBtn.style.display = 'none';
   ['bd-f-gallery','bd-f-camera'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
 }
-function bd_openPhotoViewer(src) {
-  var v = document.getElementById('bd-photo-viewer'); var img = document.getElementById('bd-photo-viewer-img');
-  if (!v || !img || !src) return; img.src = src; v.classList.add('open');
-}
-function bd_closePhotoViewer() { var v = document.getElementById('bd-photo-viewer'); if (v) v.classList.remove('open'); }
+// Photo viewer — delegates to shared pinch-zoom viewer (body level, accessible from any module)
+function bd_openPhotoViewer(src) { if (src) openPhotoViewer(src); }
+function bd_closePhotoViewer() { closePhotoViewer(); }
 
 // ===== SYNC SCREEN =====
 function bd_renderSync() {
@@ -10932,9 +10870,9 @@ async function bd_fetchAssets() {
   bd_setLoading(true, 'Fetching birds from farmOS...');
   var el = document.getElementById('bd-test-result');
   try {
-    var token = await bd_getToken(cfg);
+    var token = await getToken(cfg);
     var h = bd_authHeaders(token);
-    var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
     var typeMap = {}; var groupMap = {}; var fileMap = {};
@@ -10983,7 +10921,7 @@ async function bd_fetchAssets() {
       }
       return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, synced: true };
     });
-    var resEq = await fetchWithTimeout(bd_apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
+    var resEq = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
     if (resEq.ok) {
       var deq = await resEq.json();
@@ -11088,7 +11026,7 @@ async function bd_fetchLogs(token, cfg) {
   var h = bd_authHeaders(token);
   var bundles = ['observation', 'medical', 'harvest', 'birth', 'input'];
   var responses = await Promise.all(bundles.map(function(b) {
-    return fetchWithTimeout(bd_apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: h });
+    return fetchWithTimeout(apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: h });
   }));
   var imageUrlMap = {};
   var rawLogs = [];
@@ -11271,7 +11209,7 @@ async function bd_syncToFarmOS() {
   var logEl = document.getElementById('bd-sync-log'); if (logEl) logEl.textContent = '';
   var synced = 0, failed = 0;
   try {
-    var token = await bd_getToken(cfg);
+    var token = await getToken(cfg);
     for (var i = 0; i < unsynced.length; i++) {
       var item = unsynced[i];
       try {
@@ -11324,7 +11262,7 @@ async function bd_syncToFarmOS() {
         var linkPayload = { data: { type: 'log--' + hBundle, id: hLog.farmosUUID, relationships: {
           asset: { data: chicks.map(function(c) { return { type: 'asset--animal', id: c.uuid }; }) }
         } } };
-        var linkRes = await fetchWithTimeout(bd_apiUrl('/api/log/' + hBundle + '/' + hLog.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(linkPayload) });
+        var linkRes = await fetchWithTimeout(apiUrl('/api/log/' + hBundle + '/' + hLog.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(linkPayload) });
         if (linkRes.ok) hLog.hatchLinked = true;
         else if (logEl) logEl.textContent += 'FAIL: link hatch log to chicks: ' + linkRes.status + '\n';
       } catch(e) {
@@ -11487,7 +11425,7 @@ async function bd_pushLog(log, token) {
           attributes: { measure: 'count', value: { numerator: String(log.eggCount), denominator: '1' }, inventory_adjustment: 'increment' },
           relationships: { inventory_asset: { data: { type: 'asset--product', id: eggsProductUUID } } }
         } };
-        var qRes = await fetchWithTimeout(bd_apiUrl('/api/quantity/standard'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(qPayload) });
+        var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(qPayload) });
         if (qRes.ok) {
           var qData = await qRes.json();
           var qUUID = qData && qData.data && qData.data.id;
@@ -11498,7 +11436,7 @@ async function bd_pushLog(log, token) {
     } catch(qe) { /* egg inventory tracking is a nice-to-have — log itself still saves below */ }
   }
 
-  var res = await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
   var logUUID = data && data.data && data.data.id;
@@ -11509,7 +11447,7 @@ async function bd_pushLog(log, token) {
       var photoData = await Photos.load(log.photoId);
       if (photoData) {
         var blob = await (await fetch(photoData)).blob();
-        await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
+        await fetchWithTimeout(apiUrl('/api/log/' + ftype + '/' + logUUID + '/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: blob
@@ -11530,7 +11468,7 @@ async function bd_patchLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, id: log.farmosUUID, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
-  var res = await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Re-upload the photo if present — same gap as the POST path above, now closed on edit too.
   if (log.photoId) {
@@ -11538,7 +11476,7 @@ async function bd_patchLog(log, token) {
       var photoData = await Photos.load(log.photoId);
       if (photoData) {
         var blob = await (await fetch(photoData)).blob();
-        await fetchWithTimeout(bd_apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
+        await fetchWithTimeout(apiUrl('/api/log/' + ftype + '/' + log.farmosUUID + '/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bird-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: blob
@@ -11558,7 +11496,7 @@ async function bd_pushProfilePhoto(birdUUID, photoId, token) {
   if (!photoData) return;
   try {
     var blob = await (await fetch(photoData)).blob();
-    var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal/' + birdUUID + '/image'), {
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + birdUUID + '/image'), {
       method: 'POST',
       headers: {
         'Content-Type':        'application/octet-stream',
@@ -11597,7 +11535,7 @@ async function bd_pushCreateBird(bird, token) {
       if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
     } catch(e) { /* species set is best-effort on create — core fields still save */ }
   }
-  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
   var lb = bd_birds.filter(function(b) { return b._localId === bird._localId; })[0];
@@ -11639,7 +11577,7 @@ async function bd_pushUpdateBird(bird, token) {
       if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
     } catch(e) { /* species update is best-effort — core fields still save */ }
   }
-  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Photos attach to logs, not assets — pushing straight to the bird's
   // image field wasn't reliable. Attach via a log instead.
@@ -11650,7 +11588,7 @@ async function bd_pushArchiveBird(uuid, token) {
   if (!uuid) return;
   // farmOS v4+ uses a boolean 'archived' attribute, not status:'archived'
   var payload = { data: { type: 'asset--animal', id: uuid, attributes: { archived: true } } };
-  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
@@ -11664,7 +11602,7 @@ async function bd_archiveBirdWithLog(birdId, logBundle, details) {
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === birdId; })[0];
   if (!bird || !bird.uuid) { bd_toast('⚠️ Sync first — bird not yet synced'); return false; }
   try {
-    var token = await bd_getToken(cfg);
+    var token = await getToken(cfg);
     var headers = bd_postHeaders(token);
     var label = bird.tag || bird.name || 'Bird';
     var attrs = {
@@ -11679,7 +11617,7 @@ async function bd_archiveBirdWithLog(birdId, logBundle, details) {
       if (priceRef) relationships.quantity = { data: [priceRef] };
     }
     var payload = { data: { type: 'log--' + logBundle, attributes: attrs, relationships: relationships } };
-    var res = await fetchWithTimeout(bd_apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+    var res = await fetchWithTimeout(apiUrl('/api/log/' + logBundle), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
     if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,200)); }
     await bd_pushArchiveBird(bird.uuid, token);
     return true;
@@ -13252,8 +13190,6 @@ function updateFarmNameSubtitle() {
 function closeTopOverlay() {
   var pv = document.getElementById('photoViewer');
   if (pv && pv.classList.contains('open')) { pv.classList.remove('open'); return true; }
-  var bdpv = document.getElementById('bd-photo-viewer');
-  if (bdpv && bdpv.classList.contains('open')) { bdpv.classList.remove('open'); return true; }
   var em = document.getElementById('editModal');
   if (em && em.style.display === 'block') { closeEdit(); return true; }
   var mm = document.getElementById('moveModal');
@@ -13645,11 +13581,11 @@ async function bd_ensureGroupUUID(flockName, token) {
   if (!flockName) return null;
   var flock = bd_flocks.filter(function(f) { return f.name === flockName; })[0];
   if (flock && flock.uuid) return flock.uuid;
-  var q = bd_apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(flockName) + '&page[limit]=1');
+  var q = apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(flockName) + '&page[limit]=1');
   var r = await fetchWithTimeout(q, { headers: bd_authHeaders(token) });
   if (r.ok) { var d = await r.json(); if (d.data && d.data[0]) { var id = d.data[0].id; if (flock) { flock.uuid = id; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); } return id; } }
   var payload = { data: { type: 'asset--group', attributes: { name: flockName } } };
-  var res = await fetchWithTimeout(bd_apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/asset/group'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('group HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var jd = await res.json(); var nid = jd.data && jd.data.id;
   if (flock && nid) { flock.uuid = nid; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
@@ -13660,11 +13596,37 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   if (!birdUUID) return;
   var groupId = flockName ? await bd_ensureGroupUUID(flockName, token) : null;
   var payload = { data: { type: 'log--activity', attributes: { name: flockName ? ('Move to ' + flockName) : 'Remove from flock', status: 'done', timestamp: String(Math.floor(Date.now()/1000)), is_group_assignment: true }, relationships: { asset: { data: [{ type: 'asset--animal', id: birdUUID }] }, group: { data: groupId ? [{ type: 'asset--group', id: groupId }] : [] } } } };
-  var res = await fetchWithTimeout(bd_apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('assign HTTP ' + res.status + ': ' + err.slice(0,250)); }
 }
 
 </script>
+
+<!-- ===== PROFILE MODALS — body level, accessible from any module ===== -->
+<div id="goat-profile-modal" class="bd-modal" onclick="closeGoatProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <strong id="goat-profile-title" style="font-size:18px;color:#3a7;"></strong>
+      <button onclick="closeGoatProfile()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="goat-profile-content"></div>
+    <button class="secondary wide" onclick="closeGoatProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
+<div id="bd-batch-profile-modal" class="bd-modal" onclick="closeBatchProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div id="bd-batch-profile-content"></div>
+    <button class="secondary wide" onclick="closeBatchProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
+<div id="sd-item-profile-modal" class="bd-modal" onclick="closeItemProfile()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <div id="sd-item-profile-content"></div>
+    <button class="secondary wide" onclick="closeItemProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
 
 <!-- ===== SHARED MODAL ===== -->
 <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeEdit()">
