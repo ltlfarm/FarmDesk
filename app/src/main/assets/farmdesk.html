@@ -1103,7 +1103,13 @@ header > div:last-child { min-width: 0; }
 <div id="sd-screen-history" class="screen">
   <div class="box">
     <strong>Recent Adjustments</strong>
-    <p style="color:#888;font-size:13px;margin:4px 0 0;">Local log of adjustments. ⏳ = not yet synced to farmOS.</p>
+    <input id="sd-hist-search" placeholder="Search item name..." oninput="sd_renderHistory()" style="width:100%;box-sizing:border-box;margin-top:8px;">
+    <div class="filter-chips" style="margin-top:8px;">
+      <button class="chip active" onclick="sd_setHistFilter('all',this)">All</button>
+      <button class="chip" onclick="sd_setHistFilter('increment',this)">📥 In</button>
+      <button class="chip" onclick="sd_setHistFilter('decrement',this)">📤 Out</button>
+      <button class="chip" onclick="sd_setHistFilter('reset',this)">🔢 Count</button>
+    </div>
   </div>
   <div class="box" style="display:flex;gap:8px;align-items:center;">
     <label style="margin:0;display:flex;align-items:center;gap:6px;flex:1;">
@@ -1461,7 +1467,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782180117"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782180708"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1721,6 +1727,13 @@ function populateGoatSelect() {
   goats.forEach(g => {
     const o = document.createElement("option");
     o.value = g; o.textContent = g;
+    fg.appendChild(o);
+  });
+  // Add goat batch labels as filter options
+  batches.filter(b => b.module === 'goat').forEach(b => {
+    const label = b.label || b.species + ' batch';
+    const o = document.createElement("option");
+    o.value = label; o.textContent = '📦 ' + label;
     fg.appendChild(o);
   });
 }
@@ -10361,13 +10374,25 @@ function sd_saveThresholds() {
 // (standalone StockDesk cfg form + logout removed — auth is shared via the FarmOS Sync screen)
 
 // ===== HISTORY =====
+let sd_histFilter = 'all';
+function sd_setHistFilter(f, btn) {
+  sd_histFilter = f;
+  document.querySelectorAll('#sd-screen-history .chip').forEach(function(c) { c.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  sd_renderHistory();
+}
+
 function sd_renderHistory() {
   const list = document.getElementById('historyList');
-  if (!adjHistory.length) {
-    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No adjustments yet.</div>';
+  const search = (document.getElementById('sd-hist-search') ? document.getElementById('sd-hist-search').value : '').toLowerCase().trim();
+  let entries = adjHistory.slice();
+  if (sd_histFilter !== 'all') entries = entries.filter(h => h.action === sd_histFilter);
+  if (search) entries = entries.filter(h => (h.name || '').toLowerCase().includes(search) || (h.notes || '').toLowerCase().includes(search));
+  if (!entries.length) {
+    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No adjustments found.</div>';
     return;
   }
-  list.innerHTML = adjHistory.slice(0, 50).map(h => {
+  list.innerHTML = entries.slice(0, 50).map(h => {
     const icon      = h.action === 'increment' ? '📥' : (h.action === 'decrement' ? '📤' : '🔢');
     const sign      = h.action === 'increment' ? '+' : (h.action === 'decrement' ? '−' : '=');
     const amtColor  = h.action === 'decrement' ? '#c66' : '#3a7';
@@ -12951,7 +12976,11 @@ function renderDashboardScreen() {
   }
   if (enabled.includes('birds')) {
     const birdLogs = JSON.parse(localStorage.getItem(BD_LS.history) || '[]');
-    birdLogs.forEach(l => recentItems.push({ mod: 'birds', time: l.timeISO || l.ts || l.time, text: (l.birdTag || l.birdName || (l.data && l.data.animal) || 'Bird') + ' — ' + (l.type||''), id: l.id }));
+    const birdBatchEntries = bd_batchHistoryLogs();
+    const birdExistingIds = {};
+    birdLogs.forEach(l => { birdExistingIds[l.id] = true; });
+    const birdCombined = birdLogs.concat(birdBatchEntries.filter(s => !birdExistingIds[s.id]));
+    birdCombined.forEach(l => recentItems.push({ mod: 'birds', time: l.timeISO || l.ts || l.time, text: (l.birdTag || l.birdName || (l.data && l.data.animal) || 'Bird') + ' — ' + (l.type||''), id: l.id }));
   }
   recentItems.sort((a,b) => new Date(b.time) - new Date(a.time));
   html += '<div class="box"><strong>🗒️ Recent Logs</strong>';
