@@ -372,10 +372,10 @@ header > div:last-child { min-width: 0; }
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
     <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
     <div style="display:flex;gap:6px;align-items:center;">
-      <button class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
-      <button class="module-btn" onclick="show('ledger')" title="Ledger">💰</button>
+      <button id="hdr-home-btn" class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
+      <button id="hdr-ledger-btn" class="module-btn" onclick="show('ledger')" title="Ledger">💰</button>
       <div class="module-switcher" id="moduleSwitcher"></div>
-      <button class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
+      <button id="hdr-settings-btn" class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
     </div>
     <small id="syncStatus">Offline</small>
   </div>
@@ -1433,7 +1433,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782277716"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782278537"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1578,17 +1578,18 @@ function showAppScreenInternal(id) {
   document.getElementById('app-screens').style.display = '';
   const screenEl = document.getElementById('screen-' + id);
   if (screenEl) screenEl.classList.add('active');
-  if (id === 'settings') { renderSettings(); }
+  if (id === 'settings') { renderSettings(); _updateHeaderActiveState('settings'); }
   if (id === 'sync') {
     if (localStorage.getItem(LS.standalone) === '1') { showAppScreenInternal('standalone'); return; }
     document.querySelectorAll('.gd-bottom-nav button').forEach(b => b.classList.remove('active'));
     var sn = document.getElementById('gd-nav-sync'); if (sn) sn.classList.add('active');
     renderSync();
+    _updateHeaderActiveState(null);
   }
-  if (id === 'standalone') { renderStandaloneScreen(); }
-  if (id === 'dashboard') { renderDashboardScreen(); }
-  if (id === 'scheduler') { renderScheduler(); }
-  if (id === 'ledger') { show_ledger_init(); }
+  if (id === 'standalone') { renderStandaloneScreen(); _updateHeaderActiveState(null); }
+  if (id === 'dashboard') { renderDashboardScreen(); _updateHeaderActiveState('home'); }
+  if (id === 'scheduler') { renderScheduler(); _updateHeaderActiveState(null); }
+  if (id === 'ledger') { show_ledger_init(); _updateHeaderActiveState('ledger'); }
 }
 
 // Internal: actually display a goat module screen. No stack push.
@@ -12808,7 +12809,7 @@ function renderDashboardScreen() {
       const dateStr = isNaN(d) ? '' : d.toLocaleDateString();
       const icon = it.mod === 'goats' ? '🐐' : '🐦';
       var clickFn = it.mod === 'goats'
-        ? "goModule('goats');show('history');"
+        ? "goModule('goats');show('history');setTimeout(function(){var el=document.querySelector('[data-id=\"" + it.id + "\"]');if(el)el.scrollIntoView({behavior:'smooth'});},300);"
         : "goModule('birds');bd_show('history');";
       return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="' + clickFn + '">' +
         icon + ' ' + it.text + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
@@ -12833,7 +12834,8 @@ function renderDashboardScreen() {
     } else {
       html += low.slice(0,5).map(a => {
         const tag = a.value <= 0 ? '<span style="color:#e55;">EMPTY</span>' : '<span style="color:#fa3;">LOW</span>';
-        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">' + a.name + ' — ' + a.value + (a.units?' '+a.units:'') + ' ' + tag + '</div>';
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="goModule(\'stock\');setTimeout(function(){openAdjust(\'' + (a.uuid||'') + '\');},150);">' +
+          a.name + ' — ' + a.value + (a.units?' '+a.units:'') + ' ' + tag + '</div>';
       }).join('');
       if (low.length > 5) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (low.length - 5) + ' more</p>';
     }
@@ -12866,18 +12868,24 @@ function renderDashboardScreen() {
   }
 
   // ===== SYNC STATUS (per enabled module) =====
+  function fmtSync(val) {
+    if (!val) return 'Never synced';
+    var d = new Date(val);
+    if (isNaN(d)) return val; // already a formatted string, show as-is
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
   html += '<div class="box"><strong>🔄 Sync Status</strong>';
   if (enabled.includes('goats')) {
     const ls = localStorage.getItem(LS.lastSync);
-    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">🐐 Goats — ' + (ls ? ls : 'Never synced') + '</div>';
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">🐐 Goats — ' + fmtSync(ls) + '</div>';
   }
   if (enabled.includes('stock')) {
     const ls = localStorage.getItem(SD_LS.lastSync);
-    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">📦 Stock — ' + (ls ? ls : 'Never synced') + '</div>';
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">📦 Stock — ' + fmtSync(ls) + '</div>';
   }
   if (enabled.includes('birds')) {
     const ls = localStorage.getItem(BD_LS.lastSync);
-    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">🐦 Birds — ' + (ls ? ls : 'Never synced') + '</div>';
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">🐦 Birds — ' + fmtSync(ls) + '</div>';
   }
   html += '</div>';
 
@@ -13144,13 +13152,16 @@ function settingsHome() {
 // Highlights the 🏠 or ⚙️ header button when those screens are active,
 // and clears module tab highlighting when neither is a module.
 function _updateHeaderActiveState(which) {
-  var homeBtn = document.querySelector('#moduleSwitcher').previousElementSibling;
-  var settingsBtn = document.querySelector('#moduleSwitcher').nextElementSibling;
-  if (homeBtn) homeBtn.classList.toggle('active', which === 'home');
+  var homeBtn     = document.getElementById('hdr-home-btn');
+  var ledgerBtn   = document.getElementById('hdr-ledger-btn');
+  var settingsBtn = document.getElementById('hdr-settings-btn');
+  if (homeBtn)     homeBtn.classList.toggle('active',     which === 'home');
+  if (ledgerBtn)   ledgerBtn.classList.toggle('active',   which === 'ledger');
   if (settingsBtn) settingsBtn.classList.toggle('active', which === 'settings');
-  // Dim module tabs when Home or Settings is shown
-  document.querySelectorAll('.module-btn').forEach(function(b) {
-    if (b !== homeBtn && b !== settingsBtn) b.classList.toggle('dimmed', !!which);
+  // Dim module tabs when an app-level screen is shown
+  var appScreen = which === 'home' || which === 'settings' || which === 'ledger';
+  document.querySelectorAll('#moduleSwitcher .module-btn').forEach(function(b) {
+    b.classList.toggle('dimmed', appScreen);
   });
 }
 
