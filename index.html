@@ -660,7 +660,7 @@ header > div:last-child { min-width: 0; }
     </div>
     <div class="set-body">
 
-      <div class="set-sub">
+      <div class="set-sub" id="setgrp-farmos-conn">
         <strong>🔗 FarmOS Connection</strong>
         <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
         <label>FarmOS URL</label>
@@ -820,7 +820,7 @@ header > div:last-child { min-width: 0; }
   </div>
   <div class="box">
     <div style="display:flex;align-items:center;gap:8px;"><strong>Export XML</strong><span onclick="showHint('Full backup of all your logs, animals, and stock inventory. Use the same filename every time to overwrite the old backup. Import this file on another device to transfer your data.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></div>
-    <p style="color:#888;font-size:13px;">Exports all goat logs and stock history. Share to email, Google Drive, USB, or any app.</p>
+    <p style="color:#888;font-size:13px;">Exports all logs — goats, birds, and stock. Share to email, Google Drive, USB, or any app.</p>
     <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
     <button onclick="exportXML('download')" class="wide secondary" style="margin-top:8px;">💾 Save to Downloads</button>
   </div>
@@ -969,7 +969,7 @@ header > div:last-child { min-width: 0; }
   </div>
   <div class="box">
     <div style="display:flex;gap:8px;margin-bottom:8px;">
-      <button onclick="ledgerFetch()" class="secondary wide" style="margin:0;">⬇️ Fetch from farmOS</button>
+      <button id="ledgerFetchBtn" onclick="ledgerFetch()" class="secondary wide" style="margin:0;">⬇️ Fetch from farmOS</button>
     </div>
     <div class="filter-chips">
       <button class="chip active" onclick="ledgerSetFilter('all',this)">All</button>
@@ -1217,7 +1217,7 @@ header > div:last-child { min-width: 0; }
 
 <!-- SYNC SCREEN -->
 <div id="bd-screen-sync" class="screen">
-  <div class="box">
+  <div class="box" id="bd-syncFarmOSBox">
     <h3 style="margin:0 0 6px;">farmOS Sync</h3>
     <p style="color:#888;font-size:14px;margin:0 0 10px;">Pending logs saved locally. Push when connected.</p>
     <div style="font-size:16px;margin-bottom:10px;">
@@ -1227,12 +1227,20 @@ header > div:last-child { min-width: 0; }
     </div>
     <button onclick="bd_syncToFarmOS()" class="wide">Push to farmOS</button>
   </div>
-  <div class="box">
+  <div class="box" id="bd-connBox">
     <strong>Connection</strong>
     <div id="bd-conn-status" style="font-size:14px;color:#888;margin:6px 0 10px;"></div>
     <button onclick="openSharedSettings()" class="secondary wide" style="margin-bottom:8px;">⚙️ Change in Settings</button>
     <button id="bd-fetch-btn" onclick="bd_fetchAssets()" class="wide">🔄 Fetch Birds from farmOS</button>
     <div id="bd-test-result" style="margin-top:8px;font-size:13px;color:#888;"></div>
+  </div>
+  <!-- Standalone export — shown in standalone mode -->
+  <div class="box" id="bd-syncStandaloneBox" style="display:none;">
+    <strong>📦 Standalone Data</strong>
+    <p style="color:#888;font-size:13px;margin:4px 0 8px;">Export or import all farm logs as XML.</p>
+    <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML('download')" class="secondary wide" style="margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="document.getElementById('xmlImportFile').click()" class="secondary wide" style="margin-top:8px;">📥 Import XML</button>
   </div>
   <div class="box">
     <strong>Flock &amp; Nest Box Config</strong>
@@ -3790,10 +3798,8 @@ function renderSettings() {
   if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
   var syncAllBtn = document.getElementById("syncAllBtn");
   if (syncAllBtn) syncAllBtn.style.display = isStandalone ? "none" : "";
-  var farmosConnBox = document.querySelector(".set-sub");
-  // Hide the entire FarmOS Connection sub-section in standalone mode
-  var connSubs = document.querySelectorAll("#setgrp-general .set-sub");
-  if (connSubs[0]) connSubs[0].style.display = isStandalone ? "none" : "";
+  var farmosConnSub = document.getElementById("setgrp-farmos-conn");
+  if (farmosConnSub) farmosConnSub.style.display = isStandalone ? "none" : "";
 
   // Active user selector
   var userSel = document.getElementById("activeUserSelect");
@@ -10730,20 +10736,15 @@ function bd_renderSync() {
   var connStatus = document.getElementById('bd-conn-status');
   if (connStatus) connStatus.textContent = cfg.url ? '✅ ' + cfg.url : '❌ Not configured — set in Settings → FarmOS Sync';
   var isStandalone = localStorage.getItem(LS.standalone) === '1';
-  var pushBtn = document.querySelector('#bd-screen-sync .wide');
-  var fetchBtn = document.getElementById('bd-fetch-btn');
-  if (pushBtn) pushBtn.style.display = isStandalone ? 'none' : '';
-  if (fetchBtn) fetchBtn.style.display = isStandalone ? 'none' : '';
-  var standaloneNote = document.getElementById('bd-standalone-note');
-  if (!standaloneNote) {
-    standaloneNote = document.createElement('div');
-    standaloneNote.id = 'bd-standalone-note';
-    standaloneNote.className = 'box';
-    standaloneNote.innerHTML = '<p style="color:#c90;margin:0;">⚠️ Standalone mode — farmOS sync disabled.</p>';
-    var syncScreen = document.getElementById('bd-screen-sync');
-    if (syncScreen) syncScreen.insertBefore(standaloneNote, syncScreen.firstChild);
-  }
-  standaloneNote.style.display = isStandalone ? '' : 'none';
+  var farmBox = document.getElementById('bd-syncFarmOSBox');
+  var connBox = document.getElementById('bd-connBox');
+  var standaloneBox = document.getElementById('bd-syncStandaloneBox');
+  if (farmBox) farmBox.style.display = isStandalone ? 'none' : '';
+  if (connBox) connBox.style.display = isStandalone ? 'none' : '';
+  if (standaloneBox) standaloneBox.style.display = isStandalone ? '' : 'none';
+  // Remove old injected note if present
+  var oldNote = document.getElementById('bd-standalone-note');
+  if (oldNote) oldNote.remove();
   bd_updateSyncBadge();
   bd_renderExcludedTypes();
 }
@@ -13093,6 +13094,10 @@ function ledgerSetFilter(f, btn) {
 }
 
 function show_ledger_init() {
+  // Hide fetch button in standalone mode
+  var isStandalone = localStorage.getItem(LS.standalone) === '1';
+  var fetchBtn = document.getElementById('ledgerFetchBtn');
+  if (fetchBtn) fetchBtn.style.display = isStandalone ? 'none' : '';
   // Build from local pendingActions — always available offline
   _ledgerEntries = [];
   pendingActions.forEach(function(a) {
