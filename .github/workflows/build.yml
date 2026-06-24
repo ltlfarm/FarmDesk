@@ -66,8 +66,8 @@ jobs:
           cp farmdesk.html pwa/index.html
           cp manifest.json pwa/manifest.json
           cp sw.js pwa/sw.js
-          cp icon192.png pwa/icon192.png
-          cp icon512.png pwa/icon512.png
+          cp app/src/main/assets/icon192.png pwa/icon192.png
+          cp app/src/main/assets/icon512.png pwa/icon512.png
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
