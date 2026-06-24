@@ -51,3 +51,27 @@ jobs:
           body: "Updated goatdesk.html — download and install on your Android phone."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-pwa:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+
+      - name: Assemble PWA files
+        run: |
+          mkdir pwa
+          cp farmdesk.html pwa/index.html
+          cp manifest.json pwa/manifest.json
+          cp sw.js pwa/sw.js
+          cp icon192.png pwa/icon192.png
+          cp icon512.png pwa/icon512.png
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pwa
+          publish_branch: gh-pages
