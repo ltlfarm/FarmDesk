@@ -552,12 +552,7 @@ header > div:last-child { min-width: 0; }
   <div id="sch_goats_panel" class="box" style="display:none;">
     <label>Log Type</label>
     <select id="sch_type" onchange="renderSchedulerTypeFields()">
-      <option value="med">💉 Med</option>
-      <option value="obs">👁️ Observation</option>
-      <option value="hoof">Hoof</option>
-      <option value="proc">✂️ Procedure</option>
-      <option value="birth">🐐🍼 Birth</option>
-      <option value="activity">📝 Activity</option>
+      <!-- populated from GOAT_LOG_TYPES by renderSchedulerGoatsPanel() -->
     </select>
 
     <label>Groups <span style="color:#888;font-size:12px;">(tap to select members)</span></label>
@@ -588,11 +583,7 @@ header > div:last-child { min-width: 0; }
   <div id="sch_birds_panel" class="box" style="display:none;">
     <label>Log Type</label>
     <select id="sch_b_type" onchange="renderSchedulerBirdsTypeFields()">
-      <option value="weight">Weight</option>
-      <option value="med">💉 Med / Treatment</option>
-      <option value="obs">👁️ Observation</option>
-      <option value="proc">✂️ Procedure</option>
-      <option value="feed">🌾 Feed</option>
+      <!-- populated from BIRD_LOG_TYPES by renderSchedulerBirdsPanel() -->
     </select>
 
     <label>Flocks <span style="color:#888;font-size:12px;">(tap to select members)</span></label>
@@ -1442,7 +1433,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782274907"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782277716"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -5766,6 +5757,16 @@ function renderSchedulerModule() {
 }
 
 function renderSchedulerGoatsPanel() {
+  // Populate log type select from config — exclude weight/vitals (done on the spot, not scheduled)
+  const typeSel = document.getElementById('sch_type');
+  if (typeSel && typeSel.options.length === 0) {
+    const exclude = ['weight', 'vitals'];
+    GOAT_LOG_TYPES.filter(function(lt) { return !exclude.includes(lt.id); }).forEach(function(lt) {
+      var o = document.createElement('option');
+      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      typeSel.appendChild(o);
+    });
+  }
   // Group chips
   const groupContainer = document.getElementById("sch_groups");
   if (groupContainer) {
@@ -5828,6 +5829,16 @@ function renderSchedulerGoatsPanel() {
 
 // ===== BIRDS SCHEDULER (mirrors the Goats panel above) =====
 function renderSchedulerBirdsPanel() {
+  // Populate log type select from config — exclude hatch/mortality (event-driven, not scheduled)
+  const bTypeSel = document.getElementById('sch_b_type');
+  if (bTypeSel && bTypeSel.options.length === 0) {
+    const exclude = ['hatch', 'mortality'];
+    BIRD_LOG_TYPES.filter(function(lt) { return !exclude.includes(lt.id); }).forEach(function(lt) {
+      var o = document.createElement('option');
+      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      bTypeSel.appendChild(o);
+    });
+  }
   // Flock chips — tapping one toggles all its current member birds' chips
   const flockContainer = document.getElementById("sch_b_flocks");
   if (flockContainer) {
