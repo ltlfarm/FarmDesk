@@ -676,7 +676,7 @@ header > div:last-child { min-width: 0; }
           <button onclick="testFarmOS()" style="flex:1;margin:0;">Test Connection</button>
         </div>
         <div id="farmosTestResult" style="margin-top:8px;font-size:13px;color:#888;"></div>
-        <button onclick="syncAllModules()" class="wide" style="margin-top:10px;">⬇️ Sync All (Pull from farmOS)</button>
+        <button id="syncAllBtn" onclick="syncAllModules()" class="wide" style="margin-top:10px;">⬇️ Sync All (Pull from farmOS)</button>
         <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
 
@@ -3350,6 +3350,37 @@ function exportXML(mode) {
     xml += "    </adjustment>\n";
   });
   xml += "  </stock_history>\n";
+
+  // Bird logs
+  var bdHistory = JSON.parse(localStorage.getItem("farmdesk_bird_history") || "[]");
+  xml += "  <bird_logs>\n";
+  bdHistory.forEach(function(log) {
+    xml += "    <log>\n";
+    Object.keys(log).forEach(function(k) {
+      var v = log[k];
+      if (v === null || v === undefined) return;
+      if (typeof v === "object") v = JSON.stringify(v);
+      xml += "      <" + escXMLTag(k) + ">" + escXML(String(v)) + "</" + escXMLTag(k) + ">\n";
+    });
+    xml += "    </log>\n";
+  });
+  xml += "  </bird_logs>\n";
+
+  // Birds
+  var bdBirds = JSON.parse(localStorage.getItem("farmdesk_bird_assets") || "[]");
+  xml += "  <birds>\n";
+  bdBirds.forEach(function(bird) {
+    xml += "    <bird>\n";
+    Object.keys(bird).forEach(function(k) {
+      var v = bird[k];
+      if (v === null || v === undefined) return;
+      if (typeof v === "object") v = JSON.stringify(v);
+      xml += "      <" + escXMLTag(k) + ">" + escXML(String(v)) + "</" + escXMLTag(k) + ">\n";
+    });
+    xml += "    </bird>\n";
+  });
+  xml += "  </birds>\n";
+
   xml += "</farmdesk_export>\n";
 
   var rawFarm = (localStorage.getItem(LS.farmName) || "farmdesk").trim();
@@ -3409,6 +3440,30 @@ function importXML(input) {
         if (obj.id) importedStock.push(obj);
       });
 
+      var importedBirdLogs = [];
+      doc.querySelectorAll("bird_logs > log").forEach(function(node) {
+        var obj = {};
+        node.childNodes.forEach(function(child) {
+          if (child.nodeType !== 1) return;
+          var val = child.textContent;
+          try { val = JSON.parse(val); } catch(e) {}
+          obj[child.tagName] = val;
+        });
+        if (obj.id) importedBirdLogs.push(obj);
+      });
+
+      var importedBirds = [];
+      doc.querySelectorAll("birds > bird").forEach(function(node) {
+        var obj = {};
+        node.childNodes.forEach(function(child) {
+          if (child.nodeType !== 1) return;
+          var val = child.textContent;
+          try { val = JSON.parse(val); } catch(e) {}
+          obj[child.tagName] = val;
+        });
+        if (obj._localId || obj.uuid) importedBirds.push(obj);
+      });
+
       if (choice) {
         var existing = JSON.parse(localStorage.getItem(LS.logs) || "[]");
         var existingIds = new Set(existing.map(function(l) { return l.id; }));
@@ -3420,15 +3475,29 @@ function importXML(input) {
         var addedStock = importedStock.filter(function(l) { return !existingStockIds.has(l.id); });
         localStorage.setItem("farmdesk_stock_history", JSON.stringify(existingStock.concat(addedStock)));
 
-        result.textContent = "✅ Merged: " + added.length + " goat logs, " + addedStock.length + " stock entries added.";
+        var existingBirdLogs = JSON.parse(localStorage.getItem("farmdesk_bird_history") || "[]");
+        var existingBirdIds = new Set(existingBirdLogs.map(function(l) { return l.id; }));
+        var addedBirdLogs = importedBirdLogs.filter(function(l) { return !existingBirdIds.has(l.id); });
+        localStorage.setItem("farmdesk_bird_history", JSON.stringify(existingBirdLogs.concat(addedBirdLogs)));
+
+        var existingBirds = JSON.parse(localStorage.getItem("farmdesk_bird_assets") || "[]");
+        var existingBirdKeys = new Set(existingBirds.map(function(b) { return b._localId || b.uuid; }));
+        var addedBirds = importedBirds.filter(function(b) { return !existingBirdKeys.has(b._localId || b.uuid); });
+        localStorage.setItem("farmdesk_bird_assets", JSON.stringify(existingBirds.concat(addedBirds)));
+
+        result.textContent = "✅ Merged: " + added.length + " goat logs, " + addedStock.length + " stock entries, " + addedBirdLogs.length + " bird logs, " + addedBirds.length + " birds added.";
       } else {
         localStorage.setItem(LS.logs, JSON.stringify(importedLogs));
         localStorage.setItem("farmdesk_stock_history", JSON.stringify(importedStock));
-        result.textContent = "✅ Replaced: " + importedLogs.length + " goat logs, " + importedStock.length + " stock entries loaded.";
+        localStorage.setItem("farmdesk_bird_history", JSON.stringify(importedBirdLogs));
+        localStorage.setItem("farmdesk_bird_assets", JSON.stringify(importedBirds));
+        result.textContent = "✅ Replaced: " + importedLogs.length + " goat logs, " + importedStock.length + " stock entries, " + importedBirdLogs.length + " bird logs, " + importedBirds.length + " birds loaded.";
       }
       input.value = "";
       // Reload logs into memory and refresh UI
       logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
+      bd_history = JSON.parse(localStorage.getItem("farmdesk_bird_history") || "[]");
+      bd_birds = JSON.parse(localStorage.getItem("farmdesk_bird_assets") || "[]");
       renderHome();
     } catch(err) {
       result.textContent = "❌ Error: " + err.message;
@@ -3708,6 +3777,12 @@ function renderSettings() {
   var isStandalone = localStorage.getItem(LS.standalone) === "1";
   if (standaloneToggle) standaloneToggle.checked = isStandalone;
   if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
+  var syncAllBtn = document.getElementById("syncAllBtn");
+  if (syncAllBtn) syncAllBtn.style.display = isStandalone ? "none" : "";
+  var farmosConnBox = document.querySelector(".set-sub");
+  // Hide the entire FarmOS Connection sub-section in standalone mode
+  var connSubs = document.querySelectorAll("#setgrp-general .set-sub");
+  if (connSubs[0]) connSubs[0].style.display = isStandalone ? "none" : "";
 
   // Active user selector
   var userSel = document.getElementById("activeUserSelect");
