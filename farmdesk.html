@@ -1968,6 +1968,31 @@ function renderStep() {
     setupFollowupHandler();
   }
 
+
+  if (t === "birth") {
+    var birthIsBatch = goatBirthDefaultMode() === 'batch';
+    var damOpts  = goats.filter(function(n) { var p = animalProfiles[n]; return !p || p.sex === 'F' || !p.sex; }).map(function(n) { return '<option>' + n + '</option>'; }).join('');
+    var sireOpts = '<option value="">-- Unknown / None --</option>' + goats.filter(function(n) { var p = animalProfiles[n]; return p && p.sex === 'M' && !p.castrated; }).map(function(n) { return '<option>' + n + '</option>'; }).join('');
+    box.innerHTML =
+      '<label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="f_birth_batch"' + (birthIsBatch ? ' checked' : '') + ' style="width:18px;height:18px;" onchange="toggleBirthBatchMode(this.checked)"> Batch (count only — unnamed kids)</label>' +
+      '<p style="color:#888;font-size:12px;margin:2px 0 8px;">Uncheck to name each kid individually.</p>' +
+      '<div id="f_birth_individual_fields"' + (birthIsBatch ? ' style="display:none;"' : '') + '>' +
+        '<label>Kids <span style="color:#888;font-size:12px;">(add one row per kid)</span></label>' +
+        '<div id="f_kidRows" style="margin-top:4px;"></div>' +
+        '<button type="button" onclick="addBirthKidRow(null, false)" style="width:100%;margin-top:4px;background:#333;font-size:15px;">\u2795 Add Kid</button>' +
+      '</div>' +
+      '<div id="f_birth_batch_fields"' + (!birthIsBatch ? ' style="display:none;"' : '') + '>' +
+        '<label>Number of Kids</label>' +
+        '<input id="f_birth_batch_count" type="number" min="1" step="1" placeholder="e.g. 3">' +
+      '</div>' +
+      '<label>Dam (Mother)</label><select id="f_dam">' + damOpts + '</select>' +
+      '<label>Sire (Father — optional)</label><select id="f_sire">' + sireOpts + '</select>' +
+      '<label>Birth Type</label><select id="f_birthtype"><option>Natural</option><option>Assisted</option><option>C-section</option></select>' +
+      '<label>Notes</label><textarea id="f_birthnotes" rows="2" placeholder="Optional notes"></textarea>' +
+      renderPhotoBlockHTML('birth');
+    if (!birthIsBatch) { addBirthKidRow(null, false); }
+  }
+
   if (t === "activity") {
     var prevTitles = [...new Set(logs.filter(function(l) { return l.type === "activity" && l.data.title; }).map(function(l) { return l.data.title; }))];
     box.innerHTML =
