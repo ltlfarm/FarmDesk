@@ -1388,6 +1388,32 @@ const FOLLOWUP_OPTIONS = [
 // toast, and logging utilities. Used by all modules.
 // ============================================================
 
+// ─────────────────────────────────────────────────────────
+// SHARED FUNCTION INDEX
+// The following shared functions are defined later in the file
+// (inside C. GoatDesk for historical reasons) but are used by
+// all modules. Search for the marker to find each one.
+//
+//   ───── SHARED: toast notification          (~line 6252)
+//   ───── SHARED: fullscreen photo viewer     (~line 6267)
+//   ───── SHARED: file attachment handler     (~line 6362)
+//   ───── SHARED: photo auth loader           (~line 6380)
+//   ───── SHARED: farm logo                   (~line 6406)
+//   ───── SHARED: OAuth2 authentication       (~line 6610)
+//   ───── SHARED: logout                      (~line 6692)
+//   ───── SHARED: recent farmOS URLs          (~line 6723)
+//   ───── SHARED: config sync                 (~line 6845)
+//   ───── SHARED: fetch from farmOS           (~line 6996)
+//   ───── SHARED: fetch batches               (~line 7515)
+//   ───── SHARED: process queued actions      (~line 7747)
+//   ───── SHARED: photo storage / Photos API  (~line 3890)
+//   ───── SHARED: asset card renderer         (~line 3971)
+//   ───── SHARED: animal lifecycle (sell/die) (~line 4141)
+//   ───── SHARED: batch tracking              (~line 4198)
+//   ───── SHARED: pending actions queue       (~line 4237)
+//   ───── SHARED: batch action modal          (~line 4445)
+// ─────────────────────────────────────────────────────────
+
 // ===== SHARED CORE: localStorage keys (farmdesk_ prefix for universal app compatibility) =====
 const LS = {
   goats:          "farmdesk_goats",
@@ -1416,7 +1442,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782274357"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782274907"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2022,7 +2048,7 @@ function onAndroidPhoto(dataUrl) {
 }
 
 
-// ===== SHARED: fix JPEG EXIF orientation before drawing to canvas =====
+// ───── SHARED: fix JPEG EXIF orientation ─────
 function correctOrientation(img, rawDataUrl, callback) {
   // Only attempt EXIF read for JPEG data URLs from camera
   if (!rawDataUrl || !rawDataUrl.includes('data:image/jpeg')) {
@@ -2104,7 +2130,7 @@ function orientedCanvas(img, rawDataUrl, maxW, callback) {
 }
 
 
-// ===== SHARED: replace-on-push — keep only the newest photo on a record =====
+// ───── SHARED: replace-on-push (keep newest photo) ─────
 // farmOS APPENDS uploaded images. After an upload succeeds, this PATCHes the
 // record's image relationship down to just the new file, so old copies detach
 // and Drupal's cleanup removes them. Photos are per-record in farmOS, so this
@@ -2130,7 +2156,7 @@ async function keepOnlyNewestImage(entityType, bundle, uuid, fileId, token) {
   } catch(e) { /* non-fatal — worst case the old photo stays attached */ }
 }
 
-// ===== SHARED: rotate a base64 image 90 degrees clockwise =====
+// ───── SHARED: rotate base64 image 90° clockwise ─────
 function rotateBase64CW(dataUrl, callback) {
   const img = new Image();
   img.onload = function() {
@@ -3886,8 +3912,13 @@ function deleteFormula(name) {
 
 
 
-// ===== SHARED MODULE: animals screen =====
-// ===== SHARED MODULE: photo storage (native APK file store, browser fallback)
+// ─────────────────────────────────────────────────────────
+// SHARED FUNCTIONS — defined here, used by all modules.
+// These live in the GoatDesk section for historical reasons.
+// Future refactor: move to B. SHARED CORE.
+// ─────────────────────────────────────────────────────────
+// ───── SHARED: animals screen ─────
+// ───── SHARED: photo storage (native APK file store, browser fallback)
 // APK: photos saved as files via AndroidBridge; only the id lives in
 // localStorage. Browser/old APK: stores a thumbnail data URL under the id.
 // Same async API both ways: save(dataUrl)->id, load(id)->dataUrl, remove(id).
@@ -3935,7 +3966,7 @@ var Photos = (function(){
   };
 })();
 
-// ===== SHARED MODULE: shrink an image to a small thumbnail (base64 JPEG) =====
+// ───── SHARED: shrink image to thumbnail (base64 JPEG) ─────
 // Profile photos only need to be thumbnail-sized; full-res blew the localStorage
 // quota. Caps the longest edge at 320px and re-encodes as JPEG ~0.7 quality.
 function makeThumb(dataUrl, maxEdge, quality) {
@@ -3968,7 +3999,7 @@ function saveProfilesSafely() {
   }
 }
 
-// ===== SHARED MODULE: asset card (animals, materials, equipment) =====
+// ───── SHARED: asset card (animals, materials, equipment) ─────
 function assetCardHTML(img, title, detail, onclick, photoId) {
   var ph = img
     ? '<img src="' + img + '" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;">'
@@ -4138,7 +4169,7 @@ function closeProfile() {
   if (modal) modal.style.display = 'none';
 }
 
-// ===== SHARED MODULE: animal lifecycle — purchase, sale, death =====
+// ───── SHARED: animal lifecycle (purchase, sale, death) ─────
 // farmOS-native log types for entering/leaving the farm. Sale and death
 // both archive the asset on success so it naturally drops out of fetch
 // results — no local-only exclusion list needed.
@@ -4195,7 +4226,7 @@ async function buildPriceQuantityRef(unitPrice, token) {
   } catch(e) { return null; }
 }
 
-// ===== SHARED: BATCH/INVENTORY TRACKING FOR OFFSPRING =====
+// ───── SHARED: batch/inventory tracking for offspring ─────
 // A "batch" represents a group of fungible young animals from one
 // hatch/birth event, tracked as a running count rather than individual
 // assets — most offspring on a breeding operation get sold or raised for
@@ -4234,7 +4265,7 @@ function saveBatches() { localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(bat
   if (changed) localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(batches));
 })();
 
-// ===== SHARED: OFFLINE-FIRST PENDING ACTIONS QUEUE =====
+// ───── SHARED: offline-first pending actions queue ─────
 // Local-first write-back queue for actions that aren't a fit for the
 // `logs` array (asset archiving, profile pushes, retypes, batch
 // sell/died/promote, purchases). Local state changes happen immediately
@@ -4442,7 +4473,7 @@ function promoteFromBatch(batchId) {
   return true;
 }
 
-// ===== SHARED BATCH ACTION MODAL (Sell / Mark Died) =====
+// ───── SHARED: batch action modal (sell / mark died) ─────
 var _batchActionPending = null; // { batchId, action: 'sell'|'died' }
 
 function openBatchSellModal(batchId) {
@@ -6484,7 +6515,7 @@ function importLogs(input) {
 }
 
 function clearLogs() {
-  // ===== SHARED MODULE: clearLogs — clears all logs including pending tasks =====
+  // ───── SHARED: clearLogs ─────
   const pendingCount = logs.filter(l => l.status === "pending").length;
   const totalCount = logs.length;
   openConfirm({
@@ -6516,10 +6547,10 @@ function clearLogs() {
 }
 
 // ===== FARMOS SYNC =====
-// ===== SHARED MODULE: farmOS sync — log type mapping, push/pull, config sync =====
+// ───── SHARED: farmOS sync — log type mapping, push/pull, config sync ─────
 
 // farmOS log type mapping — matches your existing records
-// ===== SHARED: sex mapping helpers =====
+// ───── SHARED: sex mapping helpers ─────
 // farmOS stores sex as 'male'/'female' and castration separately.
 // Wethers are sex:'male' + castrated:true — never send 'wether' to farmOS.
 function sexToFarmOS(sex) {
@@ -6533,7 +6564,7 @@ function sexToFarmOS(sex) {
   return {};
 }
 
-// ===== SHARED: parent-eligible animal helpers =====
+// ───── SHARED: parent-eligible animal helpers ─────
 // Dam = female only. Sire = intact male only (not wether).
 function getDams()  {
   return goats.filter(function(g) { return (animalProfiles[g] || {}).sex === 'F'; });
@@ -6671,7 +6702,7 @@ function apiUrl(path) {
   return window._useProxy ? "/proxy" + path : (JSON.parse(localStorage.getItem(LS.cfg) || "{}").url || "") + path;
 }
 
-// ===== SHARED: fetch with a hard timeout =====
+// ───── SHARED: fetch with hard timeout ─────
 // Nothing in this app put a timeout on its farmOS requests — a slow or
 // unresponsive server just hangs the awaiting code forever with zero
 // feedback (looks identical to a frozen app). This aborts after 20s so
@@ -6850,7 +6881,7 @@ const CONFIG_LOG_NAME = "_goatdesk_config";
 let configLogUUID = localStorage.getItem(LS.configLogUUID) || null;
 
 function buildConfigPayload(existingUUID) {
-  // ===== SHARED MODULE: config sync blob — app-wide setup =====
+  // ───── SHARED: config sync blob ─────
   // Admin sets this up once (farm name, active modules, tab order, formulas,
   // logo, bird species/exclusions) and pushes. Every other device just logs
   // in and pulls — no per-device setup required.
@@ -7099,7 +7130,7 @@ async function fetchAnimalUUIDs(silent = false) {
         return;
       }
       animalUUIDs[name] = a.id;
-      // ===== SHARED MODULE: animal profile capture =====
+      // ───── SHARED: animal profile capture ─────
       var imgRel  = a.relationships && a.relationships.image && a.relationships.image.data;
       var imgId   = Array.isArray(imgRel) ? (imgRel.length ? imgRel[imgRel.length-1].id : null) : (imgRel && imgRel.id);
       var prevPhoto = (animalProfiles[name] && animalProfiles[name].photo) || null;
@@ -8410,6 +8441,10 @@ document.addEventListener("keydown", e => {
   saveEdit();
 });
 
+
+// ─────────────────────────────────────────────────────────
+// GOATDESK-SPECIFIC — log editing, save, init
+// ─────────────────────────────────────────────────────────
 // ===== DELETE & EDIT =====
 let editingId = null;
 
@@ -8764,7 +8799,7 @@ const SD_LS = {
   tasks:      'farmdesk_stock_tasks'     // local-only reminders — no farmOS log type fits "intend to restock later"
 };
 
-// ===== SHARED MODULE: farmOS taxonomy UUIDs =====
+// ───── SHARED: farmOS taxonomy UUIDs ─────
 const UNIT_MAP = {
   count: { uuid: '22528b34-ae02-4d42-8e3f-1e3524caa911', measure: 'count',  label: ''      },
   bales: { uuid: 'ca1ad806-6733-450f-a28f-2d8b1032d47e', measure: 'count',  label: 'bales' },
@@ -8783,7 +8818,7 @@ const MAT_TYPE_NAME = {
 };
 
 // All farm users — every new asset gets these owners
-// ===== SHARED MODULE: farm user UUIDs =====
+// ───── SHARED: farm user UUIDs ─────
 const ALL_OWNERS = [
   '8bb78703-7675-412a-a1c9-bbb19ded1e7b', // Jess
   '71afeef7-7da7-4917-88d6-4c3e0e46f226', // Tammy
@@ -8914,7 +8949,7 @@ function apiHeaders(token) {
 }
 
 // ===== ASSET FETCH — pulls live inventory from farmOS =====
-// ===== SHARED MODULE: farmOS taxonomy auto-detect =====
+// ───── SHARED: farmOS taxonomy auto-detect ─────
 // Category and unit term UUIDs differ on every farmOS instance. This pulls
 // THIS farm's terms once per fetch and caches them, so the Add Item form
 // works on any homestead — the constants above are only a fallback.
@@ -9375,7 +9410,7 @@ function updateStockDisplay() {
     adjustAsset.value + (ul ? ' ' + ul : '') + ' on hand';
 }
 
-// ===== SHARED MODULE: timestamp helpers — matches GoatDesk pattern =====
+// ───── SHARED: timestamp helpers ─────
 function initTimestamp() {
   const now   = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -9477,7 +9512,7 @@ function buildCostNote() {
 }
 
 // ===== ASSET PHOTO =====
-// ===== SHARED MODULE: asset photo handling =====
+// ───── SHARED: asset photo handling ─────
 function takeAssetPhoto() {
   if (window.AndroidBridge && window.AndroidBridge.takePhoto) {
     window.AndroidBridge.takePhoto('onAndroidAssetPhoto');
@@ -9760,7 +9795,7 @@ async function confirmAdjust() {
 }
 
 // ===== CORE LOCAL ADJUST =====
-// ===== SHARED MODULE: doAdjust — writes to local pending queue, no network call =====
+// ───── SHARED: doAdjust (local pending queue) ─────
 // action: 'increment' | 'decrement' | 'reset'
 function doAdjust(asset, action, amount, notes, seller, lot, ts) {
   // Update local cache immediately
@@ -9868,7 +9903,7 @@ function sd_renderSyncScreen() {
 }
 
 // ===== PUSH TO FARMOS =====
-// ===== SHARED MODULE: syncToFarmOS — pushes pending queue to farmOS =====
+// ───── SHARED: syncToFarmOS ─────
 async function sd_syncToFarmOS() {
   const cfg = JSON.parse(localStorage.getItem(SD_LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) {
@@ -13276,7 +13311,7 @@ function closeConfirm() {
 }
 
 // ===== HISTORY DELETE =====
-// ===== SHARED MODULE: adjHistory delete — single, multiselect, clear all =====
+// ───── SHARED: adjHistory delete ─────
 function sd_toggleSelectAll(checked) {
   document.querySelectorAll('.history-select').forEach(cb => cb.checked = checked);
 }
@@ -13569,7 +13604,7 @@ function medDeductClose() {
 
 
 
-// ===== SHARED MODULE: group/flock membership (farmOS asset--group) =====
+// ───── SHARED: group/flock membership (farmOS asset--group) ─────
 async function bd_ensureGroupUUID(flockName, token) {
   if (!flockName) return null;
   var flock = bd_flocks.filter(function(f) { return f.name === flockName; })[0];
