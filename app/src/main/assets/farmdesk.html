@@ -1274,6 +1274,30 @@ header > div:last-child { min-width: 0; }
 
 <script>
 // ============================================================
+// FARMDESK — SCRIPT TABLE OF CONTENTS
+// ============================================================
+//
+//  A. FARM CONFIG     line ~1300   Edit here to customize for your farm.
+//                                  Log types, field options, species,
+//                                  routes, follow-up schedules.
+//
+//  B. SHARED CORE     line ~1450   localStorage keys, auth, navigation,
+//                                  modals, photos, toast, sync utils.
+//                                  Used by all three modules.
+//
+//  C. GOATDESK        line ~1600   Individual animal tracking.
+//                                  Template for all animal modules.
+//
+//  D. STOCKDESK       line ~8700   Inventory tracking.
+//
+//  E. BIRDDESK        line ~10200  Flock-style tracking.
+//
+//  F. APP LEVEL       line ~12500  Dashboard, scheduler, ledger,
+//                                  settings, module switcher, init.
+//
+// ============================================================
+
+// ============================================================
 // A. FARM CONFIG
 // Edit this section to customize FarmDesk for your farm.
 // Adding a new log type: add one entry to GOAT_LOG_TYPES or
@@ -1358,11 +1382,13 @@ const FOLLOWUP_OPTIONS = [
 // END FARM CONFIG — everything below is app logic
 // ============================================================
 
-// ===========================
-// ===== GOATDESK MODULE =====
-// ===========================
+// ============================================================
+// B. SHARED CORE
+// Auth, localStorage, navigation, modals, photos, sync badge,
+// toast, and logging utilities. Used by all modules.
+// ============================================================
 
-// ===== SHARED MODULE: localStorage keys (farmdesk_ prefix for universal app compatibility) =====
+// ===== SHARED CORE: localStorage keys (farmdesk_ prefix for universal app compatibility) =====
 const LS = {
   goats:          "farmdesk_goats",
   excluded:       "farmdesk_excludedAnimals",
@@ -1390,7 +1416,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782251659"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782274357"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1575,6 +1601,13 @@ function show(id) {
   showGoatScreenInternal(id);
   pushNav('goats', id);
 }
+
+// ============================================================
+// C. GOATDESK MODULE
+// Individual animal tracking — logs, weights, vitals, meds,
+// births, procedures, hoof care, observations, activities.
+// Template module: all individual-animal modules mirror this.
+// ============================================================
 
 // ===== FLOW =====
 let flow = [], step = 0, herdIndex = 0;
@@ -3155,15 +3188,7 @@ function toggleSetGroup(head) {
 
 // ===== STANDALONE MODE =====
 function showHint(msg) {
-  var modal   = document.getElementById("editModal");
-  var fields  = document.getElementById("editFields");
-  var title   = document.getElementById("editTitle");
-  var saveBtn = document.getElementById("modalSaveBtn");
-  if (!modal) return;
-  title.textContent = "💡 Tip";
-  fields.innerHTML = "<p style='font-size:15px;color:#ccc;line-height:1.6;'>" + msg + "</p>";
-  saveBtn.style.display = "none";
-  modal.style.display = "block";
+  openConfirm({ title: '💡 Tip', body: "<p style='font-size:15px;color:#ccc;line-height:1.6;'>" + msg + "</p>", confirmLabel: 'OK', danger: false });
 }
 
 function setStandaloneMode(on) {
@@ -3512,7 +3537,6 @@ function generateReport(mode) {
   }
 }
 
-// ===== END STANDALONE MODE =====
 
 function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
@@ -4832,97 +4856,66 @@ async function archiveAnimalWithLog(animalName, logBundle, details) {
 }
 
 function openSellAnimalModal(name) {
-  var modal = document.getElementById('editModal');
-  var fields = document.getElementById('editFields');
-  var title = document.getElementById('editTitle');
-  if (!modal || !fields) return;
-  if (title) title.textContent = '🏷️ Sell ' + name;
-  fields.innerHTML =
-    '<p style="color:#888;font-size:13px;">Records a sale log in farmOS and archives this animal.</p>' +
-    '<label>Sale Price</label>' +
-    '<input id="lifecyclePrice" type="number" step="0.01" min="0" placeholder="Optional — $ per head">' +
-    '<label>Notes (buyer, etc.)</label>' +
-    '<textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>';
-  var sb = document.getElementById('modalSaveBtn');
-  if (sb) {
-    sb.style.display = '';
-    sb.textContent = '🏷️ Confirm Sale';
-    sb.style.background = '#8b6500';
-    sb.onclick = function() {
+  openModal({
+    title: '🏷️ Sell ' + name,
+    fields: '<p style="color:#888;font-size:13px;">Records a sale log in farmOS and archives this animal.</p>' +
+      '<label>Sale Price</label><input id="lifecyclePrice" type="number" step="0.01" min="0" placeholder="Optional — $ per head">' +
+      '<label>Notes (buyer, etc.)</label><textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>',
+    saveLabel: '🏷️ Confirm Sale',
+    danger: false,
+    onSave: function() {
       var notes = document.getElementById('lifecycleNotes').value || '';
       var priceVal = parseFloat(document.getElementById('lifecyclePrice').value);
       queuePendingAction('sell', { animalName: name, notes: notes, unitPrice: isNaN(priceVal) ? null : priceVal });
       showToast('✅ ' + name + ' sold and archived locally — will sync to farmOS next push');
       closeEdit();
-      delete animalProfiles[name];
-      saveProfilesSafely();
-      goats = goats.filter(g => g !== name);
+      delete animalProfiles[name]; saveProfilesSafely();
+      goats = goats.filter(function(g) { return g !== name; });
       localStorage.setItem(LS.goats, JSON.stringify(goats));
       renderAnimalsScreen();
-    };
-  }
-  modal.style.display = 'block';
+    }
+  });
 }
 
 function openDeathAnimalModal(name) {
-  var modal = document.getElementById('editModal');
-  var fields = document.getElementById('editFields');
-  var title = document.getElementById('editTitle');
-  if (!modal || !fields) return;
-  if (title) title.textContent = '💀 Record Death: ' + name;
-  fields.innerHTML =
-    '<p style="color:#888;font-size:13px;">Records a death observation in farmOS and archives this animal.</p>' +
-    '<label>Cause / Notes</label>' +
-    '<textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>';
-  var sb = document.getElementById('modalSaveBtn');
-  if (sb) {
-    sb.style.display = '';
-    sb.textContent = '💀 Confirm Death';
-    sb.style.background = '#8b0000';
-    sb.onclick = function() {
+  openModal({
+    title: '💀 Record Death: ' + name,
+    fields: '<p style="color:#888;font-size:13px;">Records a death observation in farmOS and archives this animal.</p>' +
+      '<label>Cause / Notes</label><textarea id="lifecycleNotes" rows="3" placeholder="Optional"></textarea>',
+    saveLabel: '💀 Confirm Death',
+    danger: true,
+    onSave: function() {
       var notes = document.getElementById('lifecycleNotes').value || '';
       queuePendingAction('death', { animalName: name, notes: 'Death recorded. ' + notes });
       showToast('✅ ' + name + ' recorded and archived locally — will sync to farmOS next push');
       closeEdit();
-      delete animalProfiles[name];
-      saveProfilesSafely();
-      goats = goats.filter(g => g !== name);
+      delete animalProfiles[name]; saveProfilesSafely();
+      goats = goats.filter(function(g) { return g !== name; });
       localStorage.setItem(LS.goats, JSON.stringify(goats));
       renderAnimalsScreen();
-    };
-  }
-  modal.style.display = 'block';
+    }
+  });
 }
 
 function openRetypeAnimalModal(name) {
-  var modal = document.getElementById('editModal');
-  var fields = document.getElementById('editFields');
-  var title = document.getElementById('editTitle');
-  if (!modal || !fields) return;
-  if (title) title.textContent = '❓ Retype: ' + name;
-  fields.innerHTML =
-    '<p style="color:#888;font-size:13px;">This corrects the animal\'s species in farmOS so it stops appearing in the wrong module for everyone who syncs.</p>' +
-    '<label>Actual species</label>' +
-    '<input id="lifecycleRetype" placeholder="e.g. Dog, Cat, Sheep, Chicken">';
-  var sb = document.getElementById('modalSaveBtn');
-  if (sb) {
-    sb.style.display = '';
-    sb.textContent = '❓ Confirm Retype';
-    sb.style.background = '#555';
-    sb.onclick = function() {
+  openModal({
+    title: '❓ Retype: ' + name,
+    fields: '<p style="color:#888;font-size:13px;">This corrects the animal\'s species in farmOS so it stops appearing in the wrong module for everyone who syncs.</p>' +
+      '<label>Actual species</label><input id="lifecycleRetype" placeholder="e.g. Dog, Cat, Sheep, Chicken">',
+    saveLabel: '❓ Confirm Retype',
+    danger: false,
+    onSave: function() {
       var typeName = (document.getElementById('lifecycleRetype').value || '').trim();
       if (!typeName) { showToast('⚠️ Enter a species'); return; }
       queuePendingAction('retype', { animalName: name, typeName: typeName }, true);
       showToast('✅ ' + name + ' retyped as ' + typeName + ' locally — will sync to farmOS next push');
       closeEdit();
-      delete animalProfiles[name];
-      saveProfilesSafely();
-      goats = goats.filter(g => g !== name);
+      delete animalProfiles[name]; saveProfilesSafely();
+      goats = goats.filter(function(g) { return g !== name; });
       localStorage.setItem(LS.goats, JSON.stringify(goats));
       renderAnimalsScreen();
-    };
-  }
-  modal.style.display = 'block';
+    }
+  });
 }
 
 
@@ -6256,7 +6249,7 @@ function saveScheduledTasks() {
   document.getElementById("sch_notes").value = "";
 }
 
-// ===== SHARED MODULE: toast =====
+// ───── SHARED: toast notification ─────
 function showToast(msg) {
   let toast = document.getElementById("appToast");
   if (!toast) {
@@ -6271,7 +6264,7 @@ function showToast(msg) {
   toast._timer = setTimeout(() => { toast.style.opacity = "0"; }, 2500);
 }
 
-// ===== SHARED MODULE: fullscreen photo viewer with pinch-zoom + pan =====
+// ───── SHARED: fullscreen photo viewer (pinch-zoom + pan) ─────
 let _viewerScale = 1;
 let _viewerLastDist = 0;
 let _viewerTX = 0, _viewerTY = 0;          // current pan translation
@@ -6366,7 +6359,7 @@ function closePhotoViewer(e) {
   if (viewer) viewer.classList.remove("open");
 }
 
-// ===== SHARED MODULE: file attachment handler =====
+// ───── SHARED: file attachment handler ─────
 function handleFileAttach(input) {
   const file = input.files[0];
   if (!file) return;
@@ -6384,7 +6377,7 @@ function handleFileAttach(input) {
   if (clearBtn) clearBtn.style.display = "";
 }
 
-// ===== SHARED MODULE: photo auth loader =====
+// ───── SHARED: photo auth loader ─────
 // farmOS may serve file URLs that require auth. Try direct first,
 // fall back to fetching with Bearer token if the image fails to load.
 function loadPhotoWithAuth(img) {
@@ -6410,7 +6403,7 @@ function applyPhotoSrcs() {
   });
 }
 
-// ===== SHARED MODULE: logo =====
+// ───── SHARED: farm logo ─────
 function handleLogo(input) {
   const file = input.files[0];
   if (!file) return;
@@ -6492,47 +6485,34 @@ function importLogs(input) {
 
 function clearLogs() {
   // ===== SHARED MODULE: clearLogs — clears all logs including pending tasks =====
-  const modal  = document.getElementById("editModal");
-  const fields = document.getElementById("editFields");
-  const saveBtn = document.getElementById("modalSaveBtn");
   const pendingCount = logs.filter(l => l.status === "pending").length;
   const totalCount = logs.length;
-  document.getElementById("editTitle").textContent = "Clear ALL logs?";
-  fields.innerHTML = `
-    <p style="color:#c66;">All ${totalCount} log entries will be deleted${pendingCount > 0 ? `, including ${pendingCount} scheduled task${pendingCount > 1 ? "s" : ""}` : ""}.</p>
-    <p style="color:#c66;">This cannot be undone.</p>
-  `;
-  saveBtn.textContent = "🗑️ Confirm Clear All";
-  saveBtn.style.background = "#8b0000";
-  saveBtn.onclick = () => {
-    logs = [];
-    localStorage.setItem(LS.logs, JSON.stringify(logs));
-    Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
-    localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
-    localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
-    localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
-    assets = []; pending = []; adjHistory = [];
-    localStorage.removeItem(BD_LS.assets);
-    localStorage.removeItem(BD_LS.history);
-    localStorage.removeItem(BD_LS.pending);
-    localStorage.removeItem(BD_LS.flocks);
-    localStorage.removeItem(BD_LS.lastSync);
-    bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
-    bd_updateSyncBadge();
-    bd_renderBirds();
-    bd_renderHistory();
-    batches = []; saveBatches();
-    pendingActions = []; savePendingActions();
-    saveBtn.textContent = "💾 Save";
-    saveBtn.style.background = "";
-    saveBtn.onclick = saveEdit;
-    closeEdit();
-    renderSettings();
-    renderRecent();
-    renderDashboard();
-    showToast("✅ All logs and inventory cleared");
-  };
-  modal.style.display = "block";
+  openConfirm({
+    title: 'Clear ALL logs?',
+    body: '<p style="color:#c66;">All ' + totalCount + ' log entries will be deleted' + (pendingCount > 0 ? ', including ' + pendingCount + ' scheduled task' + (pendingCount > 1 ? 's' : '') : '') + '.</p><p style="color:#c66;">This cannot be undone.</p>',
+    confirmLabel: '🗑️ Confirm Clear All',
+    danger: true,
+    onConfirm: function() {
+      logs = [];
+      localStorage.setItem(LS.logs, JSON.stringify(logs));
+      Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
+      localStorage.setItem("farmdesk_stock_assets",  JSON.stringify([]));
+      localStorage.setItem("farmdesk_stock_pending", JSON.stringify([]));
+      localStorage.setItem("farmdesk_stock_history", JSON.stringify([]));
+      assets = []; pending = []; adjHistory = [];
+      localStorage.removeItem(BD_LS.assets);
+      localStorage.removeItem(BD_LS.history);
+      localStorage.removeItem(BD_LS.pending);
+      localStorage.removeItem(BD_LS.flocks);
+      localStorage.removeItem(BD_LS.lastSync);
+      bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = [];
+      bd_updateSyncBadge(); bd_renderBirds(); bd_renderHistory();
+      batches = []; saveBatches();
+      pendingActions = []; savePendingActions();
+      renderSettings(); renderRecent(); renderDashboard();
+      showToast("✅ All logs and inventory cleared");
+    }
+  });
 }
 
 // ===== FARMOS SYNC =====
@@ -6627,7 +6607,7 @@ function saveFarmOSCfg() {
   return cfg;
 }
 
-// ===== SHARED MODULE: OAuth2 authentication =====
+// ───── SHARED: OAuth2 authentication ─────
 // Tries proxy first then direct. Returns a valid token or throws.
 async function getToken(cfg) {
   let lastErr = null; // most informative error seen across attempts
@@ -6709,67 +6689,38 @@ function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 
-// ===== SHARED MODULE: logout =====
+// ───── SHARED: logout ─────
 function logout() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const url = cfg.url || "";
-  const unsyncedGoat  = logs.filter(l => !l.synced).length;
-  const unsyncedStock = pending.filter(p => !p.synced).length;
-  const unsyncedBird  = bd_pending.filter(p => !p.synced).length;
-  const unsyncedCount = unsyncedGoat + unsyncedStock + unsyncedBird;
-
-  const modal = document.getElementById("editModal");
-  const fields = document.getElementById("editFields");
-  const saveBtn = document.getElementById("modalSaveBtn");
-
-  document.getElementById("editTitle").textContent = "Log Out?";
-  fields.innerHTML = `
-    <p style="color:#ccc;">Logged in as <strong>${cfg.user || "unknown"}</strong></p>
-    <p style="color:#ccc;">Farm: <strong>${url || "unknown"}</strong></p>
-    ${unsyncedCount > 0 ? `<p style="color:#c90;">⚠️ ${unsyncedCount} unsynced item${unsyncedCount > 1 ? "s" : ""} across all modules will be lost.</p>` : ""}
-    <p style="color:#888;font-size:14px;margin-top:8px;">All local data, animals, and config will be cleared.</p>
-  `;
-  saveBtn.textContent = "🚪 Confirm Logout";
-  saveBtn.style.background = "#555";
-  saveBtn.onclick = () => {
-    localStorage.removeItem(LS.cfg);
-    localStorage.removeItem(LS.logs);
-    localStorage.removeItem(LS.weights);
-    localStorage.removeItem(LS.goats);
-    localStorage.removeItem(LS.excluded);
-    localStorage.removeItem(LS.animalUUIDs);
-    localStorage.removeItem(LS.configLogUUID);
-    localStorage.removeItem(LS.lastSync);
-    localStorage.removeItem("farmdesk_role");
-    localStorage.removeItem(SD_LS.assets);
-    localStorage.removeItem(SD_LS.pending);
-    localStorage.removeItem(SD_LS.history);
-    localStorage.removeItem(SD_LS.lastSync);
-    localStorage.removeItem(BD_LS.assets);
-    localStorage.removeItem(BD_LS.history);
-    localStorage.removeItem(BD_LS.pending);
-    localStorage.removeItem(BD_LS.lastSync);
-    localStorage.removeItem(BD_LS.excluded);
-    localStorage.removeItem(BD_LS.flocks);
-    localStorage.removeItem(BATCHES_LS_KEY);
-    localStorage.removeItem(PENDING_ACTIONS_LS_KEY);
-    logs = []; weights = {}; goats = [...DEFAULT_ANIMALS]; excludedAnimals = [];
-    assets = []; pending = []; adjHistory = [];
-    bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = []; bd_excluded = [];
-    batches = []; pendingActions = [];
-    bd_updateSyncBadge();
-    saveBtn.textContent = "💾 Save";
-    saveBtn.style.background = "";
-    saveBtn.onclick = saveEdit;
-    closeEdit();
-    populateGoatSelect();
-    renderRecent();
-    show("settings");
-  };
-  modal.style.display = "block";
+  const unsyncedCount = logs.filter(l => !l.synced).length + pending.filter(p => !p.synced).length + bd_pending.filter(p => !p.synced).length;
+  openConfirm({
+    title: 'Log Out?',
+    body: '<p style="color:#ccc;">Logged in as <strong>' + (cfg.user || 'unknown') + '</strong></p>' +
+      '<p style="color:#ccc;">Farm: <strong>' + (url || 'unknown') + '</strong></p>' +
+      (unsyncedCount > 0 ? '<p style="color:#c90;">⚠️ ' + unsyncedCount + ' unsynced item' + (unsyncedCount > 1 ? 's' : '') + ' across all modules will be lost.</p>' : '') +
+      '<p style="color:#888;font-size:14px;margin-top:8px;">All local data, animals, and config will be cleared.</p>',
+    confirmLabel: '🚪 Confirm Logout',
+    danger: false,
+    onConfirm: function() {
+      localStorage.removeItem(LS.cfg); localStorage.removeItem(LS.logs); localStorage.removeItem(LS.weights);
+      localStorage.removeItem(LS.goats); localStorage.removeItem(LS.excluded); localStorage.removeItem(LS.animalUUIDs);
+      localStorage.removeItem(LS.configLogUUID); localStorage.removeItem(LS.lastSync); localStorage.removeItem("farmdesk_role");
+      localStorage.removeItem(SD_LS.assets); localStorage.removeItem(SD_LS.pending); localStorage.removeItem(SD_LS.history); localStorage.removeItem(SD_LS.lastSync);
+      localStorage.removeItem(BD_LS.assets); localStorage.removeItem(BD_LS.history); localStorage.removeItem(BD_LS.pending);
+      localStorage.removeItem(BD_LS.lastSync); localStorage.removeItem(BD_LS.excluded); localStorage.removeItem(BD_LS.flocks);
+      localStorage.removeItem(BATCHES_LS_KEY); localStorage.removeItem(PENDING_ACTIONS_LS_KEY);
+      logs = []; weights = {}; goats = [...DEFAULT_ANIMALS]; excludedAnimals = [];
+      assets = []; pending = []; adjHistory = [];
+      bd_birds = []; bd_history = []; bd_pending = []; bd_flocks = []; bd_excluded = [];
+      batches = []; pendingActions = [];
+      bd_updateSyncBadge(); populateGoatSelect(); renderRecent();
+      show("settings");
+    }
+  });
 }
 
-// ===== SHARED MODULE: recent URLs =====
+// ───── SHARED: recent farmOS URLs ─────
 function getRecentUrls() {
   return JSON.parse(localStorage.getItem(LS.recentUrls) || "[]");
 }
@@ -6891,7 +6842,7 @@ async function testFarmOS() {
   }
 }
 
-// ===== CONFIG SYNC =====
+// ───── SHARED: config sync ─────
 // Shared config stored in farmOS as activity log named _goatdesk_config
 // Contains: formulas, custom proc types, custom methods, goat list, excluded animals
 
@@ -7042,7 +6993,7 @@ async function pullConfig(token) {
   }
 }
 
-// ===== FETCH (animals + logs + config) =====
+// ───── SHARED: fetch (animals + logs + config) from farmOS ─────
 async function fetchAnimalUUIDs(silent = false) {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   if (!cfg.url || !cfg.user || !cfg.pass) {
@@ -7561,7 +7512,7 @@ async function fetchAnimalUUIDs(silent = false) {
   }
 }
 
-// ===== SHARED: fetch batches from farmOS product assets =====
+// ───── SHARED: fetch batches from farmOS product assets ─────
 // Batches are pushed as asset--product. On reinstall localStorage is wiped,
 // so we pull them back from farmOS to restore the local batch list.
 // Matches by productUUID if known, or by name pattern if new device.
@@ -7793,7 +7744,7 @@ function buildFarmOSPayload(l) {
   return payload;
 }
 
-// ===== SHARED: PROCESS QUEUED OFFLINE-FIRST ACTIONS =====
+// ───── SHARED: process queued offline-first actions ─────
 // Pushes the live farmOS half of everything queued by queuePendingAction
 // (sell/death/move/retype/profile edits/purchases). Called from both
 // Goat's syncToFarmOS and Bird's bd_syncToFarmOS — same queue either way.
@@ -8435,40 +8386,25 @@ function toggleSelectAll(checked) {
 function deleteSelected() {
   const selected = [...document.querySelectorAll(".log-select:checked")].map(cb => cb.dataset.id);
   if (!selected.length) return;
-
-  const modal  = document.getElementById("editModal");
-  const fields = document.getElementById("editFields");
-  const saveBtn = document.getElementById("modalSaveBtn");
-
-  document.getElementById("editTitle").textContent = "Delete Selected Logs?";
-  fields.innerHTML = `
-    <p style="color:#ccc;">${selected.length} log${selected.length > 1 ? "s" : ""} will be deleted.</p>
-    <p style="color:#c66;">This cannot be undone.</p>
-  `;
-
-  saveBtn.textContent = "🗑️ Confirm Delete";
-  saveBtn.style.background = "#8b0000";
-  saveBtn.onclick = () => {
-    logs = logs.filter(l => !selected.includes(l.id));
-    localStorage.setItem(LS.logs, JSON.stringify(logs));
-    saveBtn.textContent = "💾 Save";
-    saveBtn.style.background = "";
-    saveBtn.onclick = saveEdit;
-    const sa = document.getElementById("selectAllLogs");
-    if (sa) sa.checked = false;
-    closeEdit();
-    renderHistory();
-    renderRecent();
-  };
-
-  modal.style.display = "block";
+  openConfirm({
+    title: 'Delete Selected Logs?',
+    body: '<p style="color:#ccc;">' + selected.length + ' log' + (selected.length > 1 ? 's' : '') + ' will be deleted.</p><p style="color:#c66;">This cannot be undone.</p>',
+    confirmLabel: '🗑️ Confirm Delete',
+    danger: true,
+    onConfirm: function() {
+      logs = logs.filter(l => !selected.includes(l.id));
+      localStorage.setItem(LS.logs, JSON.stringify(logs));
+      const sa = document.getElementById("selectAllLogs");
+      if (sa) sa.checked = false;
+      renderHistory(); renderRecent();
+    }
+  });
 }
 
 // Enter in edit modal saves
 document.addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
   if (document.getElementById("editModal").style.display !== "block") return;
-  // Don't intercept Enter in textareas
   if (document.activeElement.tagName === "TEXTAREA") return;
   e.preventDefault();
   saveEdit();
@@ -8480,35 +8416,20 @@ let editingId = null;
 function deleteLog(id) {
   const l = logs.find(l => l.id === id);
   if (!l) return;
-
-  const modal  = document.getElementById("editModal");
-  const fields = document.getElementById("editFields");
-  const saveBtn = document.getElementById("modalSaveBtn");
-
-  document.getElementById("editTitle").textContent = "Delete this log?";
-  fields.innerHTML = `
-    <div style="padding:10px 0;color:#ccc;">
-      <strong style="color:#fff;">${l.goat}</strong> — ${l.type}<br>
-      <span style="color:#aaa;font-size:13px;">${formatLog(l)}</span><br>
-      <span style="color:#666;font-size:12px;">${l.time && !isNaN(new Date(l.time).getTime()) ? new Date(l.time).toLocaleString() : "unknown time"}</span>
-    </div>
-    <p style="color:#c66;">This cannot be undone.</p>
-  `;
-
-  saveBtn.textContent = "🗑️ Confirm Delete";
-  saveBtn.style.background = "#8b0000";
-  saveBtn.onclick = () => {
-    logs = logs.filter(x => x.id !== id);
-    localStorage.setItem(LS.logs, JSON.stringify(logs));
-    saveBtn.textContent = "💾 Save";
-    saveBtn.style.background = "";
-    saveBtn.onclick = saveEdit;
-    closeEdit();
-    renderHistory();
-    renderRecent();
-  };
-
-  modal.style.display = "block";
+  openConfirm({
+    title: 'Delete this log?',
+    body: '<div style="padding:10px 0;color:#ccc;"><strong style="color:#fff;">' + l.goat + '</strong> — ' + l.type + '<br>' +
+      '<span style="color:#aaa;font-size:13px;">' + formatLog(l) + '</span><br>' +
+      '<span style="color:#666;font-size:12px;">' + (l.time && !isNaN(new Date(l.time).getTime()) ? new Date(l.time).toLocaleString() : 'unknown time') + '</span></div>' +
+      '<p style="color:#c66;">This cannot be undone.</p>',
+    confirmLabel: '🗑️ Confirm Delete',
+    danger: true,
+    onConfirm: function() {
+      logs = logs.filter(x => x.id !== id);
+      localStorage.setItem(LS.logs, JSON.stringify(logs));
+      renderHistory(); renderRecent();
+    }
+  });
 }
 
 async function openEdit(id) {
@@ -8823,9 +8744,11 @@ if ("serviceWorker" in navigator) {
 }
 
 
-// ============================
-// ===== STOCKDESK MODULE =====
-// ============================
+// ============================================================
+// D. STOCKDESK MODULE
+// Inventory tracking — adjust, restock, deplete.
+// Syncs to farmOS asset--material with quantity--standard.
+// ============================================================
 
 // ===== STOCKDESK localStorage keys =====
 const SD_LS = {
@@ -9621,10 +9544,10 @@ async function sd_openPhotoViewer(uuid) {
 async function openEditItem(uuid) {
   const a = assets.find(x => x.uuid === uuid);
   if (!a) return;
-  const modal   = document.getElementById('sd-editModal');
-  const fields  = document.getElementById('sd-editFields');
-  const saveBtn = document.getElementById('sd-modalSaveBtn');
-  document.getElementById('sd-editTitle').textContent = '✏️ Edit Item';
+  const modal   = document.getElementById('editModal');
+  const fields  = document.getElementById('editFields');
+  const saveBtn = document.getElementById('modalSaveBtn');
+  document.getElementById('editTitle').textContent = '✏️ Edit Item';
 
   // Resolve existing photo IDs to actual image data for the editing session.
   // The session itself still works in raw base64 in memory (rotate/remove/
@@ -9716,7 +9639,7 @@ async function openEditItem(uuid) {
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
     }
     window._editItemPhotos = null;
-    sd_closeEdit();
+    closeEdit();
     renderDashboard();
     showToast('✅ Item updated');
   };
@@ -10276,13 +10199,13 @@ function toggleHistoryDrawer(card) {
 function openEditLog(id) {
   const entry   = adjHistory.find(h => h.id === id);
   if (!entry) return;
-  const modal   = document.getElementById('sd-editModal');
-  const fields  = document.getElementById('sd-editFields');
-  const saveBtn = document.getElementById('sd-modalSaveBtn');
+  const modal   = document.getElementById('editModal');
+  const fields  = document.getElementById('editFields');
+  const saveBtn = document.getElementById('modalSaveBtn');
   // Convert stored ISO time to datetime-local value
   const rawTime  = entry.time ? new Date(entry.time) : new Date();
   const localVal = new Date(rawTime.getTime() - rawTime.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  document.getElementById('sd-editTitle').textContent = '✏️ Edit Log';
+  document.getElementById('editTitle').textContent = '✏️ Edit Log';
   fields.innerHTML = `
     <div style="color:#aaa;font-size:13px;margin-bottom:8px;">${entry.name} ${entry.action === 'increment' ? '+' : entry.action === 'decrement' ? '−' : '='}${entry.amount}</div>
     <label style="color:#aaa;font-size:14px;">Date &amp; Time</label>
@@ -10308,7 +10231,7 @@ function openEditLog(id) {
     }
     localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
     localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
-    sd_closeEdit();
+    closeEdit();
     sd_renderHistory();
     updateSyncBadge();
     showToast('✅ Log updated');
@@ -10319,9 +10242,11 @@ function openEditLog(id) {
 // logo — handled by shared GoatDesk logo init
 
 
-// ============================
-// ===== BIRDDESK MODULE ======
-// ============================
+// ============================================================
+// E. BIRDDESK MODULE
+// Flock-style tracking — birds, eggs, hatches, mortality.
+// Template module: all flock-style modules mirror this.
+// ============================================================
 
 // Bird species this module owns — lowercase animal_type term names.
 // Matches the pattern used by Goat's MODULE_ANIMAL_TYPES. Extend this list
@@ -11457,7 +11382,7 @@ function bd_openSellModal(birdId) {
   modal.style.display = 'block';
 }
 
-// ===== LOGOUT =====
+// ===== BIRDDESK: clear state on re-auth =====
 
 // ===== SPECIES FILTER =====
 function bd_setSpeciesFilter(s) {
@@ -12338,22 +12263,19 @@ function bd_closeLogModalOverlay()     { document.getElementById('bd-log-modal')
 function bd_closeBirdModalOverlay()    { document.getElementById('bd-bird-modal').style.display = 'none'; }
 function bd_closeFlockModalOverlay()   { document.getElementById('bd-flock-modal').style.display = 'none'; }
 function bd_closeSpeciesModalOverlay() { document.getElementById('bd-species-modal').style.display = 'none'; }
-function bd_closeConfirmModalOverlay() { document.getElementById('bd-confirm-modal').style.display = 'none'; }
+function bd_closeConfirmModalOverlay() { closeConfirm(); }
 function bd_closeEditModalOverlay()    { document.getElementById('bd-edit-modal').style.display = 'none'; editCurrentPhoto = null; editCurrentFileAttach = null; }
 
 
-// ===== CONFIRM MODAL =====
+// bd_showConfirm now delegates to shared openConfirm — same API, no modal duplication
 function bd_showConfirm(title, body, onOk) {
-  var _cm = document.getElementById('bd-confirm-modal'); if (_cm.parentNode !== document.body) document.body.appendChild(_cm);
-  document.getElementById('bd-confirm-title').textContent = title;
-  document.getElementById('bd-confirm-body').innerHTML = body;
-  document.getElementById('bd-confirm-ok').onclick = function() { document.getElementById('bd-confirm-modal').style.display = 'none'; onOk(); };
-  document.getElementById('bd-confirm-modal').style.display = 'block';
+  openConfirm({ title: title, body: body, confirmLabel: 'Confirm', danger: true, onConfirm: onOk });
 }
-function bd_closeConfirmModal(e) { if (!e || e.target === document.getElementById('bd-confirm-modal')) document.getElementById('bd-confirm-modal').style.display = 'none'; }
+function bd_closeConfirmModal() { closeConfirm(); }
 
 // ===== FLOCK MANAGER =====
-function bd_openFlockManager() { var m = document.getElementById('bd-flock-modal'); if (m.parentNode !== document.body) document.body.appendChild(m); bd_renderFlockList(); m.style.display = 'block'; }
+// Body-append no longer needed — modals are at body level since stage1
+function bd_openFlockManager() { bd_renderFlockList(); document.getElementById('bd-flock-modal').style.display = 'block'; }
 function bd_closeFlockModal(e) { if (!e || e.target === document.getElementById('bd-flock-modal')) document.getElementById('bd-flock-modal').style.display = 'none'; }
 function bd_renderFlockList() {
   var list = document.getElementById('bd-flock-list');
@@ -12387,7 +12309,7 @@ function bd_deleteBox(fi, bi) { bd_flocks[fi].nestBoxes.splice(bi,1); localStora
 function bd_updateBoxName(fi, bi, val) { bd_flocks[fi].nestBoxes[bi] = val; localStorage.setItem(BD_LS.flocks, JSON.stringify(bd_flocks)); }
 
 // ===== SPECIES MANAGER =====
-function bd_openSpeciesManager() { var m = document.getElementById('bd-species-modal'); if (m.parentNode !== document.body) document.body.appendChild(m); bd_renderSpeciesList(); m.style.display = 'block'; }
+function bd_openSpeciesManager() { bd_renderSpeciesList(); document.getElementById('bd-species-modal').style.display = 'block'; }
 function bd_closeSpeciesModal(e) { if (!e || e.target === document.getElementById('bd-species-modal')) document.getElementById('bd-species-modal').style.display = 'none'; }
 function bd_renderSpeciesList() {
   var list = document.getElementById('bd-species-list');
@@ -12408,7 +12330,7 @@ function bd_addBreed(sp) {
 }
 function bd_deleteBreed(sp, i) { bd_speciesCfg[sp].splice(i,1); localStorage.setItem(BD_LS.species, JSON.stringify(bd_speciesCfg)); bd_renderSpeciesList(); }
 
-function bd_openFormulaManager() { var m = document.getElementById('bd-formula-modal'); if (m.parentNode !== document.body) document.body.appendChild(m); bd_renderFormulaList(); m.style.display = 'block'; }
+function bd_openFormulaManager() { bd_renderFormulaList(); document.getElementById('bd-formula-modal').style.display = 'block'; }
 function bd_closeFormulaModal(e) { if (!e || e.target === document.getElementById('bd-formula-modal')) document.getElementById('bd-formula-modal').style.display = 'none'; }
 function bd_closeFormulaModalOverlay() { document.getElementById('bd-formula-modal').style.display = 'none'; }
 function bd_renderFormulaList() {
@@ -12616,9 +12538,13 @@ async function syncAllModules() {
 // back button handled by shared module switcher popstate
 const _lastSync = localStorage.getItem(SD_LS.lastSync);
 document.getElementById('syncStatus').textContent = _lastSync ? 'Synced ' + _lastSync : 'Offline';
-// ============================
-// ===== MODULE SWITCHER ======
-// ============================
+// ============================================================
+// F. APP LEVEL
+// Dashboard, scheduler, ledger, settings, module switcher,
+// navigation stack, init. Runs after all modules load.
+// ============================================================
+
+// ===== MODULE SWITCHER =====
 // MODULE REGISTRY — to add a new module:
 //   1. Wrap its HTML in <div id="module-yourmod" style="display:none;"> ... </div>
 //   2. Add one entry below. onActivate runs each time the module is shown.
@@ -13213,17 +13139,17 @@ function closeTopOverlay() {
     { id: 'medDeductModal',    test: function(el) { return el.style.display === 'block'; }, close: function(el) { el.style.display = 'none'; } },
     { id: 'batchEditModal',    test: function(el) { return el.style.display === 'block'; }, close: function() { closeBatchEditModal(); } },
     { id: 'batchActionModal',  test: function(el) { return el.style.display === 'block'; }, close: function() { closeBatchActionModal(); } },
+    { id: 'confirm-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { closeConfirm(); } },
     { id: 'editModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { closeEdit(); } },
     { id: 'moveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { closeMoveModal(); } },
     { id: 'groupModal',        test: function(el) { return el.style.display === 'block'; }, close: function() { closeGroupModal(); } },
-    { id: 'sd-editModal',      test: function(el) { return el.style.display === 'block'; }, close: function() { sd_closeEdit(); } },
+    { id: 'editModal',      test: function(el) { return el.style.display === 'block'; }, close: function() { closeEdit(); } },
     { id: 'profile-modal',     test: function(el) { return el.style.display === 'flex' || el.style.display === 'block'; }, close: function() { closeProfile(); } },
     { id: 'bd-profile-modal',  test: function(el) { return el.style.display === 'flex' || el.style.display === 'block'; }, close: function() { bd_closeBirdProfile(); } },
     { id: 'bd-log-modal',      test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeLogModal(); } },
     { id: 'bd-bird-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeBirdModal(); } },
     { id: 'bd-flock-modal',    test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFlockModal(); } },
     { id: 'bd-species-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeSpeciesModal(); } },
-    { id: 'bd-confirm-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeConfirmModal(); } },
     { id: 'bd-edit-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeEditModal(); } },
     { id: 'bd-formula-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFormulaModal(); } }
   ];
@@ -13298,9 +13224,55 @@ renderNewItemCatOptions();
 renderDashboard();
 populateInjectionSelects();
 updateSyncBadge();
-// ===== MODAL =====
-function sd_closeEdit() {
-  document.getElementById('sd-editModal').style.display = 'none';
+
+// ===== SHARED MODAL ENGINE =====
+// openModal()    — general purpose edit/form modal (title, scrollable fields, save/cancel)
+// openConfirm()  — lightweight confirm dialog (title, body text, one action)
+// Both are body-level, accessible from any module.
+
+// openModal({ title, fields, onSave, saveLabel, cancelLabel })
+// fields: HTML string injected into #editFields
+// onSave: function called when save button tapped — return false to keep modal open
+function openModal(opts) {
+  var modal   = document.getElementById('editModal');
+  var titleEl = document.getElementById('editTitle');
+  var fieldsEl = document.getElementById('editFields');
+  var saveBtn  = document.getElementById('modalSaveBtn');
+  var cancelBtn = document.getElementById('modalCancelBtn');
+  if (!modal) return;
+  if (titleEl)   titleEl.textContent = opts.title || '';
+  if (fieldsEl)  fieldsEl.innerHTML  = opts.fields || '';
+  if (saveBtn) {
+    saveBtn.textContent  = opts.saveLabel || '💾 Save';
+    saveBtn.style.background = opts.danger ? '#8b0000' : '';
+    saveBtn.style.display = opts.onSave ? '' : 'none';
+    saveBtn.onclick = function() { if (opts.onSave) opts.onSave(); };
+  }
+  if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+  modal.style.display = 'block';
+}
+
+// openConfirm({ title, body, onConfirm, confirmLabel, danger })
+// Lightweight — no fields, just a message and one action button
+function openConfirm(opts) {
+  var modal    = document.getElementById('confirm-modal');
+  var titleEl  = document.getElementById('confirm-modal-title');
+  var bodyEl   = document.getElementById('confirm-modal-body');
+  var btn      = document.getElementById('confirm-modal-btn');
+  if (!modal) return;
+  if (titleEl) titleEl.textContent = opts.title || 'Confirm';
+  if (bodyEl)  bodyEl.innerHTML    = opts.body  || '';
+  if (btn) {
+    btn.textContent       = opts.confirmLabel || 'Confirm';
+    btn.style.background  = opts.danger ? '#8b0000' : '';
+    btn.onclick = function() { closeConfirm(); if (opts.onConfirm) opts.onConfirm(); };
+  }
+  modal.style.display = 'block';
+}
+
+function closeConfirm() {
+  var modal = document.getElementById('confirm-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 // ===== HISTORY DELETE =====
@@ -13312,28 +13284,21 @@ function sd_toggleSelectAll(checked) {
 function sd_deleteSelected() {
   const selected = [...document.querySelectorAll('.history-select:checked')].map(cb => cb.dataset.id);
   if (!selected.length) return;
-  const modal   = document.getElementById('sd-editModal');
-  const fields  = document.getElementById('sd-editFields');
-  const saveBtn = document.getElementById('sd-modalSaveBtn');
-  document.getElementById('sd-editTitle').textContent = 'Delete Selected?';
-  fields.innerHTML = `
-    <p style="color:#ccc;">${selected.length} item${selected.length > 1 ? 's' : ''} will be removed from local adjHistory.</p>
-    <p style="color:#c66;">This cannot be undone.</p>
-  `;
-  saveBtn.textContent = '🗑️ Confirm Delete';
-  saveBtn.style.background = '#8b0000';
-  saveBtn.onclick = () => {
-    adjHistory = adjHistory.filter(h => !selected.includes(h.id));
-    pending = pending.filter(p => !selected.includes(p.id));
-    localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
-    localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
-    const sa = document.getElementById('selectAllHistory');
-    if (sa) sa.checked = false;
-    sd_closeEdit();
-    sd_renderHistory();
-    updateSyncBadge();
-  };
-  modal.style.display = 'block';
+  openConfirm({
+    title: 'Delete Selected?',
+    body: '<p style="color:#ccc;">' + selected.length + ' item' + (selected.length > 1 ? 's' : '') + ' will be removed from local history.</p><p style="color:#c66;">This cannot be undone.</p>',
+    confirmLabel: '🗑️ Confirm Delete',
+    danger: true,
+    onConfirm: function() {
+      adjHistory = adjHistory.filter(h => !selected.includes(h.id));
+      pending = pending.filter(p => !selected.includes(p.id));
+      localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
+      localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
+      const sa = document.getElementById('selectAllHistory');
+      if (sa) sa.checked = false;
+      sd_renderHistory(); updateSyncBadge();
+    }
+  });
 }
 
 function cloneStockLog(id) {
@@ -13354,28 +13319,19 @@ function cloneStockLog(id) {
 }
 
 function sd_clearHistory() {
-  const modal   = document.getElementById('sd-editModal');
-  const fields  = document.getElementById('sd-editFields');
-  const saveBtn = document.getElementById('sd-modalSaveBtn');
   const unsyncedCount = pending.filter(p => !p.synced).length;
-  document.getElementById('sd-editTitle').textContent = 'Clear All History?';
-  fields.innerHTML = `
-    <p style="color:#c66;">All ${adjHistory.length} adjHistory entries will be deleted${unsyncedCount > 0 ? `, including ${unsyncedCount} unsynced item${unsyncedCount > 1 ? 's' : ''}` : ''}.</p>
-    <p style="color:#c66;">This cannot be undone.</p>
-  `;
-  saveBtn.textContent = '🗑️ Confirm Clear All';
-  saveBtn.style.background = '#8b0000';
-  saveBtn.onclick = () => {
-    adjHistory = [];
-    pending = [];
-    localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
-    localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
-    sd_closeEdit();
-    sd_renderHistory();
-    sd_renderSettings();
-    updateSyncBadge();
-  };
-  modal.style.display = 'block';
+  openConfirm({
+    title: 'Clear All History?',
+    body: '<p style="color:#c66;">All ' + adjHistory.length + ' history entries will be deleted' + (unsyncedCount > 0 ? ', including ' + unsyncedCount + ' unsynced item' + (unsyncedCount > 1 ? 's' : '') : '') + '.</p><p style="color:#c66;">This cannot be undone.</p>',
+    confirmLabel: '🗑️ Confirm Clear All',
+    danger: true,
+    onConfirm: function() {
+      adjHistory = []; pending = [];
+      localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
+      localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
+      sd_renderHistory(); sd_renderSettings(); updateSyncBadge();
+    }
+  });
 }
 
 
@@ -13610,9 +13566,6 @@ function medDeductClose() {
 }
 
 
-// ============================
-// ===== MODULE SWITCHER ======
-// ============================
 
 
 
@@ -13768,18 +13721,6 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   </div>
 </div>
 
-<!-- CONFIRM MODAL -->
-<div id="bd-confirm-modal" class="bd-modal" onclick="bd_closeConfirmModalOverlay()">
-  <div class="bd-modal-box" onclick="event.stopPropagation()">
-    <h3 id="bd-confirm-title">Confirm</h3>
-    <div id="bd-confirm-body"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button id="bd-confirm-ok" style="flex:1;background:#8b0000;">Confirm</button>
-      <button class="secondary" onclick="bd_closeConfirmModal()" style="flex:0 0 auto;">Cancel</button>
-    </div>
-  </div>
-</div>
-
 <!-- EDIT LOG MODAL -->
 <div id="bd-edit-modal" class="bd-modal" onclick="bd_closeEditModalOverlay()">
   <div class="bd-modal-box" onclick="event.stopPropagation()">
@@ -13793,6 +13734,22 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 </div>
 
 <!-- ===== SHARED MODAL ===== -->
+<!-- ===== SHARED CONFIRM MODAL — body level, used by all modules ===== -->
+<!-- openConfirm({title, body, onConfirm, confirmLabel, danger}) / closeConfirm() -->
+<div id="confirm-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;" onclick="closeConfirm()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong id="confirm-modal-title" style="font-size:18px;"></strong>
+      <button onclick="closeConfirm()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="confirm-modal-body"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="confirm-modal-btn" onclick="closeConfirm()" style="flex:1;margin:0;">Confirm</button>
+      <button onclick="closeConfirm()" class="secondary" style="flex:1;margin:0;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeEdit()">
   <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -13840,20 +13797,6 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   </div>
 </div>
 
-<!-- ===== StockDesk MODAL (separate instance) ===== -->
-<div id="sd-editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
-  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <strong id="sd-editTitle" style="font-size:18px;">Confirm</strong>
-      <button onclick="sd_closeEdit()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
-    </div>
-    <div id="sd-editFields"></div>
-    <div style="display:flex;gap:8px;margin-top:12px;">
-      <button id="sd-modalSaveBtn" style="flex:1;margin:0;">Confirm</button>
-      <button onclick="sd_closeEdit()" class="secondary" style="flex:1;margin:0;">Cancel</button>
-    </div>
-  </div>
-</div>
 
 <!-- ===== FULLSCREEN PHOTO VIEWER (shared) ===== -->
 <div id="photoViewer" onclick="closePhotoViewer(event)">
