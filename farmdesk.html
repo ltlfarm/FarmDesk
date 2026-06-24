@@ -71,7 +71,7 @@ header {
 header span { font-size:22px; font-weight:bold; color:#3a7; }
 header small { color:#888; font-size:14px; }
 
-.screen { display:none; padding:10px; }
+.screen { display:none; padding:10px; padding-bottom:80px; }
 .screen.active { display:block; }
 
 .box { background:#2a2a2a; padding:14px; margin-bottom:10px; border-radius:8px; }
@@ -216,7 +216,6 @@ input:focus, select:focus, textarea:focus {
   cursor:pointer;z-index:10000;
 }
 
-
 /* ===== STOCKDESK MODULE STYLES ===== */
 .stock-card {
   background:#2a2a2a;
@@ -296,21 +295,15 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 .bottom-nav button.active { color:#3a7; border-bottom:2px solid #3a7; }
 .bottom-nav button:last-child { border-right:none; }
 /* Module switcher in header */
-.module-switcher {
-  display:flex;
-  gap:4px;
-}
-.module-btn {
-  padding:6px 12px; font-size:13px; margin:0;
-  background:#333; border-radius:6px; color:#888;
-}
+.module-switcher { display:flex; gap:4px; overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; -ms-overflow-style:none; }
+.module-switcher::-webkit-scrollbar { display:none; }
+.module-btn { padding:6px 12px; font-size:13px; margin:0; background:#333; border-radius:6px; color:#888; }
 .module-btn.active { background:#3a7; color:#fff; }
 .module-btn.dimmed { opacity:0.45; }
-/* Screen padding for bottom nav */
-.screen { padding-bottom:80px; }
+body { overflow-x:hidden; }
+header { flex-direction:column; gap:0; align-items:stretch; }
 
-/* ===== BIRDDESK MODULE STYLES ===== */
-.bird-card { background:#2a2a2a; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; border-left:4px solid #3a7; cursor:pointer; }
+/* ===== BIRDDESK MODULE STYLES ===== */ background:#2a2a2a; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; border-left:4px solid #3a7; cursor:pointer; }
 .bird-card:active { opacity:0.8; }
 .bird-card .bird-info { flex:1; }
 .bird-card .bird-tag { font-weight:bold; font-size:16px; color:#3a7; }
@@ -344,49 +337,37 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 .bd-modal-box { background:#2a2a2a; border-radius:10px; padding:18px; max-width:480px; margin:0 auto; }
 .bd-modal-box h3 { margin:0 0 14px; color:#3a7; }
 
-body { overflow-x: hidden; }
-.module-switcher { overflow-x: auto; flex-wrap: nowrap; max-width: 52vw; scrollbar-width: none; -ms-overflow-style: none; }
-.module-switcher::-webkit-scrollbar { display: none; }
-header { gap: 8px; }
-header > div:last-child { min-width: 0; }
-@media (orientation: portrait) {
-  header { flex-direction: column; align-items: stretch; gap: 8px; }
-  header > div:last-child { width: 100%; align-items: stretch; }
-  header > div:last-child > div:first-child { width: 100%; }
-  .module-switcher { max-width: none; flex: 1 1 auto; min-width: 0; }
-}
-
-
 </style>
 </head>
 <body>
 
 <header>
-  <div style="display:flex;align-items:center;gap:10px;">
-    <img id="farmLogo" src="" alt="" style="height:40px;width:auto;display:none;border-radius:4px;">
-    <div style="display:flex;flex-direction:column;gap:1px;">
-      <span id="headerTitle">🐐 FarmDesk</span>
-      <small id="farmNameSubtitle" style="color:#888;font-size:12px;display:none;"></small>
-    </div>
-  </div>
-  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-    <!-- Buttons rendered from the MODULE REGISTRY (bottom of script) -->
-    <div style="display:flex;gap:6px;align-items:center;">
-      <button id="hdr-home-btn" class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
-      <button id="hdr-ledger-btn" class="module-btn" onclick="show('ledger')" title="Ledger">💰</button>
-      <div class="module-switcher" id="moduleSwitcher"></div>
-      <button id="hdr-help-btn" class="module-btn" onclick="show('help')" title="Help">❓</button>
-      <button id="hdr-settings-btn" class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
+  <!-- Row 1: Logo + title -->
+  <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <img id="farmLogo" src="" alt="" style="height:40px;width:auto;display:none;border-radius:4px;">
+      <div style="display:flex;flex-direction:column;gap:1px;">
+        <span id="headerTitle">🐐 FarmDesk</span>
+        <small id="farmNameSubtitle" style="color:#888;font-size:12px;display:none;"></small>
+      </div>
     </div>
     <small id="syncStatus">Offline</small>
   </div>
+  <!-- Row 2: Fixed app-level buttons -->
+  <div style="display:flex;align-items:center;gap:4px;width:100%;margin-top:6px;">
+    <button id="hdr-home-btn" class="module-btn" onclick="openDashboard()" title="Dashboard">🏠</button>
+    <button id="hdr-ledger-btn" class="module-btn" onclick="show('ledger')" title="Ledger">💰</button>
+    <button id="hdr-help-btn" class="module-btn" onclick="show('help')" title="Help">❓</button>
+    <button id="hdr-settings-btn" class="module-btn" onclick="openSharedSettings()" title="Settings">⚙️</button>
+  </div>
+  <!-- Row 3: Module switcher -->
+  <div class="module-switcher" id="moduleSwitcher" style="width:100%;margin-top:4px;"></div>
 </header>
 
 <div id="loading"><div class="spinner"></div><p id="loadingMsg">Loading...</p></div>
 
 <!-- ===== GOATDESK MODULE ===== -->
 <div id="module-goatdesk">
-
 
 <!-- ===== HOME (LOG TAB) ===== -->
 <div id="screen-home" class="screen active">
@@ -891,6 +872,50 @@ header > div:last-child { min-width: 0; }
     </div>
   </div>
 
+  <!-- Dashboard -->
+  <div class="set-group">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>🏠 Dashboard</span><span class="set-arrow">▼</span>
+    </div>
+    <div class="set-body">
+      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">The Dashboard shows a summary of everything happening on the farm — accessible from the 🏠 button in the header.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tasks</strong> — Upcoming and overdue tasks across all modules. Tap to complete.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Warning Tags</strong> — Animals flagged for attention.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Recent Logs</strong> — Latest activity across all modules.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Low Inventory</strong> — Stock items that are empty or below threshold.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;"><strong>Sync Status</strong> — Last sync time per module.</p>
+    </div>
+  </div>
+
+  <!-- Sync and Data -->
+  <div class="set-group">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>🔄 Sync &amp; Data</span><span class="set-arrow">▼</span>
+    </div>
+    <div class="set-body">
+      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">All logs save locally first. Nothing is sent to farmOS until you explicitly push.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬆️ Push to farmOS</strong> — Sends all unsynced local logs to your server.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬇️ Pull from farmOS</strong> — Downloads current animals, logs, and inventory from your server.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬇️ Sync All</strong> — Pulls all modules at once from the Settings screen.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Each module has its own Sync tab for push and pull.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>No farmOS server?</strong> Enable Standalone Mode in Settings. Use Export XML to back up your data and Import XML to restore it on another device.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;"><strong>Export XML</strong> backs up everything — goats, birds, stock, and ledger entries.</p>
+    </div>
+  </div>
+
+  <!-- Scheduler -->
+  <div class="set-group">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>📅 Scheduler</span><span class="set-arrow">▼</span>
+    </div>
+    <div class="set-body">
+      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Create future tasks for animals. Tasks show on the Dashboard and each module's pending list until completed.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Select a module, pick a log type, choose animals or flocks, set a date, and tap <strong>Schedule Tasks</strong>. One task is created per animal.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 6px;"><strong>Completing a task:</strong> Tap it on the Dashboard or home screen. The log form opens pre-filled. Fill in the details and tap Save — the task is marked done in farmOS.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;">Stock reminders are local-only (no farmOS event). Tap ✓ on the Dashboard to dismiss them.</p>
+    </div>
+  </div>
+
   <!-- Goat Desk -->
   <div class="set-group">
     <div class="set-head" onclick="toggleSetGroup(this)">
@@ -902,7 +927,7 @@ header > div:last-child { min-width: 0; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🌡️ Vitals</strong> — Temperature, heart rate, respiratory rate.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>💉 Med</strong> — Medication, dose, route, lot number. Auto-deducts from Stock inventory if tracked.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>✂️ Procedure</strong> — Any procedure performed (band, disbud, ear tag, etc.).</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🐾 Hoof</strong> — Hoof trimming and condition notes.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Hoof (cloven icon)</strong> — Hoof trimming and condition notes.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>👁️ Observe</strong> — General observation or health note.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🍼 Birth</strong> — Record a birth with dam, sire, and kid details.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📝 Activity</strong> — General farm activity.</p>
@@ -945,50 +970,6 @@ header > div:last-child { min-width: 0; }
     </div>
   </div>
 
-  <!-- Scheduler -->
-  <div class="set-group">
-    <div class="set-head" onclick="toggleSetGroup(this)">
-      <span>📅 Scheduler</span><span class="set-arrow">▼</span>
-    </div>
-    <div class="set-body">
-      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Create future tasks for animals. Tasks show on the Dashboard and each module's pending list until completed.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Select a module, pick a log type, choose animals or flocks, set a date, and tap <strong>Schedule Tasks</strong>. One task is created per animal.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 6px;"><strong>Completing a task:</strong> Tap it on the Dashboard or home screen. The log form opens pre-filled. Fill in the details and tap Save — the task is marked done in farmOS.</p>
-      <p style="font-size:14px;color:#ccc;margin:0;">Stock reminders are local-only (no farmOS event). Tap ✓ on the Dashboard to dismiss them.</p>
-    </div>
-  </div>
-
-  <!-- Dashboard -->
-  <div class="set-group">
-    <div class="set-head" onclick="toggleSetGroup(this)">
-      <span>🏠 Dashboard</span><span class="set-arrow">▼</span>
-    </div>
-    <div class="set-body">
-      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">The Dashboard shows a summary of everything happening on the farm — accessible from the 🏠 button in the header.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tasks</strong> — Upcoming and overdue tasks across all modules. Tap to complete.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Warning Tags</strong> — Animals flagged for attention.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Recent Logs</strong> — Latest activity across all modules.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Low Inventory</strong> — Stock items that are empty or below threshold.</p>
-      <p style="font-size:14px;color:#ccc;margin:0;"><strong>Sync Status</strong> — Last sync time per module.</p>
-    </div>
-  </div>
-
-  <!-- Sync and Data -->
-  <div class="set-group">
-    <div class="set-head" onclick="toggleSetGroup(this)">
-      <span>🔄 Sync &amp; Data</span><span class="set-arrow">▼</span>
-    </div>
-    <div class="set-body">
-      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">All logs save locally first. Nothing is sent to farmOS until you explicitly push.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬆️ Push to farmOS</strong> — Sends all unsynced local logs to your server.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬇️ Pull from farmOS</strong> — Downloads current animals, logs, and inventory from your server.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬇️ Sync All</strong> — Pulls all modules at once from the Settings screen.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Each module has its own Sync tab for push and pull.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>No farmOS server?</strong> Enable Standalone Mode in Settings. Use Export XML to back up your data and Import XML to restore it on another device.</p>
-      <p style="font-size:14px;color:#ccc;margin:0;"><strong>Export XML</strong> backs up everything — goats, birds, stock, and ledger entries.</p>
-    </div>
-  </div>
-
   <!-- Settings -->
   <div class="set-group">
     <div class="set-head" onclick="toggleSetGroup(this)">
@@ -1001,7 +982,7 @@ header > div:last-child { min-width: 0; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Name</strong> — Used in exported filenames.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Standalone Mode</strong> — Use FarmDesk without a farmOS server. Hides all sync options. Export XML to save your data.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Active User</strong> — The name stamped on every log entry. Add all farm hands here and switch when logging on their behalf.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Med Formulas (Goat Desk)</strong> — Set dose-per-lb for each medication. FarmDesk calculates the correct dose automatically from the animal's weight.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Med Formulas</strong> — Set dose-per-lb for each medication. FarmDesk calculates the correct dose automatically from the animal's weight. Each animal module has its own formula settings.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>Clear All Logs</strong> — Wipes all data. Use before switching to a different farm. Cannot be undone.</p>
     </div>
   </div>
@@ -1061,7 +1042,6 @@ header > div:last-child { min-width: 0; }
     <button onclick="document.getElementById('xmlImportFile').click()" class="secondary wide" style="margin-top:8px;">📥 Import XML</button>
   </div>
 </div>
-
 
 <!-- ===== LEDGER ===== -->
 <div id="screen-ledger" class="screen">
@@ -1373,7 +1353,6 @@ header > div:last-child { min-width: 0; }
 </nav>
 </div>
 
-
 <script>
 // ============================================================
 // FARMDESK — SCRIPT TABLE OF CONTENTS
@@ -1419,7 +1398,7 @@ const GOAT_LOG_TYPES = [
   { id: 'vitals',   label: 'Vitals',    icon: '🌡️', followup: false, photo: false, farmosBundle: 'log--observation' },
   { id: 'med',      label: 'Med',       icon: '💉',  followup: true,  photo: false, farmosBundle: 'log--medical'     },
   { id: 'proc',     label: 'Procedure', icon: '✂️',  followup: true,  photo: true,  farmosBundle: 'log--activity'    },
-  { id: 'hoof',     label: 'Hoof',      icon: '🐾',  followup: true,  photo: true,  farmosBundle: 'log--activity'    },
+  { id: 'hoof',     label: 'Hoof',      icon: '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAA5CAIAAAD/bz8YAAAOuklEQVR4nIVZa48lV3Vda5+qe/ve7p6el5lHbGOMTcAG2YBwCDIJCUEixAGjSCQSisQ/ipSPiSJFifiCCIRECuQtsEG249gG2fFj3sx0T/f0u++zbtXZKx9O1X30tOGoW+quW/fUPvux9lq7uHnrh2gWSQpzy0Di5EUAEgGQmH6LJgB0gRQBYH4/6diFxSWRzI5ftTkLZt8/ZpbppG0pUIBgYLpBC9/jcWtO2uW4QVq4qbaGjUGqb/DkTaY9pZnFTgAOt9qaqUU8wSCA90XgPg/dt6ZfcUWBIcuNmaQqloTqTyUQgAEGYxba7h698liSZmaofTZ9/PsG7tcaJEGgO1zwbmdl2Oe9rT1aPHd+OQSCTP4xUIAFG47Lzb39vL2ydqqz3GZZTNxhZrMDKv3OzkoXABA6IYcWrQEhWFV5yFq9o+GP/+ull196c2P93qc+/eQ3//xrFtzjpAkd5VUIdm9n5y/+8q+Ydx/90Ac//1tPf+LJjwIePQYj5ExZ9j5PA0/2UEoagl4pyrHcPff6G2/+4z/88N131hXbxWS8unx+qb0a435KYxIQaO6YLC93QLt5Y/3u+u4br/z8C5//7PNf/8rySquKRW7T4N73QAgidZJBtTUAjYhqtTs/ffHVb3/7+3s7w8xWYXmWty5dvtBqYTxy1iFL97urWF7pXLxw6c76KA9rw37vRz96YWdn58+++bWLl876pLCTcKRBD0Cy48bMrUlZ5nn75z9/66//5u827u63WqdgoVLVXsLyqkUdiZWkueqVUGV5WFtbg4JhyWwFWHrl1V9897vf7w+GNEuVenLIAABGgSJl9Q8s3e/ypdYHbt+Mf/+3/3K4X7Xby6Nq7OZVRJaFtVPtWJUUDDTQ3Wu8EFp5vra2Fn1S+ggmC3k7X/vZC+/80/dejK5S46ioGi4WLBMhYsFDZO18STAbDOI//+DHN67fa+UrEhwug8ta7fbK6rIi3ZXW9HiShZCtrq6GzCovZC5JnrWztf/4t5+99vqbIbTLKH8f/BeOhyxFzSRkWf7qq//7yv+80ul2XF472kxQp9tZ7nYBTVcdL1EwiaurK+12C0odhQ5F+Wg4+tcfvjAcMLAdI4Q6u4UU9fpUCwal70ugZfv7hy+8+NNxUUqkBSXQAxzeXsrzPMBFzaxKGxgsVrHb7QLMshwwkRIdyltL7727/uJP3lhqn5YbAKHBHxCpHx4LWW0u0Vpqv/bG62/+31uWmQhPtqZgIgIu1dcWEzQVaCQFeIJm1f2asAAu//ePX93eOcrztrsnm5o0V4I9kyR53bg9usc87/b6/pOf/KIoAxhEgqntEyQJ0kEdIwJNtUmINAfkrvQQJ0WLMFl++/bO669fMS7H6ICTEKIQPTUDyRqXOzxlqQvhrTdvX7t20MrPihQMIGmEGYwQKKvTn9N+LjRpICchwb3uzckmNzK3CPvpi68f7o3brQ7kCbvF1KAWqixRDadxOBq//D8vD4ZDGDULCeub6EAUYt3w667f3CNOo6SFkBJA8tnV69euXLva6XRBA3x6o+DHq8yFkLX2Dw6uXr/OLHcBSrlMiBLd3eVlVVSxJDW1hKSRgAFBQowxz3MzWwQFVFVl5Gg8fPvtd8sqQnApLoLRrAlLKKvKzG7evLGzuxOysMhmAMDd5ZJHyaftes5DNTsaDAZVVc11+KndsBAAXrl6dWdvd1Yuc8vm9lKn26kqvfHG26NRNAYcX0xUTAoeLZm5wLBUg+9gMJlMfHYVqKmkACmE7M6djZs31vNWV3UFkikOTRRdcEc0s729wdUr29AKkNEImyWKkRKykBUjGxzB7H64pRwhtEb9QC1N0YFwQhSMAWQI1u8P33lrI3Cldn2qHZE+h0OSQgh37mwcHfWz0GrCdKy2RaIoyqPewMwEX/g0uUjq90eTopyzc7GlCh79l79c390/uD+ss/9JunT79p1er08z6GQWbMyGg2G/14sxVmWlpp3VOGgmR6/Xq6oq1V+qnVn0JAtheWV1fWPj3r17IcuFFP26E9i8e4aj0XtXrzrB+0hCIz5IcjQuDg6PJrGMHl0e5VEuF4QQwng83t/bz7KsUUGCNCevUsfLdvf27t69C+OMyDa0vPFQCIdHg7ubW1YLLZ/qoKbvEXSSVfTdg0NYQDDNIZXkAPr9Qa/fDyFL0Z5JD9Y4lcA3Ardu36kquXsDQg7AUspFkzNsb/mgF7IQkKoaqrUWAWPTHRiBza1decdC2+G15wBQxrx3wEF/YlbTzvSJT1t6LSQ5KbOtuyMvO3neliKkRBxtPjQb63vDQcWm9BKu+FTscHpK29jc7vUnFjKfpm0Tj827+73ewCy1vSbMCc+ZVAPFIOT3tntHR0WwzDULSM0pSZN8c2urKErSJM3ixbp8UKeDjNze3t3d32soKZvIUtL6+noxGhsNEudE5jQJk+wJIezs7uzs7MolRTSPsMQpAlkUk73dPciIjDAiQKnKaDU7ECG5t1rtSVlubm6SQTCBUnCYWVZW2tjYkMsY5E2gFpcAOSyEw6Pe1va9GKOQanWa1BLB0WBwd2vTDXHWfu5j4wIgM46LYnNrM5k7vTnLssOj3sbGFhPKkydJjMZXZBXj/v4hzUgDRLkEq2FS7Pf9qD92MgIwJqtMZnLAMSfwSMZSV95d7/eLVqud0tFhDtvcvLe9vZPleU2wTtBgmEsr29raju4184MgGOu+YUe9WEWQAaSU+JelUQZJwEnVItXVzpdv3dzeOziSEKMLBrMy+vXrt8aT0iz7FWqHrDtgyPKd3d1xUQCEPNWPiajkCOz1j8pyYotuXmydNWmVPAvh6PDw5o1bIYRW3iII0aNu3ryVRM6vCNY09gAHw1FRFGaJkkqSUWD0NrPBQW84niDLPAkkcf6Idc3WhVPX23vvXZlMqmAZHHK/u7n1y/UNBCMSaPmUit/vJREWbFJWo+HEGObRV4GwqOFRL5YlUttoNECd/413Gpyv/17fuHN4eBirqijG3eXurdu3t3a2rcbomqq/n4tIgjYeFaPROISAmrSnpDar5L1+z6M3bD7Z5Y2QSBOUuoiVqDTt7t2jw4NhnmWtdhadt9d3isJomSgnhPtg6FjYHMPheDwam4V6U9IcQiAyG5UlpSkrm04PBa+FDKlEZQHRYK2jg/bGnV4gDTo4nFy/cQCsOjOvyVhzrvdZ7qoqL8tYUzdQqilzep4lhWNNZwckulOO2vvTIydkqypdv34zlhMC/cFo/+CQlgmQeRpo6P1DNnfwud6bOLUcksK0G9YORZMr4ix70ieUGWlRvnV3s5qUWbDd3Z2jw8MQpsebwc1c3sy2ry/M1B4AkTCCcsBltGMBTyZNs2rhI6V5hA2Hw9Fg2M5be3t7w+GIDe2f473zamn+v/p5iRjWfBuymVtszo5p0IATKqUZEhhtXIyP+r0QwnAwKCZFCtOvjdN0n+geshBj9OguhzwDIKO12TktBp9nm0h9X80YY+a5xseEu2KMCdSSXEdS0Ykd2ck8OC2XLy8vra50CZnBUutIZKBSdeaB1fZSS1JTGbMoafFnzpGstU+dbMfGRb9uCd1ud2V5WXAmrGaiH65YTD5w9oG8lXsj/zCT0eRCC6kLjWCMMYQsz3N3D2YWguRTg062a+6qGdfW1jrdTnRvsFcGMRM5qS6dOdfudkqTApsXDJTq5KuZlYyaVaNX1anV1bNnz06KybkzZ8+srcXoqQGfaEzNNxti7FV1+dKFbqcl94S6abJRT7VPnTr10MMPF5OJojdn8YUMWIgW5d5ZWrp08WK+lLnig5cvr62ecnnzaDVM6UTjCCHQHrx8CXT3qMS7CWsyke126/FHLrRQAJIQER0OULJEL2vahQQWwSPJoyc/8UiW55NYnH0gu/zgmVjGKR8HBDZnm2NTEiGrJn7hA8uPP34OqpD4vSDA1Eg9yp964uGLD3SrajxtW80QNHWN6YFFALF8+INnHnvscjEpPcZWe/zUUx9uL4WQ1Zx3DkkXkUweiHJcPPqhBy5d7nhVWONVqNbuiVBWl3/jzJNPPhLLQSNwFyY8CaFBgBUxCtn42c999uzZc0IE3Sv/1NNPfuxjD41HB8Z4UiIlSqM80Gxy+nT27LPPtPK8nIxrBcFU/kCdRvSQFb/z+acvXTwTq7HRkNg+AxmMmTEzWkYZJsV451NPPfrbz3zaPToFYxWrU2tLX33ud8+eankssiwLIU/zpKZcSdGAELwsDz/zmY98/InHVFaBoEKNy/SplHYS4ODDj1947rk/gDxWMMsIJoRoRnchC1aW/csPnv7q8188e3a1mkwSshqsnPQ/+cnH/ugrv0evJuPCEBJ7BxJHcCIEZuNR/5FHLj73x1/Ic4cQbOF1w0woSrIQYhw/++zTz/3h53I7ROwLaSOxZnnVYHBw/vzKt771jUcfuzgaH5opo9VMxYuiOPjSl579ype/EDSMZQ8QYKTJYQQRx8XB5ctrX//6Fy9cXp6Uvfqs9atIAcoEZy2V6bFrQMgG3/iTZy6eG37vBy9t7kwCkGWZkcEsevHQQ+e+8adffuKjjxTFgYUWFOApf5kRsZpkefb887+fW/nv//nSQT+zkEVXZqGMZasVn3r6Q197/ouPffh8VW5byOAdJPIHUHCJ61e+QzLxEGeaHSsPGYNdubb92mtXr1y5sre31253Tq+d/shvPv6ZZ56+cOFUrI4YSiLQjbU4qxMlKhhzIn/7nRsvv/LGtWs3yip2u521tVNPfOwjn/z0x8+fX4nlATghLahF0VKtCA5x/cp36upOvYhMw0qSWdapIoej0VGvl2XZ0tLKcneZ9KoaGSPTe0AZJEukVkaZG+kyWmupXVbx4LA3mZStVitv5UtL7cpLsgoqRKdgyKDQGCQHaoPuK9DU4iAmYRlUt3ClWUiDwlRDmATA20AAozECUXDQzAJYj+cjxmnmkjWpTqVart/g6cR3rkQ9DzfBSXcgRgAwp2n6eq8pCjYMVACljIhpeJ928qqBMoIWyUgF1XMOE01SmL5+kP4flxmT7obmf2wAAAAASUVORK5CYII=" style="height:1em;width:auto;vertical-align:-0.15em;display:inline-block;">',  followup: true,  photo: true,  farmosBundle: 'log--activity'    },
   { id: 'obs',      label: 'Observe',   icon: '👁️', followup: true,  photo: true,  farmosBundle: 'log--observation' },
   { id: 'birth',    label: 'Birth',     icon: '🍼',  followup: false, photo: true,  farmosBundle: 'log--birth'       },
   { id: 'activity', label: 'Activity',  icon: '📝',  followup: false, photo: false, farmosBundle: 'log--activity'    },
@@ -1879,8 +1858,14 @@ function renderStep() {
   const box = document.getElementById("inputs");
   const lw = weights[g] || "";
 
-  document.getElementById("entryTitle").textContent =
-    (TYPE_LABELS[t] || t) + " — " + g;
+  var titleEl = document.getElementById("entryTitle");
+  var titleStr = (TYPE_LABELS[t] || t) + " — " + g;
+  var logType = GOAT_LOG_TYPES.find(function(lt) { return lt.id === t; });
+  if (logType && logType.icon && logType.icon.charAt(0) === '<') {
+    titleEl.innerHTML = titleStr;
+  } else {
+    titleEl.textContent = titleStr;
+  }
 
   if (t === "weight") {
     box.innerHTML = `
@@ -2082,7 +2067,6 @@ function renderStep() {
     setupFollowupHandler();
   }
 
-
   if (t === "birth") {
     var birthIsBatch = goatBirthDefaultMode() === 'batch';
     var damOpts  = goats.filter(function(n) { var p = animalProfiles[n]; return !p || p.sex === 'F' || !p.sex; }).map(function(n) { return '<option>' + n + '</option>'; }).join('');
@@ -2178,7 +2162,6 @@ function onAndroidPhoto(dataUrl) {
   img.src = full;
 }
 
-
 // ───── SHARED: fix JPEG EXIF orientation ─────
 function correctOrientation(img, rawDataUrl, callback) {
   // Only attempt EXIF read for JPEG data URLs from camera
@@ -2227,7 +2210,6 @@ function correctOrientation(img, rawDataUrl, callback) {
   }
 }
 
-
 function orientedCanvas(img, rawDataUrl, maxW, callback) {
   correctOrientation(img, rawDataUrl, (img, orient) => {
     // For orientations 5-8 the image is rotated 90/270 so w/h are swapped
@@ -2259,7 +2241,6 @@ function orientedCanvas(img, rawDataUrl, maxW, callback) {
     callback(canvas);
   });
 }
-
 
 // ───── SHARED: replace-on-push (keep newest photo) ─────
 // farmOS APPENDS uploaded images. After an upload succeeds, this PATCHes the
@@ -2337,7 +2318,6 @@ function rotateEditItemPhoto(idx) {
     }
   });
 }
-
 
 // ===== PHOTO HANDLING =====
 var currentPhoto = null;
@@ -2952,7 +2932,6 @@ function getBirthKids(editMode) {
   });
   return kids;
 }
-
 
 // Cancel entry — clears task state and returns to dashboard or home
 function cancelEntry() {
@@ -3839,7 +3818,6 @@ function generateReport(mode) {
   }
 }
 
-
 function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
@@ -3985,6 +3963,11 @@ function renderSettings() {
   // GoatDesk-specific boxes only make sense when the Goats module is on
   const goatsOn = (typeof moduleEnabled === "function") ? moduleEnabled("goats") : true;
   document.querySelectorAll("#screen-settings .gd-only").forEach(b => b.style.display = goatsOn ? "" : "none");
+  var setgrpGoats = document.getElementById("setgrp-goats");
+  if (setgrpGoats) setgrpGoats.style.display = goatsOn ? "" : "none";
+  // BirdDesk settings group — only when Birds is enabled
+  var setgrpBirds = document.getElementById("setgrp-birds");
+  if (setgrpBirds) setgrpBirds.style.display = ((typeof moduleEnabled === "function") ? moduleEnabled("birds") : true) ? "" : "none";
   // Populate Birth Litter Default dropdown
   var birthDefaultSel = document.getElementById("goatBirthDefaultSel");
   if (birthDefaultSel) birthDefaultSel.value = goatBirthDefaultMode();
@@ -4123,7 +4106,6 @@ function procQueueSupplyDecrements(supplies, goatName, logTime) {
   if (typeof updateSyncBadge === 'function') updateSyncBadge();
 }
 
-
 function procAddEditSupplyRow(existing) {
   // Add a supply row to the EDIT modal (ed_procSuppliesList)
   const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
@@ -4189,8 +4171,6 @@ function deleteFormula(name) {
   localStorage.setItem(LS.formulas, JSON.stringify(formulas));
   renderSettings();
 }
-
-
 
 // ─────────────────────────────────────────────────────────
 // SHARED FUNCTIONS — defined here, used by all modules.
@@ -4285,7 +4265,7 @@ function assetCardHTML(img, title, detail, onclick, photoId) {
     ? '<img src="' + img + '" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;">'
     : (photoId
         ? '<img data-photoid="' + photoId + '" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;background:#333;">'
-        : '<div style="width:54px;height:54px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">🐾</div>');
+        : '<div style="width:54px;height:54px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">🦶</div>');
   return '<div onclick="' + onclick + '" style="display:flex;align-items:center;gap:12px;padding:10px;background:#2a2a2a;border-radius:8px;margin-bottom:8px;cursor:pointer;">' +
     ph +
     '<div style="flex:1;min-width:0;"><div style="font-weight:bold;font-size:16px;color:#fff;">' + title + '</div>' +
@@ -4396,7 +4376,7 @@ function openAnimalProfile(name) {
     ? '<img src="' + p.photo + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;">'
     : (p.photoId
         ? '<img data-photoid="' + p.photoId + '" style="width:100%;max-height:240px;border-radius:8px;object-fit:cover;margin-bottom:10px;background:#333;">'
-        : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🐾</div>');
+        : '<div style="width:100%;height:140px;border-radius:8px;background:#333;display:flex;align-items:center;justify-content:center;font-size:48px;margin-bottom:10px;">🦶</div>');
   function row(k,v){ return v ? '<div style="margin:4px 0;"><strong style="color:#9c9;">' + k + ':</strong> ' + v + '</div>' : ""; }
 
   // Flags
@@ -5255,7 +5235,6 @@ function openRetypeAnimalModal(name) {
   });
 }
 
-
 // ===== UNIVERSAL: dynamic breed-field detection =====
 // Different farmOS instances may or may not expose a real "breed" attribute
 // on asset--animal — this one doesn't (confirmed via a 422). Rather than
@@ -5403,8 +5382,6 @@ async function syncBirthKidAssets(l, logUUID, token, headers, logEl) {
   }
 }
 
-
-
 async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
   var cfg = JSON.parse(localStorage.getItem(cfgKey || 'farmdesk_cfg') || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
@@ -5430,7 +5407,6 @@ async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
     return false;
   }
 }
-
 
 // Same pattern as Bird flocks — group membership assigned via log--activity
 // with is_group_assignment, not a direct attribute on the animal asset.
@@ -5951,7 +5927,6 @@ function addAnimalFromScreen() {
   }
 }
 
-
 // ===== TASK → FORM (open pending task pre-filled in entry form) =====
 // taskId is stored globally so saveStep can mark it done on save
 let _activeTaskId = null;
@@ -5971,7 +5946,8 @@ function openTaskForm(id, fromDashboard) {
   var banner = document.getElementById('taskBanner');
   var bannerText = document.getElementById('taskBannerText');
   if (banner && bannerText) {
-    bannerText.textContent = (task.goat || 'Animal') + ' — ' + task.type;
+    var typeLabel = TYPE_LABELS[task.type] || task.type;
+    bannerText.innerHTML = (task.goat || 'Animal') + ' — ' + typeLabel;
     banner.style.display = '';
   }
 
@@ -6400,7 +6376,6 @@ function completeStockTask(id, andAdjust) {
   if (typeof renderDashboardScreen === 'function') renderDashboardScreen();
   if (andAdjust) openAdjust(task.itemUUID);
 }
-
 
 // Combined pending-task list across all enabled modules. Goats, Birds, and
 // Stock are all wired now — Stock reminders are local-only (no farmOS sync).
@@ -7062,7 +7037,6 @@ function fetchWithTimeout(url, options, timeoutMs) {
     throw err;
   });
 }
-
 
 // ───── SHARED: logout ─────
 function logout() {
@@ -8785,7 +8759,6 @@ document.addEventListener("keydown", e => {
   saveEdit();
 });
 
-
 // ─────────────────────────────────────────────────────────
 // GOATDESK-SPECIFIC — log editing, save, init
 // ─────────────────────────────────────────────────────────
@@ -9121,7 +9094,6 @@ setTimeout(() => fetchAnimalUUIDs(true), 500);
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
-
 
 // ============================================================
 // D. STOCKDESK MODULE
@@ -9634,15 +9606,6 @@ function renderDashboard() {
   lazyLoadPhotos(list); // fill in <img data-photoid> from the Photos store
 }
 
-function toggleCardDrawer(card) {
-  const drawer = card.querySelector('.card-drawer');
-  const arrow  = card.querySelector('.card-arrow');
-  if (!drawer) return;
-  const isOpen = drawer.style.display === 'block';
-  drawer.style.display = isOpen ? 'none' : 'block';
-  if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
-}
-
 // ===== QUICK ADJUST (dashboard +/-1) — local only =====
 function quickAdj(uuid, delta) {
   const a = assets.find(x => x.uuid === uuid);
@@ -9701,7 +9664,6 @@ function openItemProfile(uuid) {
   lazyLoadPhotos(document.getElementById('profile-modal-content'));
   modal.style.display = 'flex';
 }
-
 
 async function openAdjust(uuid) {
   adjustAsset = assets.find(a => a.uuid === uuid);
@@ -10620,7 +10582,6 @@ function openEditLog(id) {
 
 // logo — handled by shared GoatDesk logo init
 
-
 // ============================================================
 // E. BIRDDESK MODULE
 // Flock-style tracking — birds, eggs, hatches, mortality.
@@ -10765,7 +10726,6 @@ var bd_currentBirdPhoto = null;
 var bd_typeListGlobal = [];
 var bd_editingLogId = null;
 
-
 // Internal: actually display a bird module screen. No stack push.
 function bd_showInternal(id) {
   document.querySelectorAll('#module-birddesk .screen').forEach(function(s) { s.classList.remove('active'); });
@@ -10902,7 +10862,6 @@ function bd_clearPhoto() {
 }
 // Photo viewer — delegates to shared pinch-zoom viewer (body level, accessible from any module)
 function bd_openPhotoViewer(src) { if (src) openPhotoViewer(src); }
-function bd_closePhotoViewer() { closePhotoViewer(); }
 
 // ===== SYNC SCREEN =====
 function bd_renderSync() {
@@ -10950,8 +10909,6 @@ function bd_toggleExcludeIdx(i) {
   if (typeof bd_renderExcludedTypesInSettings === 'function') bd_renderExcludedTypesInSettings();
   bd_renderBirds();
 }
-
-
 
 async function bd_fetchAssets() {
   var cfg = JSON.parse(localStorage.getItem(BD_LS.cfg) || '{}');
@@ -11949,7 +11906,6 @@ function openBatchProfile(batchId) {
   modal.style.display = 'flex';
 }
 
-
 // ===== LOG MODAL =====
 function bd_openLogSheet(id) {
   bd_activeTaskId = null;
@@ -12637,18 +12593,14 @@ function bd_closeLogModalOverlay()     { document.getElementById('bd-log-modal')
 function bd_closeBirdModalOverlay()    { document.getElementById('bd-bird-modal').style.display = 'none'; }
 function bd_closeFlockModalOverlay()   { document.getElementById('bd-flock-modal').style.display = 'none'; }
 function bd_closeSpeciesModalOverlay() { document.getElementById('bd-species-modal').style.display = 'none'; }
-function bd_closeConfirmModalOverlay() { closeConfirm(); }
 function bd_closeEditModalOverlay()    { document.getElementById('bd-edit-modal').style.display = 'none'; editCurrentPhoto = null; editCurrentFileAttach = null; }
 
-
-// bd_showConfirm now delegates to shared openConfirm — same API, no modal duplication
+// bd_showConfirm delegates to shared openConfirm
 function bd_showConfirm(title, body, onOk) {
   openConfirm({ title: title, body: body, confirmLabel: 'Confirm', danger: true, onConfirm: onOk });
 }
-function bd_closeConfirmModal() { closeConfirm(); }
 
 // ===== FLOCK MANAGER =====
-// Body-append no longer needed — modals are at body level since stage1
 function bd_openFlockManager() { bd_renderFlockList(); document.getElementById('bd-flock-modal').style.display = 'block'; }
 function bd_closeFlockModal(e) { if (!e || e.target === document.getElementById('bd-flock-modal')) document.getElementById('bd-flock-modal').style.display = 'none'; }
 function bd_renderFlockList() {
@@ -12765,7 +12717,6 @@ function bd_populateFlock(elId, selected) {
     return "<option" + (f.name === selected ? ' selected' : '') + ">" + f.name + "</option>";
   }).join('');
 }
-
 
 // ===== BIRDDESK SETTINGS DRAWER =====
 function bd_renderSettings() {
@@ -13635,8 +13586,12 @@ window.addEventListener('popstate', function(e) {
   if (logBtns) {
     GOAT_LOG_TYPES.forEach(function(lt) {
       var btn = document.createElement('button');
-      btn.textContent = lt.icon + ' ' + lt.label;
       btn.setAttribute('onclick', "startFlow('" + lt.id + "')");
+      if (lt.icon && lt.icon.charAt(0) === '<') {
+        btn.innerHTML = lt.icon + ' ' + lt.label;
+      } else {
+        btn.textContent = lt.icon + ' ' + lt.label;
+      }
       logBtns.appendChild(btn);
     });
   }
@@ -13768,8 +13723,6 @@ function sd_clearHistory() {
     }
   });
 }
-
-
 
 // ============================
 // ===== MED DEDUCT BRIDGE =====
@@ -14000,10 +13953,6 @@ function medDeductClose() {
   _medDeductPending = null;
 }
 
-
-
-
-
 // ───── SHARED: group/flock membership (farmOS asset--group) ─────
 async function bd_ensureGroupUUID(flockName, token) {
   if (!flockName) return null;
@@ -14232,13 +14181,11 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   </div>
 </div>
 
-
 <!-- ===== FULLSCREEN PHOTO VIEWER (shared) ===== -->
 <div id="photoViewer" onclick="closePhotoViewer(event)">
   <button id="photoViewerClose" onclick="closePhotoViewer()">✕</button>
   <img id="photoViewerImg" src="" alt="Photo">
 </div>
-
 
 <!-- ===== BATCH ACTION (Sell / Mark Died) — shared by Bird and Goat ===== -->
 <div id="batchActionModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10001;overflow-y:auto;">
@@ -14297,8 +14244,6 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   </div>
 </div>
 
-
-
 <!-- ===== MED DEDUCT PROMPT ===== -->
 <div id="medDeductModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10001;overflow-y:auto;">
   <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
@@ -14327,7 +14272,6 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     </div>
   </div>
 </div>
-
 
 </body>
 </html>
