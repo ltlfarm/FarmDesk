@@ -1,6 +1,6 @@
 const CACHE = "farmdesk-v1";
 const FILES = [
-  "./farmdesk.html",
+  "./index.html",
   "./manifest.json",
   "./icon192.png",
   "./icon512.png"

@@ -2,7 +2,7 @@
   "name": "FarmDesk",
   "short_name": "FarmDesk",
   "description": "Homestead management for farmOS",
-  "start_url": "./farmdesk.html",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#1a1a1a",
   "theme_color": "#2d5a27",
