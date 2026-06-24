@@ -413,7 +413,7 @@ header > div:last-child { min-width: 0; }
   <div class="box">
     <div class="entry-header">
       <h3 id="entryTitle">Log</h3>
-      <button class="secondary" onclick="show('home')" style="padding:8px 12px;font-size:14px;">✕ Home</button>
+      <button class="secondary" onclick="cancelEntry()" style="padding:8px 12px;font-size:14px;">✕ Home</button>
     </div>
 
     <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Select the animal you are logging for. Tap Animals on the home screen to add new animals.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
@@ -432,7 +432,7 @@ header > div:last-child { min-width: 0; }
   <div class="box" style="display:flex;gap:8px;">
     <button onclick="saveAndHome()" style="flex:1;">💾 Save</button>
     <button id="saveNextBtn" onclick="nextAction()" style="flex:1;">➡️ Save + Next</button>
-    <button class="secondary" onclick="show('home')" style="flex:0 0 auto;">Home</button>
+    <button class="secondary" onclick="cancelEntry()" style="flex:0 0 auto;">Home</button>
   </div>
 </div>
 
@@ -2851,6 +2851,16 @@ function getBirthKids(editMode) {
   return kids;
 }
 
+
+// Cancel entry — clears task state and returns to dashboard or home
+function cancelEntry() {
+  var banner = document.getElementById('taskBanner');
+  if (banner) banner.style.display = 'none';
+  var fromDash = _taskFromDashboard;
+  _activeTaskId = null;
+  _taskFromDashboard = false;
+  if (fromDash) { openDashboard(); } else { show('home'); }
+}
 
 // Save current step and go home — used by plain Save button and task form saves
 function saveAndHome() {
