@@ -867,9 +867,8 @@ header > div:last-child { min-width: 0; }
 <!-- ===== HELP SCREEN ===== -->
 <div id="screen-help" class="screen">
   <div class="box">
-    <button class="secondary" onclick="show('home')">← Home</button>
+    <button class="secondary" onclick="settingsHome()">← Home</button>
     <h3 style="margin:10px 0 6px;">❓ FarmDesk Help</h3>
-    <p style="color:#888;font-size:13px;">Quick guide to get started and use every feature.</p>
   </div>
 
   <div class="box">
@@ -949,13 +948,21 @@ header > div:last-child { min-width: 0; }
     <h3 style="margin:10px 0 6px;">🔄 FarmOS Sync</h3>
   </div>
 
-  <div class="box">
+  <div class="box" id="gd-syncFarmOSBox">
     <strong>Sync</strong>
     <div id="connStatusLine2" style="font-size:13px;color:#888;margin-bottom:8px;"></div>
     <p style="color:#888;font-size:13px;">Unsynced local logs: <span id="unsyncedCount">0</span></p>
     <button onclick="fetchAnimalUUIDs()" class="wide secondary" style="margin-bottom:8px;">⬇️ Fetch Logs from farmOS</button>
     <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to farmOS</button>
     <div id="syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
+  </div>
+  <!-- Standalone export — shown in standalone mode -->
+  <div class="box" id="gd-syncStandaloneBox" style="display:none;">
+    <strong>📦 Standalone Data</strong>
+    <p style="color:#888;font-size:13px;margin:4px 0 8px;">Export or import all farm logs as XML.</p>
+    <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML('download')" class="secondary wide" style="margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="document.getElementById('xmlImportFile').click()" class="secondary wide" style="margin-top:8px;">📥 Import XML</button>
   </div>
 </div>
 
@@ -1142,7 +1149,6 @@ header > div:last-child { min-width: 0; }
   <button id="sd-nav-history"                  onclick="sd_show('history')">📋<br>History</button>
   <button id="sd-nav-scheduler"                 onclick="show('scheduler')">📅<br>Scheduler</button>
   <button id="sd-nav-sync"                     onclick="sd_show('sync')">🔄<br>Sync<span id="syncBadge" class="pending-badge" style="display:none;"></span></button>
-  <button id="sd-nav-settings"                 onclick="sd_show('settings')">⚙️<br>Settings</button>
 </nav>
 </div>
 
@@ -1442,7 +1448,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782321443"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782321890"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6799,6 +6805,11 @@ function renderSync() {
     + pendingActions.filter(p => !p.synced).length;
   document.getElementById("unsyncedCount").textContent = unsynced;
   document.getElementById("syncLog").textContent = "";
+  var isStandalone = localStorage.getItem(LS.standalone) === "1";
+  var farmBox = document.getElementById("gd-syncFarmOSBox");
+  var standaloneBox = document.getElementById("gd-syncStandaloneBox");
+  if (farmBox) farmBox.style.display = isStandalone ? "none" : "";
+  if (standaloneBox) standaloneBox.style.display = isStandalone ? "" : "none";
 }
 
 function saveFarmOSCfg() {
