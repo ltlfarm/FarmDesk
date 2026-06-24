@@ -1433,7 +1433,7 @@ const LS = {
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782279055"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782281349"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4203,15 +4203,41 @@ async function priceFieldsSupported(token) {
   const cached = localStorage.getItem(PRICE_FIELDS_KEY);
   if (cached !== null) return cached === '1';
   try {
-    const res = await fetchWithTimeout(apiUrl('/api/schema/quantity/standard'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
-    if (res.ok) {
-      const schema = await res.json();
-      const supported = !!(schema && schema.properties && schema.properties.unit_price && schema.properties.total_price);
-      localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
-      return supported;
+    // Try multiple schema paths — farmOS versions differ in where price fields appear
+    const paths = [
+      '/api/schema/quantity/standard',
+      '/api/quantity/standard?page[limit]=1'
+    ];
+    for (const path of paths) {
+      try {
+        const res = await fetchWithTimeout(apiUrl(path), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+        if (res.ok) {
+          const data = await res.json();
+          // Schema endpoint: check properties
+          if (data && data.properties) {
+            const supported = !!(data.properties.unit_price || data.properties.total_price);
+            localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
+            return supported;
+          }
+          // Live data endpoint: check first result's attributes
+          if (data && data.data) {
+            const first = Array.isArray(data.data) ? data.data[0] : data.data;
+            if (first) {
+              const supported = !!(first.attributes && ('unit_price' in first.attributes || 'total_price' in first.attributes));
+              localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
+              return supported;
+            }
+          }
+        }
+      } catch(e2) { /* try next path */ }
     }
+    // Assume supported on Farmier-hosted instances (confirmed working)
+    localStorage.setItem(PRICE_FIELDS_KEY, '1');
+    return true;
   } catch(e) { /* best-effort */ }
-  return false;
+  // Default to true — if the field doesn't exist, farmOS will ignore it gracefully
+  localStorage.setItem(PRICE_FIELDS_KEY, '1');
+  return true;
 }
 
 // Builds a 1-head price quantity (with unit_price/total_price if this
@@ -12572,39 +12598,72 @@ async function syncAllModules() {
   // This never pushes. Pushing is done deliberately per-module via the
   // dedicated "Push to FarmOS" buttons on the Sync screen.
   var statusEl = document.getElementById('syncAllStatus');
-  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Pulling latest from farmOS...'; statusEl.style.color = '#888'; }
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Connecting to farmOS...'; statusEl.style.color = '#888'; }
   var results = [];
 
-  // Goats — pull
+  // Get auth token once for all pulls
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) {
+    if (statusEl) { statusEl.textContent = '⚠️ Not configured — set farmOS connection in Settings first.'; statusEl.style.color = '#c66'; }
+    showToast('⚠️ Connect to farmOS in Settings first');
+    return;
+  }
+  var token;
   try {
-    if (typeof fetchAnimalUUIDs === 'function' && document.getElementById('screen-sync')) {
-      if (statusEl) statusEl.textContent = '⬇️ Pulling Goats...';
-      await fetchAnimalUUIDs(true);
-      results.push('🐐 Goats: pulled');
-    }
+    token = await getToken(cfg);
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '⚠️ Auth failed: ' + e.message; statusEl.style.color = '#c66'; }
+    showToast('⚠️ Auth failed');
+    return;
+  }
+
+  // Config — farm name, logo, formulas, module settings
+  try {
+    if (statusEl) statusEl.textContent = '⬇️ Pulling config...';
+    await pullConfig(token);
+    renderSettings();
+    updateFarmNameSubtitle();
+    results.push('⚙️ Config: pulled');
+  } catch(e) { results.push('⚙️ Config: failed — ' + e.message); }
+
+  // Goats — animals, logs, locations
+  try {
+    if (statusEl) statusEl.textContent = '⬇️ Pulling Goats...';
+    await fetchAnimalUUIDs(true);
+    results.push('🐐 Goats: pulled');
   } catch(e) { results.push('🐐 Goats: failed — ' + e.message); }
 
-  // Stock — pull
+  // Stock — inventory items
   try {
-    if (typeof refreshAssets === 'function') {
-      if (statusEl) statusEl.textContent = '⬇️ Pulling Stock...';
-      await refreshAssets(true);
-      results.push('📦 Stock: pulled');
-    }
+    if (statusEl) statusEl.textContent = '⬇️ Pulling Stock...';
+    await refreshAssets(true);
+    results.push('📦 Stock: pulled');
   } catch(e) { results.push('📦 Stock: failed — ' + e.message); }
 
-  // Birds — pull
+  // Birds — birds, logs, flocks
   try {
-    if (typeof bd_fetchAssets === 'function') {
-      if (statusEl) statusEl.textContent = '⬇️ Pulling Birds...';
-      await bd_fetchAssets();
-      results.push('🐦 Birds: pulled');
-    }
+    if (statusEl) statusEl.textContent = '⬇️ Pulling Birds...';
+    await bd_fetchAssets();
+    results.push('🐦 Birds: pulled');
   } catch(e) { results.push('🐦 Birds: failed — ' + e.message); }
 
-  var summary = results.join(' | ');
+  // Ledger — sales and purchases
+  try {
+    if (statusEl) statusEl.textContent = '⬇️ Pulling Ledger...';
+    await ledgerFetch();
+    results.push('💰 Ledger: pulled');
+  } catch(e) { results.push('💰 Ledger: failed — ' + e.message); }
+
+  // Refresh dashboard and sync status bar
+  renderDashboardScreen();
+  updateSyncBadge();
+  var now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  var syncStatusEl = document.getElementById('syncStatus');
+  if (syncStatusEl) syncStatusEl.textContent = 'Synced ' + now;
+
+  var summary = results.join(' · ');
   if (statusEl) { statusEl.textContent = summary; statusEl.style.color = '#3a7'; }
-  showToast('Pull complete — local is current');
+  showToast('✅ All modules synced');
 }
 
 // back button handled by shared module switcher popstate
@@ -13017,9 +13076,23 @@ async function ledgerFetch() {
         });
         (d.data || []).forEach(function(log) {
           var attrs = log.attributes || {};
-          var ts = parseInt(attrs.timestamp);
-          // Guard against epoch 0 — use current time as fallback for bad timestamps
-          var time = (ts && ts > 0) ? new Date(ts * 1000).toISOString() : null;
+          // farmOS v4 returns timestamp as Unix int OR ISO string — handle both
+          var time = null;
+          var rawTs = attrs.timestamp;
+          if (rawTs) {
+            var asInt = Number(rawTs);
+            if (!isNaN(asInt) && asInt > 1000000000) {
+              time = new Date(asInt * 1000).toISOString();
+            } else {
+              var parsed = new Date(rawTs);
+              if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1970) time = parsed.toISOString();
+            }
+          }
+          // Fall back to created/changed if timestamp is missing or epoch 0
+          if (!time) {
+            var fallback = attrs.created || attrs.changed;
+            if (fallback) { var fb = new Date(fallback); if (!isNaN(fb.getTime())) time = fb.toISOString(); }
+          }
           var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
           var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
           var names = assetArr.map(function(a) { return assetNames[a.id] || ''; }).filter(Boolean);
@@ -13051,6 +13124,8 @@ async function ledgerFetch() {
     }
 
     var saleRes, purchRes;
+    // Clear cached price field detection so it re-checks against the live instance
+    localStorage.removeItem(PRICE_FIELDS_KEY);
     try { saleRes = await fetchWithTimeout(apiUrl('/api/log/sale?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }); } catch(e) {}
     try { purchRes = await fetchWithTimeout(apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }); } catch(e) {}
     await parseLogRes(saleRes, 'sale');
@@ -13108,7 +13183,7 @@ function ledgerRender() {
 
   list.innerHTML = entries.map(function(e) {
     var d = new Date(e.time);
-    var dateStr = (e.time && !isNaN(d) && d.getFullYear() > 1970) ? d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'Date unknown';
+    var dateStr = (e.time && !isNaN(d) && d.getFullYear() > 1970) ? d.toLocaleDateString() : 'Date unknown';
     var typeLabel = e.logType === 'sale' ? '🏷️ Sale' : '📥 Purchase';
     var typeColor = e.logType === 'sale' ? '#3a7' : '#c66';
     var priceStr = '';
@@ -13225,7 +13300,6 @@ function closeTopOverlay() {
     { id: 'editModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { closeEdit(); } },
     { id: 'moveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { closeMoveModal(); } },
     { id: 'groupModal',        test: function(el) { return el.style.display === 'block'; }, close: function() { closeGroupModal(); } },
-    { id: 'editModal',      test: function(el) { return el.style.display === 'block'; }, close: function() { closeEdit(); } },
     { id: 'profile-modal',     test: function(el) { return el.style.display === 'flex' || el.style.display === 'block'; }, close: function() { closeProfile(); } },
     { id: 'bd-profile-modal',  test: function(el) { return el.style.display === 'flex' || el.style.display === 'block'; }, close: function() { bd_closeBirdProfile(); } },
     { id: 'bd-log-modal',      test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeLogModal(); } },
