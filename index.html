@@ -409,6 +409,7 @@ header > div:last-child { min-width: 0; }
 
 <!-- ===== ENTRY ===== -->
 <div id="screen-entry" class="screen">
+  <div id="taskBanner" style="display:none;background:#4d3b00;border-left:4px solid #c90;padding:8px 12px;font-size:13px;color:#c90;margin-bottom:4px;">📅 Completing task: <span id="taskBannerText"></span></div>
   <div class="box">
     <div class="entry-header">
       <h3 id="entryTitle">Log</h3>
@@ -1643,6 +1644,9 @@ function startFlow(type) {
   step = 0;
   herdIndex = 0;
   _activeTaskId = null; // clear any active task
+  _taskFromDashboard = false;
+  var banner = document.getElementById('taskBanner');
+  if (banner) banner.style.display = 'none';
   const saveNextBtn = document.getElementById("saveNextBtn");
   if (saveNextBtn) saveNextBtn.style.display = "";
   populateGoatSelect();
@@ -2843,11 +2847,18 @@ function getBirthKids(editMode) {
 // Save current step and go home — used by plain Save button and task form saves
 function saveAndHome() {
   if (!saveStep()) return;
+  var banner = document.getElementById('taskBanner');
+  if (banner) banner.style.display = 'none';
   if (_lastSavedEntry && _lastSavedEntry.type === 'med') {
     const e = _lastSavedEntry;
     setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat'), 100);
   }
-  show("home");
+  if (_taskFromDashboard) {
+    _taskFromDashboard = false;
+    openDashboard();
+  } else {
+    show("home");
+  }
 }
 
 function nextAction() {
@@ -5767,8 +5778,9 @@ function addAnimalFromScreen() {
 // ===== TASK → FORM (open pending task pre-filled in entry form) =====
 // taskId is stored globally so saveStep can mark it done on save
 let _activeTaskId = null;
+let _taskFromDashboard = false;
 
-function openTaskForm(id) {
+function openTaskForm(id, fromDashboard) {
   const task = logs.find(l => l.id === id);
   if (!task) return;
 
@@ -5776,6 +5788,15 @@ function openTaskForm(id) {
   // so we must set _activeTaskId AFTER startFlow returns
   startFlow(task.type);
   _activeTaskId = id;
+  _taskFromDashboard = !!fromDashboard;
+
+  // Show task banner
+  var banner = document.getElementById('taskBanner');
+  var bannerText = document.getElementById('taskBannerText');
+  if (banner && bannerText) {
+    bannerText.textContent = (task.goat || 'Animal') + ' — ' + task.type;
+    banner.style.display = '';
+  }
 
   // Pre-fill animal
   const goatSel = document.getElementById("goat");
@@ -6238,13 +6259,16 @@ function renderAllPendingTasks() {
     const d = new Date(t.time);
     const dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     var clickFn = t.mod === 'goats'
-      ? "goModule('goats');show('home');setTimeout(function(){openTaskForm('" + t.id + "');},150);"
+      ? "goModule('goats');openTaskForm('" + t.id + "',true);"
       : t.mod === 'birds'
-        ? "goModule('birds');bd_show('history');setTimeout(function(){bd_openTaskForm('" + t.id + "');},150);"
-        : "goModule('stock');sd_show('dashboard');";
-    return '<div style="padding:8px 0;border-top:1px solid #333;font-size:14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="' + clickFn + '">' +
+        ? "bd_openTaskForm('" + t.id + "');"
+        : "";
+    var doneBtn = t.mod === 'stock'
+      ? '<button onclick="event.stopPropagation();completeStockTask(\'' + t.id + '\',false);" style="margin:0;padding:6px 12px;font-size:13px;background:#1b4d1e;">✓ Done</button>'
+      : '<span style="color:#3a7;font-size:13px;padding-left:8px;">▶</span>';
+    return '<div style="padding:8px 0;border-top:1px solid #333;font-size:14px;display:flex;justify-content:space-between;align-items:center;' + (clickFn ? 'cursor:pointer;' : '') + '" ' + (clickFn ? 'onclick="' + clickFn + '"' : '') + '>' +
       '<span>' + t.icon + ' ' + t.target + ' — ' + t.type + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></span>' +
-      '<span style="color:#3a7;font-size:13px;padding-left:8px;">▶</span>' +
+      doneBtn +
       '</div>';
   }).join('');
 }
@@ -12907,12 +12931,15 @@ function renderDashboardScreen() {
         const dateStr = isNaN(d) ? '' : d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
         // Tap opens the task in its module
         var clickFn = t.mod === 'goats'
-          ? "goModule('goats');show('home');setTimeout(function(){openTaskForm('" + t.id + "');},150);"
+          ? "goModule('goats');openTaskForm('" + t.id + "',true);"
           : t.mod === 'birds'
-            ? "goModule('birds');bd_show('history');setTimeout(function(){bd_openTaskForm('" + t.id + "');},150);"
-            : "goModule('stock');sd_show('dashboard');";
-        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="' + clickFn + '">' +
-          t.icon + ' ' + t.target + ' — ' + t.type + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
+            ? "bd_openTaskForm('" + t.id + "');"
+            : "";
+        var doneBtn = t.mod === 'stock'
+          ? '<button onclick="event.stopPropagation();completeStockTask(\'' + t.id + '\',false);renderDashboard();" style="margin:0;padding:4px 10px;font-size:13px;background:#1b4d1e;float:right;">✓</button>'
+          : '';
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;' + (clickFn ? 'cursor:pointer;' : '') + '" ' + (clickFn ? 'onclick="' + clickFn + '"' : '') + '>' +
+          doneBtn + t.icon + ' ' + t.target + ' — ' + t.type + '<br><span style="color:#888;font-size:12px;">' + dateStr + '</span></div>';
       }).join('');
       if (allTasks.length > 3) {
         html += '<p style="color:#3a7;font-size:12px;margin:6px 0 0;cursor:pointer;" onclick="toggleDashTasks()">' + (_dashTasksExpanded ? '▲ Show less' : '▼ See all ' + allTasks.length) + '</p>';
