@@ -1561,7 +1561,7 @@ function isWorker()  { return getUserRole() === "farm_worker"; }
 function isViewer()  { return getUserRole() === "farm_viewer"; }
 function canWrite()  { return !isViewer(); }  // managers and workers can write
 
-const APP_VERSION = "1782366500"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782367210"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4054,6 +4054,8 @@ function renderSettings() {
       sdInject.innerHTML = "";
     }
   }
+  // Re-apply role gating after settings re-render
+  if (typeof applyRoleUI === "function") applyRoleUI();
 }
 
 // Renders one checkbox per registered module into Settings
@@ -11012,6 +11014,8 @@ async function bd_fetchAssets() {
     var res = await fetchWithTimeout(apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
+    // Diagnostic: log raw counts so we can see what the API actually returned
+    if (el) { el.textContent = 'API returned ' + (data.data || []).length + ' animals, ' + (data.included || []).length + ' included'; el.style.color = '#888'; }
     var typeMap = {}; var groupMap = {}; var fileMap = {};
     (data.included || []).forEach(function(inc) {
       if (inc.type === 'taxonomy_term--animal_type') typeMap[inc.id] = inc.attributes.name || '';
@@ -11077,7 +11081,11 @@ async function bd_fetchAssets() {
     bd_birds = fetched.concat(feeders).concat(localOnly);
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
     if (el) { el.textContent = 'Fetched ' + fetched.length + ' birds, ' + feeders.length + ' feeders'; el.style.color = '#3a7'; }
-    bd_toast('Fetched ' + fetched.length + ' birds');
+    if (fetched.length === 0 && getUserRole() === 'farm_worker') {
+      bd_toast('⚠️ Worker accounts may need manager role to view animals on Farmier');
+    } else {
+      bd_toast('Fetched ' + fetched.length + ' birds');
+    }
     bd_renderBirds();
     // Download any farmOS-hosted photo not yet cached locally (parallel),
     // same pattern as GoatDesk's animal photo download.
