@@ -714,15 +714,17 @@ body.role-viewer #setgrp-farmname { display: none !important; }
           Enable Standalone Mode
         </label>
         <div id="standaloneNote" style="font-size:13px;color:#c90;margin-top:6px;display:none;">⚠️ farmOS sync disabled. Use Data screen to export XML.</div>
-        <div id="standaloneRoleRow" style="display:none;margin-top:12px;">
-          <strong style="font-size:14px;">User Role</strong>
-          <p style="color:#888;font-size:13px;margin:4px 0 6px;">Controls what this user can do. Set to Worker or Viewer for farm hands.</p>
-          <select id="standaloneRoleSelect" onchange="setStandaloneRole(this.value)" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-            <option value="farm_manager">Manager — full access</option>
-            <option value="farm_worker">Worker — can log and sync, no config changes</option>
-            <option value="farm_viewer">Viewer — read only, can import and print reports</option>
-          </select>
-        </div>
+      </div>
+
+      <div class="set-sub">
+        <strong>User Role</strong>
+        <p style="color:#888;font-size:13px;">Set the role for this device. Use Worker or Viewer for farm hands — hides config options and restricts write access accordingly.</p>
+        <select id="standaloneRoleSelect" onchange="setStandaloneRole(this.value)" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-top:6px;">
+          <option value="farm_manager">Manager — full access</option>
+          <option value="farm_worker">Worker — can log and sync, no config changes</option>
+          <option value="farm_viewer">Viewer — read only, can import and print reports</option>
+        </select>
+        <div id="roleNote" style="font-size:13px;color:#888;margin-top:6px;">farmOS mode: role auto-detected at login, or override here.</div>
       </div>
 
       <div class="set-sub">
@@ -1007,6 +1009,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Logo</strong> — Pick a photo to show in the header. Syncs to farmOS so all devices see it.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Name</strong> — Used in exported filenames.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Standalone Mode</strong> — Use FarmDesk without a farmOS server. Hides all sync options. Export XML to save your data.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>User Role</strong> — Set Manager, Worker, or Viewer for this device. Worker hides config options. Viewer is read-only. Use this to restrict what farm hands can change on their device.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Active User</strong> — The name stamped on every log entry. Add all farm hands here and switch when logging on their behalf.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Med Formulas</strong> — Set dose-per-lb for each medication. FarmDesk calculates the correct dose automatically from the animal's weight. Each animal module has its own formula settings.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>Clear All Logs</strong> — Wipes all data. Use before switching to a different farm. Cannot be undone.</p>
@@ -3384,8 +3387,6 @@ function showHint(msg) {
 
 function setStandaloneMode(on) {
   localStorage.setItem(LS.standalone, on ? "1" : "0");
-  // Reset to manager when turning standalone off
-  if (!on) localStorage.setItem(LS.userRole, "farm_manager");
   renderSettings();
   applyRoleUI();
   showToast(on ? "✅ Standalone mode on" : "✅ farmOS sync mode on");
@@ -4014,9 +4015,7 @@ function renderSettings() {
   var isStandalone = localStorage.getItem(LS.standalone) === "1";
   if (standaloneToggle) standaloneToggle.checked = isStandalone;
   if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
-  var standaloneRoleRow = document.getElementById("standaloneRoleRow");
   var standaloneRoleSelect = document.getElementById("standaloneRoleSelect");
-  if (standaloneRoleRow) standaloneRoleRow.style.display = isStandalone ? "" : "none";
   if (standaloneRoleSelect) standaloneRoleSelect.value = getUserRole();
   var syncAllBtn = document.getElementById("syncAllBtn");
   if (syncAllBtn) syncAllBtn.style.display = isStandalone ? "none" : "";
