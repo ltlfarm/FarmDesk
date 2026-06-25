@@ -11081,11 +11081,7 @@ async function bd_fetchAssets() {
     bd_birds = fetched.concat(feeders).concat(localOnly);
     localStorage.setItem(BD_LS.assets, JSON.stringify(bd_birds));
     if (el) { el.textContent = 'Fetched ' + fetched.length + ' birds, ' + feeders.length + ' feeders'; el.style.color = '#3a7'; }
-    if (fetched.length === 0 && getUserRole() === 'farm_worker') {
-      bd_toast('⚠️ Worker accounts may need manager role to view animals on Farmier');
-    } else {
-      bd_toast('Fetched ' + fetched.length + ' birds');
-    }
+    bd_toast('Fetched ' + fetched.length + ' birds');
     bd_renderBirds();
     // Download any farmOS-hosted photo not yet cached locally (parallel),
     // same pattern as GoatDesk's animal photo download.
