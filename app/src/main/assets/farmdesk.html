@@ -336,6 +336,23 @@ header { flex-direction:column; gap:0; align-items:stretch; }
 .bd-modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:500; overflow-y:auto; padding:20px; }
 .bd-modal-box { background:#2a2a2a; border-radius:10px; padding:18px; max-width:480px; margin:0 auto; }
 .bd-modal-box h3 { margin:0 0 14px; color:#3a7; }
+/* ===== ROLE-BASED UI GATING ===== */
+/* Worker: hide manager-only config sections */
+body.role-worker #moduleToggles,
+body.role-worker #setgrp-logo,
+body.role-worker #setgrp-farmname { display: none !important; }
+/* Viewer: hide all write actions */
+body.role-viewer #gd-log-buttons,
+body.role-viewer #gd-flow-buttons,
+body.role-viewer #bd-add-btn,
+body.role-viewer .adj-btn,
+body.role-viewer .sync-push-btn,
+body.role-viewer .export-xml-btn,
+body.role-viewer #addItemPanel { display: none !important; }
+/* Worker also inherits manager-only restrictions */
+body.role-viewer #moduleToggles,
+body.role-viewer #setgrp-logo,
+body.role-viewer #setgrp-farmname { display: none !important; }
 
 </style>
 </head>
@@ -672,7 +689,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
         <div id="moduleToggles"></div>
       </div>
 
-      <div class="set-sub">
+      <div class="set-sub" id="setgrp-logo">
         <strong>Farm Logo</strong>
         <p style="color:#888;font-size:13px;">Logo shows in the header. Syncs to farmOS so farm hands see it after fetching.</p>
         <div id="logoPreview" style="margin-bottom:8px;"></div>
@@ -683,7 +700,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
         <input type="file" id="logoFile" accept="image/*" style="display:none;" onchange="handleLogo(this)">
       </div>
 
-      <div class="set-sub">
+      <div class="set-sub" id="setgrp-farmname">
         <strong>Farm Name</strong>
         <p style="color:#888;font-size:13px;">Used in exported XML filename.</p>
         <input id="farmNameInput" placeholder="e.g. Living the Life Farm" style="width:100%;box-sizing:border-box;" oninput="localStorage.setItem(LS.farmName, this.value.trim()); updateFarmNameSubtitle();">
@@ -697,6 +714,15 @@ header { flex-direction:column; gap:0; align-items:stretch; }
           Enable Standalone Mode
         </label>
         <div id="standaloneNote" style="font-size:13px;color:#c90;margin-top:6px;display:none;">⚠️ farmOS sync disabled. Use Data screen to export XML.</div>
+        <div id="standaloneRoleRow" style="display:none;margin-top:12px;">
+          <strong style="font-size:14px;">User Role</strong>
+          <p style="color:#888;font-size:13px;margin:4px 0 6px;">Controls what this user can do. Set to Worker or Viewer for farm hands.</p>
+          <select id="standaloneRoleSelect" onchange="setStandaloneRole(this.value)" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+            <option value="farm_manager">Manager — full access</option>
+            <option value="farm_worker">Worker — can log and sync, no config changes</option>
+            <option value="farm_viewer">Viewer — read only, can import and print reports</option>
+          </select>
+        </div>
       </div>
 
       <div class="set-sub">
@@ -806,8 +832,8 @@ header { flex-direction:column; gap:0; align-items:stretch; }
   <div class="box">
     <div style="display:flex;align-items:center;gap:8px;"><strong>Export XML</strong><span onclick="showHint('Full backup of all your logs, animals, and stock inventory. Use the same filename every time to overwrite the old backup. Import this file on another device to transfer your data.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></div>
     <p style="color:#888;font-size:13px;">Exports all logs — goats, birds, and stock. Share to email, Google Drive, USB, or any app.</p>
-    <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
-    <button onclick="exportXML('download')" class="wide secondary" style="margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="exportXML(\'share\')" class="export-xml-btn" class="wide">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML(\'download\')" class="export-xml-btn" class="wide secondary" style="margin-top:8px;">💾 Save to Downloads</button>
   </div>
   <div class="box">
     <strong>Import XML</strong>
@@ -1030,15 +1056,15 @@ header { flex-direction:column; gap:0; align-items:stretch; }
     <div id="connStatusLine2" style="font-size:13px;color:#888;margin-bottom:8px;"></div>
     <p style="color:#888;font-size:13px;">Unsynced local logs: <span id="unsyncedCount">0</span></p>
     <button onclick="fetchAnimalUUIDs()" class="wide secondary" style="margin-bottom:8px;">⬇️ Fetch Logs from farmOS</button>
-    <button onclick="syncToFarmOS()" style="width:100%;">⬆️ Push to farmOS</button>
+    <button onclick="syncToFarmOS()" class="sync-push-btn" style="width:100%;">⬆️ Push to farmOS</button>
     <div id="syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
   </div>
   <!-- Standalone export — shown in standalone mode -->
   <div class="box" id="gd-syncStandaloneBox" style="display:none;">
     <strong>📦 Standalone Data</strong>
     <p style="color:#888;font-size:13px;margin:4px 0 8px;">Export or import all farm logs as XML.</p>
-    <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
-    <button onclick="exportXML('download')" class="secondary wide" style="margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="exportXML(\'share\')" class="export-xml-btn" class="wide">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML(\'download\')" class="export-xml-btn" class="secondary wide" style="margin-top:8px;">💾 Save to Downloads</button>
     <button onclick="document.getElementById('xmlImportFile').click()" class="secondary wide" style="margin-top:8px;">📥 Import XML</button>
   </div>
 </div>
@@ -1203,7 +1229,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
   <div class="box" id="sd-syncFarmOSBox">
     <strong>🔄 FarmOS Sync</strong>
     <p style="color:#888;font-size:13px;margin:4px 0 0;">Unsynced items: <span id="sd-unsyncedCount">0</span></p>
-    <button onclick="sd_syncToFarmOS()" style="width:calc(100% - 10px);margin-top:10px;">⬆️ Push to farmOS</button>
+    <button onclick="sd_syncToFarmOS()" class="sync-push-btn" style="width:calc(100% - 10px);margin-top:10px;">⬆️ Push to farmOS</button>
     <button onclick="refreshAssets()" class="secondary" style="width:calc(100% - 10px);">⬇️ Fetch Inventory</button>
     <div id="sd-syncLog" style="margin-top:10px;font-size:13px;color:#888;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
   </div>
@@ -1211,8 +1237,8 @@ header { flex-direction:column; gap:0; align-items:stretch; }
   <div class="box" id="sd-syncStandaloneBox" style="display:none;">
     <strong>📦 Standalone Data</strong>
     <p style="color:#888;font-size:13px;margin:4px 0 8px;">Export or import all farm logs as XML.</p>
-    <button onclick="exportXML('share')" style="width:calc(100% - 10px);">📤 Share (Email, Drive...)</button>
-    <button onclick="exportXML('download')" class="secondary" style="width:calc(100% - 10px);margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="exportXML(\'share\')" class="export-xml-btn" style="width:calc(100% - 10px);">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML(\'download\')" class="export-xml-btn" class="secondary" style="width:calc(100% - 10px);margin-top:8px;">💾 Save to Downloads</button>
     <button onclick="document.getElementById('xmlImportFile').click()" class="secondary" style="width:calc(100% - 10px);margin-top:8px;">📥 Import XML</button>
   </div>
 </div>
@@ -1236,7 +1262,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
 <div id="bd-screen-birds" class="screen active">
   <div class="box" style="display:flex;gap:8px;align-items:center;">
     <input id="bd-search" placeholder="Search tag or name..." oninput="bd_renderBirds()" style="flex:1;margin:0;">
-    <button onclick="bd_openAddBird()" style="margin:0;padding:12px 16px;font-size:20px;">+</button>
+    <button id="bd-add-btn" onclick="bd_openAddBird()" style="margin:0;padding:12px 16px;font-size:20px;">+</button>
   </div>
   <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
     <button class="sm secondary" onclick="bd_setSpeciesFilter('')" id="bd-fAll">All</button>
@@ -1307,7 +1333,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
       &nbsp;|&nbsp;
       Last sync: <span id="bd-last-sync" style="color:#888;">Never</span>
     </div>
-    <button onclick="bd_syncToFarmOS()" class="wide">⬆️ Push to farmOS</button>
+    <button onclick="bd_syncToFarmOS()" class="wide sync-push-btn">⬆️ Push to farmOS</button>
   </div>
   <div class="box" id="bd-connBox">
     <strong>Connection</strong>
@@ -1320,8 +1346,8 @@ header { flex-direction:column; gap:0; align-items:stretch; }
   <div class="box" id="bd-syncStandaloneBox" style="display:none;">
     <strong>📦 Standalone Data</strong>
     <p style="color:#888;font-size:13px;margin:4px 0 8px;">Export or import all farm logs as XML.</p>
-    <button onclick="exportXML('share')" class="wide">📤 Share (Email, Drive...)</button>
-    <button onclick="exportXML('download')" class="secondary wide" style="margin-top:8px;">💾 Save to Downloads</button>
+    <button onclick="exportXML(\'share\')" class="export-xml-btn" class="wide">📤 Share (Email, Drive...)</button>
+    <button onclick="exportXML(\'download\')" class="export-xml-btn" class="secondary wide" style="margin-top:8px;">💾 Save to Downloads</button>
     <button onclick="document.getElementById('xmlImportFile').click()" class="secondary wide" style="margin-top:8px;">📥 Import XML</button>
   </div>
   <div class="box">
@@ -1519,11 +1545,23 @@ const LS = {
   farmName:       "farmdesk_farmName",
   activeUser:     "farmdesk_activeUser",
   users:          "farmdesk_users",
+  userRole:       "farmdesk_user_role",  // standalone role: farm_manager|farm_worker|farm_viewer
   // Per-URL log storage — key is farmdesk_logs_<urlhash>
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
 
-const APP_VERSION = "1782363539"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+// ===== ROLE HELPERS =====
+// Returns detected role from farmOS auth, or manually set role in standalone mode.
+// Defaults to farm_manager so existing installs are unaffected.
+function getUserRole() {
+  return localStorage.getItem(LS.userRole) || "farm_manager";
+}
+function isManager() { return getUserRole() === "farm_manager"; }
+function isWorker()  { return getUserRole() === "farm_worker"; }
+function isViewer()  { return getUserRole() === "farm_viewer"; }
+function canWrite()  { return !isViewer(); }  // managers and workers can write
+
+const APP_VERSION = "1782365523"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3346,8 +3384,38 @@ function showHint(msg) {
 
 function setStandaloneMode(on) {
   localStorage.setItem(LS.standalone, on ? "1" : "0");
+  // Reset to manager when turning standalone off
+  if (!on) localStorage.setItem(LS.userRole, "farm_manager");
   renderSettings();
+  applyRoleUI();
   showToast(on ? "✅ Standalone mode on" : "✅ farmOS sync mode on");
+}
+
+function setStandaloneRole(role) {
+  localStorage.setItem(LS.userRole, role);
+  applyRoleUI();
+  showToast("✅ Role set to " + role.replace("farm_",""));
+}
+
+// ===== ROLE-BASED UI GATING =====
+// Applies CSS classes to body so roles work on dynamically rendered content too.
+// manager: full access. worker: no config changes. viewer: read only.
+function applyRoleUI() {
+  var role = getUserRole();
+  document.body.classList.remove("role-manager", "role-worker", "role-viewer");
+  document.body.classList.add("role-" + role.replace("farm_", ""));
+
+  // Show role indicator in header for non-managers
+  var roleIndicator = document.getElementById("roleIndicator");
+  if (!roleIndicator) {
+    roleIndicator = document.createElement("small");
+    roleIndicator.id = "roleIndicator";
+    roleIndicator.style.cssText = "color:#c90;font-size:11px;font-weight:bold;";
+    var syncStatus = document.getElementById("syncStatus");
+    if (syncStatus) syncStatus.parentNode.insertBefore(roleIndicator, syncStatus);
+  }
+  roleIndicator.textContent = role === "farm_worker" ? "⚒️ Worker" : role === "farm_viewer" ? "👁️ Viewer" : "";
+  roleIndicator.style.display = role === "farm_manager" ? "none" : "";
 }
 
 function setActiveUser(name) {
@@ -3945,6 +4013,10 @@ function renderSettings() {
   var isStandalone = localStorage.getItem(LS.standalone) === "1";
   if (standaloneToggle) standaloneToggle.checked = isStandalone;
   if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
+  var standaloneRoleRow = document.getElementById("standaloneRoleRow");
+  var standaloneRoleSelect = document.getElementById("standaloneRoleSelect");
+  if (standaloneRoleRow) standaloneRoleRow.style.display = isStandalone ? "" : "none";
+  if (standaloneRoleSelect) standaloneRoleSelect.value = getUserRole();
   var syncAllBtn = document.getElementById("syncAllBtn");
   if (syncAllBtn) syncAllBtn.style.display = isStandalone ? "none" : "";
   var farmosConnSub = document.getElementById("setgrp-farmos-conn");
@@ -7006,14 +7078,18 @@ async function getToken(cfg) {
     [proxyBase,  true],
     [directBase, false],
   ]) {
-    try {
-      const token = await tryAuth(url, "farm_manager");
-      if (token) {
-        window._useProxy = useProxy;
-        window._isManagerScope = true;
-        return token;
-      }
-    } catch(e) { /* try next */ }
+    for (const scope of ["farm_manager", "farm_worker", "farm_viewer"]) {
+      try {
+        const token = await tryAuth(url, scope);
+        if (token) {
+          window._useProxy = useProxy;
+          window._userScope = scope;
+          window._isManagerScope = (scope === "farm_manager");
+          localStorage.setItem(LS.userRole, scope);
+          return token;
+        }
+      } catch(e) { /* try next */ }
+    }
   }
   throw new Error("Auth failed — " + (lastErr || "check credentials and URL"));
 }
@@ -7181,6 +7257,7 @@ async function testFarmOS() {
 
       el.innerHTML = html;
       el.style.color = "#3a7";
+      applyRoleUI(); // role detected during getToken — update UI now
     } else {
       el.textContent = "❌ API error: " + res.status;
       el.style.color = "#c00";
@@ -13614,6 +13691,7 @@ renderNewItemCatOptions();
 renderDashboard();
 populateInjectionSelects();
 updateSyncBadge();
+applyRoleUI();
 
 // ===== SHARED MODAL ENGINE =====
 // openModal()    — general purpose edit/form modal (title, scrollable fields, save/cancel)
@@ -14141,9 +14219,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button onclick="closeEdit()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
     </div>
     <div id="editFields"></div>
-    <div style="display:flex;gap:8px;margin-top:12px;">
-      <button id="modalSaveBtn" onclick="saveEdit()" style="flex:1;margin:0;">💾 Save</button>
-      <button id="modalCancelBtn" onclick="closeEdit()" class="secondary" style="flex:1;margin:0;">Cancel</button>
+    <div style="margin-top:12px;">
+      <button id="modalSaveBtn" onclick="saveEdit()" style="width:100%;margin:0;">💾 Save</button>
     </div>
   </div>
 </div>
@@ -14156,9 +14233,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button onclick="closeMoveModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
     </div>
     <div id="moveFields"></div>
-    <div style="display:flex;gap:8px;margin-top:12px;">
-      <button id="moveSaveBtn" onclick="saveMoveLog()" style="flex:1;margin:0;">💾 Save</button>
-      <button onclick="closeMoveModal()" class="secondary" style="flex:1;margin:0;">Cancel</button>
+    <div style="margin-top:12px;">
+      <button id="moveSaveBtn" onclick="saveMoveLog()" style="width:100%;margin:0;">💾 Save</button>
     </div>
   </div>
 </div>
@@ -14214,9 +14290,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button onclick="closeBatchEditModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
     </div>
     <div id="batchEditContent"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button onclick="saveBatchEdit()" style="flex:1;margin:0;">💾 Save Batch</button>
-      <button onclick="closeBatchEditModal()" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">Cancel</button>
+    <div style="margin-top:14px;">
+      <button onclick="saveBatchEdit()" style="width:100%;margin:0;">💾 Save Batch</button>
     </div>
   </div>
 </div>
