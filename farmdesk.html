@@ -4416,7 +4416,7 @@ async function setAnimalFlag(name, flag, on) {
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Not connected to farmOS'); return; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
@@ -5180,7 +5180,7 @@ async function createPurchaseLog(animalName, details) {
   var uuid = animalUUIDs[animalName];
   if (!uuid) { return { ok: false, reason: 'no-uuid' }; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var relationships = { asset: { data: [{ type: 'asset--animal', id: uuid }] } };
     var priceRef = await buildPriceQuantityRef(details && details.unitPrice, token);
     if (priceRef) relationships.quantity = { data: [priceRef] };
@@ -5212,7 +5212,7 @@ async function archiveAnimalWithLog(animalName, logBundle, details) {
   var uuid = animalUUIDs[animalName];
   if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
     var attrs = {
       name: (logBundle === 'sale' ? 'Sale: ' : 'Death: ') + animalName,
@@ -5459,7 +5459,7 @@ async function retypeAnimal(animalUUID, newTypeName, cfgKey) {
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
   if (!animalUUID) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var typeId = await ensureAnimalTypeUUID(newTypeName, token);
     if (!typeId) { showToast('⚠️ Could not resolve type'); return false; }
     var payload = { data: {
@@ -5562,7 +5562,7 @@ async function pushGoatGroupAssign(animalName, groupName) {
   var animalUUID = animalUUIDs[animalName];
   if (!animalUUID) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var groupId = groupName ? await ensureGoatGroupUUID(groupName, token) : null;
     var payload = { data: {
       type: 'log--activity',
@@ -5837,7 +5837,7 @@ async function pushAnimalProfilePhoto(name, dataUrl) {
   var uuid = animalUUIDs[name];
   if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var blob = await (await fetch(dataUrl)).blob();
     var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid + '/image'), {
       method: 'POST',
@@ -5868,7 +5868,7 @@ async function pushAnimalProfileCore(name, fields) {
   var uuid = animalUUIDs[name];
   if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var attrs = {};
     Object.assign(attrs, sexToFarmOS(fields.sex));
     if (fields.birthdate) attrs.birthdate = fields.birthdate;
@@ -7085,13 +7085,25 @@ async function getToken(cfg) {
           window._useProxy = useProxy;
           window._userScope = scope;
           window._isManagerScope = (scope === "farm_manager");
+          window._lastAuthToken = token;
+          window._lastAuthTime = Date.now();
           localStorage.setItem(LS.userRole, scope);
+          if (typeof applyRoleUI === 'function') applyRoleUI();
           return token;
         }
       } catch(e) { /* try next */ }
     }
   }
   throw new Error("Auth failed — " + (lastErr || "check credentials and URL"));
+}
+
+// Returns cached token if < 4 minutes old, otherwise fetches a new one.
+// farmOS access tokens last 5 minutes — reusing within 4 min avoids
+// redundant auth round trips and flood lockout risk on Farmier.
+async function getCachedToken(cfg) {
+  const age = Date.now() - (window._lastAuthTime || 0);
+  if (window._lastAuthToken && age < 4 * 60 * 1000) return window._lastAuthToken;
+  return await getToken(cfg);
 }
 function apiUrl(path) {
   return window._useProxy ? "/proxy" + path : (JSON.parse(localStorage.getItem(LS.cfg) || "{}").url || "") + path;
@@ -7216,7 +7228,7 @@ async function testFarmOS() {
   el.style.color = "#888";
   el.textContent = "Connecting...";
   try {
-    const token = await getToken(cfg);
+    const token = await getCachedToken(cfg);
     const res = await fetchWithTimeout(apiUrl("/api"), {
       headers: { "Authorization": "Bearer " + token }
     });
@@ -7439,8 +7451,7 @@ async function fetchAnimalUUIDs(silent = false) {
   const el = document.getElementById("farmosTestResult");
 
   try {
-    const token = await getToken(cfgSaved);
-    window._lastAuthToken = token; // cache for lazyLoadPhotos photo-url fallback
+    const token = await getCachedToken(cfgSaved);
     const authHeaders = {
       "Authorization": "Bearer " + token,
       "Accept": "application/vnd.api+json"
@@ -8508,7 +8519,7 @@ async function syncToFarmOS() {
 
   let token;
   try {
-    token = await getToken(cfg);
+    token = await getCachedToken(cfg);
     window._lastAuthToken = token; // cache for lazyLoadPhotos photo-url fallback
     logEl.textContent += "✅ Token OK\n";
   } catch(e) {
@@ -9395,10 +9406,9 @@ async function refreshAssets(silent) {
   }
   if (!silent) setLoading(true, 'Fetching inventory...');
   try {
-    const token = await getToken(cfg);
+    const token = await getCachedToken(cfg);
     const h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
     sd_loadTaxonomy(h); // refresh this farm's categories/units in the background
-    let url = apiUrl('/api/asset/material?page[limit]=50&filter[archived]=0');
     let all = [];
     while (url) {
       const res = await fetchWithTimeout(url, { headers: h });
@@ -10298,7 +10308,7 @@ async function sd_syncToFarmOS() {
   logEl.textContent = 'Authenticating...\n';
   let token;
   try {
-    token = await getToken(cfg);
+    token = await getCachedToken(cfg);
     logEl.textContent += '✅ Token OK\n';
   } catch(e) {
     logEl.textContent += '❌ Auth failed: ' + e.message + '\n';
@@ -10997,7 +11007,7 @@ async function bd_fetchAssets() {
   bd_setLoading(true, 'Fetching birds from farmOS...');
   var el = document.getElementById('bd-test-result');
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var h = bd_authHeaders(token);
     var res = await fetchWithTimeout(apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -11336,7 +11346,7 @@ async function bd_syncToFarmOS() {
   var logEl = document.getElementById('bd-sync-log'); if (logEl) logEl.textContent = '';
   var synced = 0, failed = 0;
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     for (var i = 0; i < unsynced.length; i++) {
       var item = unsynced[i];
       try {
@@ -11729,7 +11739,7 @@ async function bd_archiveBirdWithLog(birdId, logBundle, details) {
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === birdId; })[0];
   if (!bird || !bird.uuid) { bd_toast('⚠️ Sync first — bird not yet synced'); return false; }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var headers = bd_postHeaders(token);
     var label = bird.tag || bird.name || 'Bird';
     var attrs = {
@@ -12914,7 +12924,7 @@ async function syncAllModules() {
   }
   var token;
   try {
-    token = await getToken(cfg);
+    token = await getCachedToken(cfg);
   } catch(e) {
     if (statusEl) { statusEl.textContent = '⚠️ Auth failed: ' + e.message; statusEl.style.color = '#c66'; }
     showToast('⚠️ Auth failed');
@@ -13356,7 +13366,7 @@ async function ledgerFetch() {
     return;
   }
   try {
-    var token = await getToken(cfg);
+    var token = await getCachedToken(cfg);
     var h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
 
     var farmoEntries = [];
