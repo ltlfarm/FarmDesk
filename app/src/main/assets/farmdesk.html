@@ -1564,7 +1564,7 @@ function isWorker()  { return getUserRole() === "farm_worker"; }
 function isViewer()  { return getUserRole() === "farm_viewer"; }
 function canWrite()  { return !isViewer(); }  // managers and workers can write
 
-const APP_VERSION = "1782370086"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782410368"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
