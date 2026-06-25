@@ -7272,6 +7272,14 @@ async function testFarmOS() {
       el.innerHTML = html;
       el.style.color = "#3a7";
       applyRoleUI(); // role detected during getToken — update UI now
+      // Auto-populate Active User with farmOS username if no users set yet
+      var existingUsers = JSON.parse(localStorage.getItem(LS.users) || "[]");
+      if (!existingUsers.length && cfg.user) {
+        existingUsers.push(cfg.user);
+        localStorage.setItem(LS.users, JSON.stringify(existingUsers));
+        localStorage.setItem(LS.activeUser, cfg.user);
+        renderSettings();
+      }
     } else {
       el.textContent = "❌ API error: " + res.status;
       el.style.color = "#c00";
