@@ -1561,7 +1561,7 @@ function isWorker()  { return getUserRole() === "farm_worker"; }
 function isViewer()  { return getUserRole() === "farm_viewer"; }
 function canWrite()  { return !isViewer(); }  // managers and workers can write
 
-const APP_VERSION = "1782367210"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782367825"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3893,7 +3893,8 @@ function renderSettings() {
   const dbgLine = document.getElementById("cfgDebugLine");
   if (dbgLine) {
     const sdCfg = JSON.parse(localStorage.getItem("farmdesk_cfg") || "null");
-    dbgLine.textContent = "Debug — farmdesk_cfg: " + (sdCfg ? JSON.stringify({url: sdCfg.url, user: sdCfg.user, pass: sdCfg.pass ? "***" : "(empty)"}) : "null/missing");
+    const detectedRole = localStorage.getItem(LS.userRole) || "farm_manager (default)";
+    dbgLine.textContent = "Debug — farmdesk_cfg: " + (sdCfg ? JSON.stringify({url: sdCfg.url, user: sdCfg.user, pass: sdCfg.pass ? "***" : "(empty)"}) : "null/missing") + " | role: " + detectedRole;
   }
   const connLine = document.getElementById("connStatusLine");
   if (connLine) connLine.textContent = cfg.url ? "✅ Connected: " + cfg.url : "❌ Not configured";
