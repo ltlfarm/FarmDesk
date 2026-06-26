@@ -1564,7 +1564,7 @@ function isWorker()  { return getUserRole() === "farm_worker"; }
 function isViewer()  { return getUserRole() === "farm_viewer"; }
 function canWrite()  { return !isViewer(); }  // managers and workers can write
 
-const APP_VERSION = "1782410368"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "1782455553"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9420,6 +9420,7 @@ async function refreshAssets(silent) {
     const h = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
     sd_loadTaxonomy(h); // refresh this farm's categories/units in the background
     let all = [];
+    let url = apiUrl('/api/asset/material?page[limit]=50&filter[archived]=0');
     while (url) {
       const res = await fetchWithTimeout(url, { headers: h });
       if (!res.ok) throw new Error('Fetch failed: HTTP ' + res.status);
@@ -11315,10 +11316,31 @@ async function bd_fetchLogs(token, cfg) {
   // Local unsynced entries (synced:false) always win.
   var localByFarmOSId = {};
   bd_history.forEach(function(l, i) { if (l.farmosUUID) localByFarmOSId[l.farmosUUID] = i; });
+  // Secondary dedup: match by timestamp+type+birdId for local entries not yet pushed
+  // This prevents a local unsynced entry from doubling up when the same log is pulled from farmOS
+  var localBySignature = {};
+  bd_history.forEach(function(l, i) {
+    if (!l.farmosUUID && !l.synced) {
+      var sig = (l.type || '') + '|' + (l.birdId || '') + '|' + (l.timestamp || '');
+      localBySignature[sig] = i;
+    }
+  });
   var added = 0, updated = 0;
   fetchedLogs.forEach(function(l) {
     var idx = localByFarmOSId[l.farmosUUID];
-    if (idx === undefined) { bd_history.unshift(l); added++; }
+    if (idx === undefined) {
+      // Check signature match — stamp farmosUUID and mark synced instead of adding duplicate
+      var sig = (l.type || '') + '|' + (l.birdId || '') + '|' + (l.timestamp || '');
+      var sigIdx = localBySignature[sig];
+      if (sigIdx !== undefined) {
+        bd_history[sigIdx].farmosUUID = l.farmosUUID;
+        bd_history[sigIdx].farmosBundle = l.farmosBundle;
+        bd_history[sigIdx].synced = true;
+        updated++;
+        return;
+      }
+      bd_history.unshift(l); added++;
+    }
     else if (bd_history[idx].synced) { bd_history[idx] = l; updated++; }
   });
   if (added || updated) {
