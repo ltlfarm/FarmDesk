@@ -303,7 +303,8 @@ button.sm { padding:10px 16px; font-size:15px; margin:3px; }
 body { overflow-x:hidden; }
 header { flex-direction:column; gap:0; align-items:stretch; }
 
-/* ===== BIRDDESK MODULE STYLES ===== */ background:#2a2a2a; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; border-left:4px solid #3a7; cursor:pointer; }
+/* ===== BIRDDESK MODULE STYLES ===== */
+.bird-card { background:#2a2a2a; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; border-left:4px solid #3a7; cursor:pointer; }
 .bird-card:active { opacity:0.8; }
 .bird-card .bird-info { flex:1; }
 .bird-card .bird-tag { font-weight:bold; font-size:16px; color:#3a7; }
@@ -2835,7 +2836,7 @@ function saveStep() {
       var batchSire  = document.getElementById("f_sire")?.value || "";
       var batchNotes = document.getElementById("f_birthnotes")?.value || "";
       var batchSpecies = (animalProfiles[goats[herdIndex]] && animalProfiles[goats[herdIndex]].type) || 'Goat';
-      createBatch('goat', batchSpecies, (animalProfiles[goats[herdIndex]] && animalProfiles[goats[herdIndex]].breed) || '', batchCount, batchDam, batchSire, '', batchNotes);
+      createBatch('goat', batchSpecies, (animalProfiles[goats[herdIndex]] && animalProfiles[goats[herdIndex]].breed) || '', batchCount, batchDam, batchSire, '', batchNotes, ts);
       currentPhoto = null;
       currentFileAttach = null;
       showToast('✅ Batch of ' + batchCount + ' kids recorded');
@@ -2905,7 +2906,7 @@ function saveStep() {
     currentFileAttach = null;
     // Queue inventory decrements for supplies
     if (procSupplies.length > 0) {
-      procQueueSupplyDecrements(procSupplies, g, new Date().toISOString());
+      procQueueSupplyDecrements(procSupplies, g, entry.time || new Date().toISOString());
     }
     saveFollowup(g, "proc", { proc: entry.data.proc, method: entry.data.method });
   }
@@ -2991,7 +2992,7 @@ function saveAndHome() {
   if (banner) banner.style.display = 'none';
   if (_lastSavedEntry && _lastSavedEntry.type === 'med') {
     const e = _lastSavedEntry;
-    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat'), 100);
+    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat', e.time), 100);
   }
   if (_taskFromDashboard) {
     _taskFromDashboard = false;
@@ -3005,7 +3006,7 @@ function nextAction() {
   if (!saveStep()) return;
   if (_lastSavedEntry && _lastSavedEntry.type === 'med') {
     const e = _lastSavedEntry;
-    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat'), 100);
+    setTimeout(() => medDeductPrompt(e.data.med, e.data.dose, e.data.unit || 'ml', e.goat, 'goat', e.time), 100);
   }
 
   step++;
@@ -4642,35 +4643,35 @@ function savePendingActions() { localStorage.setItem(PENDING_ACTIONS_LS_KEY, JSO
 // same type for the same animal instead of stacking redundant pushes.
 // Discrete events (sell/death/move/purchase/batch actions) never dedupe —
 // each is its own real transaction and must be preserved.
-function queuePendingAction(type, payload, dedupeByAnimal) {
+function queuePendingAction(type, payload, dedupeByAnimal, eventISO) {
   if (dedupeByAnimal && payload && payload.animalName) {
     pendingActions = pendingActions.filter(function(a) { return a.synced || a.type !== type || a.payload.animalName !== payload.animalName; });
   }
-  var a = { id: 'pa_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), type: type, payload: payload, createdAt: new Date().toISOString(), synced: false, lastError: null };
+  var a = { id: 'pa_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), type: type, payload: payload, createdAt: eventISO || new Date().toISOString(), synced: false, lastError: null };
   pendingActions.push(a);
   savePendingActions();
   return a;
 }
 
-function createBatch(module, species, breed, count, parentDam, parentSire, groupName, notes) {
+function createBatch(module, species, breed, count, parentDam, parentSire, groupName, notes, bornDateISO) {
   var b = {
     id: 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     module: module, // 'bird' | 'goat'
     label: '',
     species: species,
     breed: breed || '',
-    parentDam: parentDam || '',   // kept for farmOS birth log mother relationship (first dam)
-    parentSire: parentSire || '', // kept for farmOS (first sire)
+    parentDam: parentDam || '',
+    parentSire: parentSire || '',
     parentDams: parentDam ? [parentDam] : [],
     parentSires: parentSire ? [parentSire] : [],
     groupName: groupName || '',
-    bornDate: new Date().toISOString(),
+    bornDate: bornDateISO || new Date().toISOString(),
     originalCount: count,
     count: count,
     notes: notes || '',
     productUUID: null,
     logUUID: null,
-    labelSynced: true, // false when label edited after first sync — triggers PATCH
+    labelSynced: true,
     synced: false
   };
   batches.push(b);
@@ -4788,28 +4789,30 @@ function _addBatchHistoryEntry(b, entry) {
   }
 }
 
-function sellFromBatch(batchId, count, unitPrice, notes) {
+function sellFromBatch(batchId, count, unitPrice, notes, eventISO) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return false;
   if (!count || count <= 0 || count > b.count) { showToast('⚠️ Enter a valid count (1–' + b.count + ')'); return false; }
+  var iso = eventISO || new Date().toISOString();
   b.count -= count;
   saveBatches();
-  queuePendingAction('batchSell', { batchId: batchId, count: count, unitPrice: unitPrice, notes: notes, species: b.species });
-  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'sale', ts: new Date().toISOString(), synced: false,
+  queuePendingAction('batchSell', { batchId: batchId, count: count, unitPrice: unitPrice, notes: notes, species: b.species }, false, iso);
+  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'sale', ts: iso, timestamp: String(Math.floor(new Date(iso).getTime()/1000)), timeISO: iso, synced: false,
     data: { animal: b.species + ' batch', count: count, unitPrice: unitPrice || '', notes: notes || '',
       summary: 'Batch sale: ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice + '/head' : '') },
     logName: 'Sale - ' + count + ' ' + b.species + (unitPrice ? ' @ $' + unitPrice : '') + (notes ? ' — ' + notes : '') });
   return true;
 }
 
-function markBatchDied(batchId, count, notes) {
+function markBatchDied(batchId, count, notes, eventISO) {
   var b = batches.find(function(x) { return x.id === batchId; });
   if (!b) return false;
   if (!count || count <= 0 || count > b.count) { showToast('⚠️ Enter a valid count (1–' + b.count + ')'); return false; }
+  var iso = eventISO || new Date().toISOString();
   b.count -= count;
   saveBatches();
-  queuePendingAction('batchDied', { batchId: batchId, count: count, notes: notes, species: b.species });
-  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'obs', ts: new Date().toISOString(), synced: false,
+  queuePendingAction('batchDied', { batchId: batchId, count: count, notes: notes, species: b.species }, false, iso);
+  _addBatchHistoryEntry(b, { id: 'bh_' + Date.now(), type: 'obs', ts: iso, timestamp: String(Math.floor(new Date(iso).getTime()/1000)), timeISO: iso, synced: false,
     data: { animal: b.species + ' batch', count: count, notes: notes || '',
       summary: 'Batch death: ' + count + ' ' + b.species },
     logName: 'Death - ' + count + ' ' + b.species + (notes ? ' — ' + notes : '') });
@@ -4846,6 +4849,7 @@ function openBatchSellModal(batchId) {
   document.getElementById('batchActionPriceRow').style.display = '';
   document.getElementById('batchActionPrice').value = '';
   document.getElementById('batchActionNotes').value = '';
+  var _n=new Date();_n.setSeconds(0,0);document.getElementById('batchActionDate').value=bd_localISO(_n).slice(0,16);
   document.getElementById('batchActionConfirmBtn').textContent = 'Confirm Sale';
   document.getElementById('batchActionModal').style.display = 'block';
 }
@@ -4859,8 +4863,65 @@ function openBatchDiedModal(batchId) {
   document.getElementById('batchActionCount').max = b.count;
   document.getElementById('batchActionPriceRow').style.display = 'none';
   document.getElementById('batchActionNotes').value = '';
+  var _n=new Date();_n.setSeconds(0,0);document.getElementById('batchActionDate').value=bd_localISO(_n).slice(0,16);
   document.getElementById('batchActionConfirmBtn').textContent = 'Confirm';
   document.getElementById('batchActionModal').style.display = 'block';
+}
+
+// ===== BATCH ADD HATCH =====
+// Adds more hatched animals to an existing batch — e.g. incubator eggs that
+// hatched later. Increments both count AND originalCount, creates a history
+// entry, and queues a farmOS birth log increment.
+var _batchAddHatchId = null;
+
+function openBatchAddHatchModal(batchId) {
+  var b = batches.find(function(x) { return x.id === batchId; });
+  if (!b) return;
+  _batchAddHatchId = batchId;
+  document.getElementById('batchAddHatchTitle').textContent = '🥚 Add Hatch to ' + (b.label || b.species + ' batch');
+  document.getElementById('batchAddHatchCount').value = '';
+  document.getElementById('batchAddHatchParent').value = '';
+  document.getElementById('batchAddHatchNotes').value = '';
+  var n = new Date(); n.setSeconds(0,0);
+  document.getElementById('batchAddHatchDate').value = bd_localISO(n).slice(0,16);
+  document.getElementById('batchAddHatchModal').style.display = 'block';
+}
+
+function confirmBatchAddHatch() {
+  var batchId = _batchAddHatchId;
+  var b = batches.find(function(x) { return x.id === batchId; });
+  if (!b) return;
+  var count = parseInt(document.getElementById('batchAddHatchCount').value);
+  if (!count || count <= 0) { showToast('⚠️ Enter how many hatched'); return; }
+  var parent = document.getElementById('batchAddHatchParent').value.trim();
+  var notes  = document.getElementById('batchAddHatchNotes').value.trim();
+  var dateVal = document.getElementById('batchAddHatchDate').value;
+  var iso = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
+  var ts  = String(Math.floor(new Date(iso).getTime() / 1000));
+
+  // Update batch counts
+  b.count         += count;
+  b.originalCount += count;
+  if (parent && b.parentDams && b.parentDams.indexOf(parent) < 0) b.parentDams.push(parent);
+  saveBatches();
+
+  // Queue farmOS birth log + quantity increment
+  queuePendingAction('batchHatch', { batchId: batchId, count: count, parent: parent, notes: notes, species: b.species }, false, iso);
+
+  // Add history entry
+  _addBatchHistoryEntry(b, {
+    id: 'bh_' + Date.now(), type: 'hatch',
+    timestamp: ts, timeISO: iso, synced: false,
+    hatchSpecies: b.species, hatchBreed: b.breed || '',
+    hatchCount: count, hatchParent: parent,
+    notes: notes,
+    logName: 'Hatch - ' + b.species + ' batch x' + count + (parent ? ' (source: ' + parent + ')' : '')
+  });
+
+  document.getElementById('batchAddHatchModal').style.display = 'none';
+  showToast('✅ ' + count + ' added to batch');
+  if (typeof bd_renderBirds === 'function') bd_renderBirds();
+  if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
 }
 
 function closeBatchActionModal() {
@@ -4872,13 +4933,15 @@ function confirmBatchAction() {
   if (!_batchActionPending) return;
   var count = parseInt(document.getElementById('batchActionCount').value);
   var notes = document.getElementById('batchActionNotes').value || '';
+  var dateVal = document.getElementById('batchActionDate').value;
+  var eventISO = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
   var ok = false;
   var pending = _batchActionPending;
   if (pending.action === 'sell') {
     var price = parseFloat(document.getElementById('batchActionPrice').value);
-    ok = sellFromBatch(pending.batchId, count, isNaN(price) ? null : price, notes);
+    ok = sellFromBatch(pending.batchId, count, isNaN(price) ? null : price, notes, eventISO);
   } else if (pending.action === 'died') {
-    ok = markBatchDied(pending.batchId, count, notes);
+    ok = markBatchDied(pending.batchId, count, notes, eventISO);
   }
   if (ok) {
     showToast('✅ Saved locally — will sync to farmOS next push');
@@ -8296,7 +8359,7 @@ async function processPendingGoatActions(token, logFn) {
 }
 
 async function processPendingBatchActions(token, logFn) {
-  var items = pendingActions.filter(function(a) { return !a.synced && ['batchSell','batchDied','batchPromote'].indexOf(a.type) !== -1; });
+  var items = pendingActions.filter(function(a) { return !a.synced && ['batchSell','batchDied','batchPromote','batchHatch'].indexOf(a.type) !== -1; });
   var ok = 0, skipped = 0, fail = 0;
   var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
   for (var i = 0; i < items.length; i++) {
@@ -8331,6 +8394,18 @@ async function processPendingBatchActions(token, logFn) {
         var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] } };
         var res3 = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
         if (!res3.ok) throw new Error('HTTP ' + res3.status);
+      } else if (a.type === 'batchHatch') {
+        // Increment the batch product quantity + push a birth log
+        var qPayloadH = { data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(a.payload.count), denominator: '1' }, inventory_adjustment: 'increment' }, relationships: { inventory_asset: { data: { type: 'asset--product', id: b.productUUID } } } } };
+        var qResH = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: headers, body: JSON.stringify(qPayloadH) });
+        if (!qResH.ok) throw new Error('HTTP ' + qResH.status);
+        var qDataH = await qResH.json();
+        var qUUIDH = qDataH?.data?.id, qRevIdH = qDataH?.data?.attributes?.drupal_internal__revision_id;
+        var hatchNote = ['Added ' + a.payload.count + ' ' + a.payload.species + ' to existing batch', a.payload.parent ? 'Source: ' + a.payload.parent : '', a.payload.notes || ''].filter(Boolean).join('\n');
+        var attrsH = { name: 'Hatch - ' + a.payload.species + ' batch x' + a.payload.count + (a.payload.parent ? ' (source: ' + a.payload.parent + ')' : ''), status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: hatchNote, format: 'default' } };
+        var relH = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUIDH, meta: { target_revision_id: qRevIdH } }] } };
+        var resH = await fetchWithTimeout(apiUrl('/api/log/birth'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--birth', attributes: attrsH, relationships: relH } }) });
+        if (!resH.ok) throw new Error('HTTP ' + resH.status);
       }
       a.synced = true; a.lastError = null; ok++;
       if (logFn) logFn('✅ ' + a.type + ' pushed\n');
@@ -11425,8 +11500,16 @@ async function bd_syncToFarmOS() {
     bd_history.forEach(function(l) {
       var p = bd_pending.filter(function(p) { return p.id === l.id; })[0];
       if (p && p.synced) {
+        // For logs that had a farmosUUID (were PATCHed), mark synced but
+        // keep the local edited values — the next pull will confirm them.
+        // Don't copy p.log back over l since p.log may have stale values.
         l.synced = true;
         if (p.log && p.log.farmosUUID) { l.farmosUUID = p.log.farmosUUID; l.farmosBundle = p.log.farmosBundle; }
+        // Preserve any timestamp/notes edits the user made on this log
+        if (p.log && p.log.timestamp && p.log.timestamp !== l.timestamp) {
+          l.timestamp = p.log.timestamp;
+          l.timeISO   = p.log.timeISO;
+        }
       }
     });
     localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
@@ -11998,6 +12081,7 @@ function openBatchProfile(batchId) {
       var label = a.type === 'batchSell'    ? '🏷️ Sold '    + (a.payload.count || 1)
                 : a.type === 'batchDied'    ? '💀 Died '    + (a.payload.count || 1)
                 : a.type === 'batchPromote' ? '⭐ Promoted 1 to individual'
+                : a.type === 'batchHatch'   ? '🥚 Hatched ' + (a.payload.count || 1) + (a.payload.parent ? ' (source: ' + a.payload.parent + ')' : '')
                 : a.type;
       var ts = a.createdAt ? new Date(a.createdAt).toLocaleString() : '';
       var sync = a.synced ? ' <span style="color:#3a7;font-size:11px;">✓</span>' : ' <span style="color:#c90;font-size:11px;">⏳</span>';
@@ -12015,6 +12099,9 @@ function openBatchProfile(batchId) {
         '<button onclick="closeProfile();openBatchSellModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b6500;min-width:80px;">🏷️ Sell</button>' +
         '<button onclick="closeProfile();openBatchDiedModal(\'' + batchId + '\');" style="flex:1;margin:0;background:#8b0000;min-width:80px;">💀 Died</button>' +
         '<button onclick="closeProfile();confirmPromoteFromBatch(\'' + batchId + '\');" style="flex:1;margin:0;background:#2a5a2a;min-width:80px;">⭐ Promote</button>' +
+      '</div>' +
+      '<div style="margin-top:8px;">' +
+        '<button onclick="closeProfile();openBatchAddHatchModal(\'' + batchId + '\');" style="width:100%;margin:0;background:#1a4a3a;">🥚 + Add Hatch</button>' +
       '</div>';
 
   document.getElementById('profile-modal-content').innerHTML =
@@ -12187,12 +12274,14 @@ async function bd_saveLog() {
 
     if (!trackIndividually) {
       // Batch mode (default) — one count, not N individual birds.
-      createBatch('bird', hatchSpecies, hatchBreed, count, hatchParent, '', hatchFlock, hatchNotes);
+      createBatch('bird', hatchSpecies, hatchBreed, count, hatchParent, '', hatchFlock, hatchNotes, new Date(timeVal).toISOString());
       // Add a history entry so the hatch appears in History tab
-      var batchHatchEntry = { id: 'bh_' + Date.now(), type: 'hatch', ts: new Date().toISOString(), synced: false,
+      var batchHatchEntry = { id: 'bh_' + Date.now(), type: 'hatch',
+        timestamp: ts, timeISO: new Date(timeVal).toISOString(),
+        synced: false,
         hatchSpecies: hatchSpecies, hatchBreed: hatchBreed, hatchCount: count,
         hatchParent: hatchParent, hatchFlock: hatchFlock, notes: hatchNotes,
-        logName: 'Hatch - ' + hatchSpecies + ' x' + count + (hatchParent ? ' (parent: ' + hatchParent + ')' : '') };
+        logName: 'Hatch - ' + hatchSpecies + ' batch x' + count + (hatchParent ? ' (dam: ' + hatchParent + ')' : '') };
       bd_history.unshift(batchHatchEntry);
       localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
       document.getElementById('bd-log-modal').style.display = 'none';
@@ -12242,7 +12331,7 @@ async function bd_saveLog() {
   bd_toast(existingTask ? '✅ Task completed' : 'Log saved'); bd_renderBirds();
   if (logData.type === 'med' && logData.med) {
     var medDeductBirdLabel = logData.birdTag || logData.birdName || 'Bird';
-    setTimeout(function() { medDeductPrompt(logData.med, logData.dose, logData.doseUnit || 'ml', medDeductBirdLabel, 'bird'); }, 100);
+    setTimeout(function() { medDeductPrompt(logData.med, logData.dose, logData.doseUnit || 'ml', medDeductBirdLabel, 'bird', logData.timeISO); }, 100);
   }
 }
 
@@ -12605,7 +12694,7 @@ async function bd_editLog(id) {
   bd_editingLogId = id;
   var birdLabel = l.type === 'egg' ? l.flock : (l.birdTag || l.birdName || '?');
   document.getElementById('bd-edit-title').textContent = 'Edit - ' + birdLabel + ' - ' + l.type;
-  var rawTime = l.timeISO ? new Date(l.timeISO) : new Date();
+  var rawTime = l.timeISO ? new Date(l.timeISO) : (l.ts ? new Date(l.ts) : new Date());
   var localTime = bd_localISO(rawTime).slice(0,16);
 
   // Stage current photo as the working copy — same pattern as GoatDesk's
@@ -13868,7 +13957,7 @@ function sd_clearHistory() {
 // Called after a med log is saved in GoatDesk saveAndHome / nextAction
 let _medDeductPending = null; // { medName, dose, unit } set before opening modal
 
-function medDeductPrompt(medName, dose, unit, linkedName, linkedType) {
+function medDeductPrompt(medName, dose, unit, linkedName, linkedType, logTime) {
   // Load SD assets from localStorage
   const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
   const medAssets = sdAssets.filter(a => a.category === 'Medical');
@@ -13879,7 +13968,7 @@ function medDeductPrompt(medName, dose, unit, linkedName, linkedType) {
   if (typeof setLoading === 'function') setLoading(false);
   if (typeof bd_setLoading === 'function') bd_setLoading(false);
 
-  _medDeductPending = { medName, dose, unit, sdAssets, linkedName, linkedType: linkedType || 'goat' };
+  _medDeductPending = { medName, dose, unit, sdAssets, linkedName, linkedType: linkedType || 'goat', logTime: logTime || null };
 
   // Build asset dropdown — pre-select best name match
   const sel = document.getElementById('medDeductAssetSelect');
@@ -14004,8 +14093,9 @@ function medDeductConfirm() {
   const { dose, unit, linkedName, linkedType } = _medDeductPending;
   const sdPending = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
   const sdHistory = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
-  const ts = String(Math.floor(Date.now() / 1000));
-  const isoTime = new Date().toISOString();
+  const deductTime = _medDeductPending.logTime || new Date().toISOString();
+  const ts = String(Math.floor(new Date(deductTime).getTime() / 1000));
+  const isoTime = deductTime;
   const notes = 'Auto-deducted from med log: ' + dose + ' ' + unit;
 
   function _queueDecrement(a, amt, note) {
@@ -14322,6 +14412,28 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 </div>
 
 <!-- ===== BATCH ACTION (Sell / Mark Died) — shared by Bird and Goat ===== -->
+<!-- ===== BATCH ADD HATCH MODAL ===== -->
+<div id="batchAddHatchModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10001;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:420px;border-radius:10px;padding:16px;">
+    <strong id="batchAddHatchTitle" style="font-size:17px;color:#3a7;">🥚 Add Hatch to Batch</strong>
+    <label style="margin-top:10px;display:block;">Count</label>
+    <input type="number" id="batchAddHatchCount" min="1" step="1" placeholder="How many hatched">
+    <label>Parent / Source (optional)</label>
+    <input type="text" id="batchAddHatchParent" placeholder="e.g. Incubator, dam name">
+    <label>Date &amp; Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="batchAddHatchDate" style="flex:1;">
+      <button onclick="var n=new Date();n.setSeconds(0,0);document.getElementById('batchAddHatchDate').value=bd_localISO(n).slice(0,16);" style="padding:10px;margin:0;font-size:13px;">Now</button>
+    </div>
+    <label>Notes</label>
+    <textarea id="batchAddHatchNotes" rows="2" placeholder="Optional"></textarea>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="confirmBatchAddHatch()" style="flex:1;margin:0;">✅ Add Hatch</button>
+      <button class="secondary" onclick="document.getElementById('batchAddHatchModal').style.display='none';" style="flex:0 0 auto;margin:0;padding:10px 16px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="batchActionModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10001;overflow-y:auto;">
   <div style="background:#2a2a2a;margin:20px auto;max-width:420px;border-radius:10px;padding:16px;">
     <strong id="batchActionTitle" style="font-size:17px;color:#3a7;"></strong>
@@ -14330,6 +14442,11 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <div id="batchActionPriceRow" style="display:none;">
       <label>Price per head (optional)</label>
       <input type="number" id="batchActionPrice" step="0.01" min="0" placeholder="Optional">
+    </div>
+    <label>Date &amp; Time</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="datetime-local" id="batchActionDate" style="flex:1;">
+      <button onclick="var n=new Date();n.setSeconds(0,0);document.getElementById('batchActionDate').value=bd_localISO(n).slice(0,16);" style="padding:10px;margin:0;font-size:13px;">Now</button>
     </div>
     <label>Notes</label>
     <textarea id="batchActionNotes" rows="2" placeholder="Optional"></textarea>
