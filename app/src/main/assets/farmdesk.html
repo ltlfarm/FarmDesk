@@ -1550,6 +1550,7 @@ const LS = {
   activeUser:     "farmdesk_activeUser",
   users:          "farmdesk_users",
   userRole:       "farmdesk_user_role",  // standalone role: farm_manager|farm_worker|farm_viewer
+  userUUID:       "farmdesk_user_uuid",  // farmOS user UUID for owner relationship on logs
   // Per-URL log storage — key is farmdesk_logs_<urlhash>
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
 };
@@ -1565,7 +1566,32 @@ function isWorker()  { return getUserRole() === "farm_worker"; }
 function isViewer()  { return getUserRole() === "farm_viewer"; }
 function canWrite()  { return !isViewer(); }  // managers and workers can write
 
-const APP_VERSION = "1782491346"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+// Returns cached log_category terms from farmOS
+function getLogCategories() {
+  if (window._logCategories) return window._logCategories;
+  try { return JSON.parse(localStorage.getItem('farmdesk_log_categories') || '[]'); } catch(e) { return []; }
+}
+
+// Builds an optional category select HTML for log forms
+// Returns empty string if no categories configured on this farmOS instance
+function buildCategorySelectHTML(selectedId) {
+  var cats = getLogCategories();
+  if (!cats.length) return '';
+  var opts = '<option value="">— Category (optional) —</option>' +
+    cats.map(function(c) {
+      return '<option value="' + c.id + '"' + (selectedId === c.id ? ' selected' : '') + '>' + c.name + '</option>';
+    }).join('');
+  return '<label style="color:#888;font-size:13px;margin-top:8px;display:block;">Category</label>' +
+    '<select id="f_log_category" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' + opts + '</select>';
+}
+
+// Returns farmOS user UUID for the owner relationship on logs.
+// Loaded from cache on startup, fetched on first connection.
+function getOwnerUUID() {
+  return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
+}
+
+const APP_VERSION = "1782508877"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1882,6 +1908,11 @@ function renderFollowupHTML() {
     '<input id="f_followup_note" placeholder="Follow-up note (optional)" style="margin-top:6px;">';
 }
 
+// Appended to every log form when farmOS log_category terms exist on this instance
+function renderCategoryHTML() {
+  return buildCategorySelectHTML('');
+}
+
 function setupFollowupHandler() {
   var sel = document.getElementById("f_followup");
   if (sel) sel.onchange = function() {
@@ -2087,6 +2118,7 @@ function renderStep() {
       '<select id="f_hoof">' + HOOF_CONDITIONS.map(function(c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
       '<label>Notes</label><input id="f_hoofnotes" placeholder="Optional notes">' +
       renderPhotoBlockHTML('hoof') +
+      renderCategoryHTML() +
       renderFollowupHTML();
     document.getElementById("f_hoof").onchange = function() {
       var v = document.getElementById("f_hoof").value;
@@ -2101,6 +2133,7 @@ function renderStep() {
       '<label>Observation</label><textarea id="f_obs" rows="3" placeholder="Describe what you observed"></textarea>' +
       '<label>Severity</label><select id="f_sev"><option>Low</option><option>Moderate</option><option>High</option><option>Urgent</option></select>' +
       renderPhotoBlockHTML('obs') +
+      renderCategoryHTML() +
       renderFollowupHTML();
     document.getElementById("f_sev").onchange = function() {
       var v = document.getElementById("f_sev").value;
@@ -2707,6 +2740,9 @@ function saveStep() {
 
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, loggedBy: localStorage.getItem(LS.activeUser) || cfg.user || "" };
+  // Read optional log category
+  var catEl = document.getElementById('f_log_category');
+  if (catEl && catEl.value) entry.logCategoryId = catEl.value;
 
   if (t === "weight") {
     const wEl = document.getElementById("f_weight");
@@ -4480,7 +4516,7 @@ function openAnimalProfile(name) {
   }
 
   body.innerHTML = img +
-    row("Tag/ID", p.tag) + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
+    row("Tag/ID", p.tag) + row("Nickname", p.nickname) + row("Sex", sex) + row("Age", animalAge(p.birthdate)) +
     row("Species", p.type) + row("Breed", p.breed) + row("Group", p.group) +
     row("Location", locText) + row("Notes", p.notes) +
     flagsHTML +
@@ -4731,9 +4767,13 @@ async function syncBatchesToFarmOS(token, logFn) {
           };
           var logRelationships = {};
           if (qUUID) logRelationships.quantity = { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] };
-          // Link the dam via the mother relationship if she's a known, synced animal
-          var damUUID = b.module === 'goat' ? animalUUIDs[b.parentDam] : (bd_birds.find(function(x) { return x.name === b.parentDam || x.tag === b.parentDam; }) || {}).uuid;
-          if (damUUID) logRelationships.mother = { data: { type: 'asset--animal', id: damUUID } };
+          // Link dam and sire via mother/father relationships for proper lineage
+          var damUUID  = b.module === 'goat' ? animalUUIDs[b.parentDam]  : (bd_birds.find(function(x) { return x.name === b.parentDam  || x.tag === b.parentDam;  }) || {}).uuid;
+          var sireUUID = b.module === 'goat' ? animalUUIDs[b.parentSire] : (bd_birds.find(function(x) { return x.name === b.parentSire || x.tag === b.parentSire; }) || {}).uuid;
+          if (damUUID)  logRelationships.mother = { data: { type: 'asset--animal', id: damUUID } };
+          if (sireUUID) logRelationships.father = { data: { type: 'asset--animal', id: sireUUID } };
+          var batchOwnerUUID = getOwnerUUID();
+          if (batchOwnerUUID) logRelationships.owner = { data: [{ type: 'user--user', id: batchOwnerUUID }] };
           var logRes = await fetchWithTimeout(apiUrl('/api/log/birth'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify({ data: { type: 'log--birth', attributes: logAttrs, relationships: logRelationships } }) });
           if (logRes.ok) {
             var logData = await logRes.json();
@@ -5807,7 +5847,8 @@ function editAnimalProfile(name) {
     goatGroups.map(function(g){ return '<option' + (g.name === p.group ? ' selected' : '') + '>' + g.name + '</option>'; }).join('') +
     '</select>' +
     '<button type="button" onclick="openGroupModal()" class="secondary" style="width:100%;margin-bottom:8px;padding:8px;font-size:13px;">Manage Groups</button>' +
-    '<input id="epNotes" placeholder="Notes" value="' + (p.notes||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:12px;box-sizing:border-box;">' +
+    '<input id="epNotes" placeholder="Notes" value="' + (p.notes||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:8px;box-sizing:border-box;">' +
+    '<input id="epNickname" placeholder="Nickname (optional)" value="' + (p.nickname||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:12px;box-sizing:border-box;">' +
     '<label style="color:#888;font-size:13px;">Profile Photo</label>' +
     '<div style="display:flex;gap:6px;margin:4px 0 8px;">' +
     '<button type="button" onclick="epTakeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>' +
@@ -5843,7 +5884,8 @@ async function saveAnimalProfile(name) {
   var newBreed = document.getElementById("epBreed").value;
   var newTag = document.getElementById("epTag").value;
   var newNotes = document.getElementById("epNotes").value;
-  var coreChanged = newSex !== (p.sex||"") || newDob !== (p.birthdate||"") || newBreed !== (p.breed||"") || newTag !== (p.tag||"") || newNotes !== (p.notes||"");
+  var newNickname = (document.getElementById("epNickname") ? document.getElementById("epNickname").value.trim() : "") || "";
+  var coreChanged = newSex !== (p.sex||"") || newDob !== (p.birthdate||"") || newBreed !== (p.breed||"") || newTag !== (p.tag||"") || newNotes !== (p.notes||"") || newNickname !== (p.nickname||"");
 
   // Resolve photo: null = unchanged, false = explicit clear, dataURL = new photo
   var newPhotoId = p.photoId || null;
@@ -5870,6 +5912,7 @@ async function saveAnimalProfile(name) {
     type:      document.getElementById("epSpecies").value,
     group:     newGroup,
     notes:     newNotes,
+    nickname:  newNickname,
     tag:       newTag,
     flags:     p.flags || [],
     photo:     p.photo || null,
@@ -5938,6 +5981,10 @@ async function pushAnimalProfileCore(name, fields) {
     Object.assign(attrs, sexToFarmOS(fields.sex));
     if (fields.birthdate) attrs.birthdate = fields.birthdate;
     if (fields.tag) attrs.id_tag = [{ id: fields.tag, type: 'tag' }];
+    // nickname is a multi-value field in farmOS — send as array
+    if (fields.nickname !== undefined) {
+      attrs.nickname = fields.nickname ? fields.nickname.split(',').map(function(n) { return n.trim(); }).filter(Boolean) : [];
+    }
     // breed: use the real attribute if this farmOS instance has one,
     // otherwise fold into notes as a universal fallback (strip any prior
     // "Breed: ..." line first so repeated saves don't pile up duplicates).
@@ -7007,11 +7054,11 @@ function clearLogs() {
 function sexToFarmOS(sex) {
   if (!sex) return {};
   var s = sex.toUpperCase();
-  if (s === 'W') return { sex: 'male', castrated: true };
-  if (s === 'M') return { sex: 'male', castrated: false };
-  if (s === 'F') return { sex: 'female', castrated: false };
-  if (s === 'MALE')   return { sex: 'male',   castrated: false };
-  if (s === 'FEMALE') return { sex: 'female',  castrated: false };
+  if (s === 'W') return { sex: 'male', castrated: true, is_sterile: true };
+  if (s === 'M') return { sex: 'male', castrated: false, is_sterile: false };
+  if (s === 'F') return { sex: 'female', castrated: false, is_sterile: false };
+  if (s === 'MALE')   return { sex: 'male',   castrated: false, is_sterile: false };
+  if (s === 'FEMALE') return { sex: 'female',  castrated: false, is_sterile: false };
   return {};
 }
 
@@ -7122,6 +7169,8 @@ async function getToken(cfg) {
         // Store expiry from token response — farmOS default is 300s (5 min)
         // Cache for 80% of lifetime to avoid using a token right before it expires
         if (data.expires_in) window._lastAuthExpiry = data.expires_in * 800; // 80% in ms
+        // Store refresh token for silent renewal — avoids re-entering credentials
+        if (data.refresh_token) window._refreshToken = data.refresh_token;
         return data.access_token;
       }
       // Surface farmOS's actual error so the user knows WHY it failed
@@ -7165,13 +7214,41 @@ async function getToken(cfg) {
   throw new Error("Auth failed — " + (lastErr || "check credentials and URL"));
 }
 
-// Returns cached token if within expiry window, otherwise fetches a new one.
-// Reads expires_in from the token response — farmOS default is 300s (5 min).
-// Falls back to 4 min if expires_in wasn't provided.
+// Returns cached token if within expiry window, otherwise renews silently.
+// First tries refresh_token (no credentials needed), then falls back to
+// full password auth. farmOS default token lifetime is 300s (5 min).
 async function getCachedToken(cfg) {
-  const maxAge = window._lastAuthExpiry || (4 * 60 * 1000); // ms
+  const maxAge = window._lastAuthExpiry || (4 * 60 * 1000);
   const age = Date.now() - (window._lastAuthTime || 0);
   if (window._lastAuthToken && age < maxAge) return window._lastAuthToken;
+
+  // Try refresh_token first — silent renewal without credentials
+  if (window._refreshToken && cfg && cfg.url) {
+    try {
+      const body = new URLSearchParams({
+        grant_type:    "refresh_token",
+        client_id:     "farm",
+        refresh_token: window._refreshToken
+      });
+      const res = await fetch(cfg.url + "/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.access_token) {
+          window._lastAuthToken = data.access_token;
+          window._lastAuthTime  = Date.now();
+          if (data.expires_in) window._lastAuthExpiry = data.expires_in * 800;
+          if (data.refresh_token) window._refreshToken = data.refresh_token;
+          return data.access_token;
+        }
+      }
+    } catch(e) { /* fall through to password auth */ }
+    window._refreshToken = null; // refresh failed — clear so we don't retry it
+  }
+
   return await getToken(cfg);
 }
 // fetchWithToken — wraps fetchWithTimeout with automatic 401 token refresh.
@@ -7364,6 +7441,20 @@ async function testFarmOS() {
         localStorage.setItem(LS.activeUser, cfg.user);
         renderSettings();
       }
+      // Fetch and cache farmOS user UUID for owner relationship on logs
+      try {
+        const meRes = await fetchWithTimeout(apiUrl("/api/user/user?filter[name]=" + encodeURIComponent(cfg.user) + "&page[limit]=1"), {
+          headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.api+json" }
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          const me = (meData.data || [])[0];
+          if (me && me.id) {
+            window._farmosUserUUID = me.id;
+            localStorage.setItem(LS.userUUID, me.id);
+          }
+        }
+      } catch(e) { /* best-effort — logs still push without owner */ }
     } else {
       el.textContent = "❌ API error: " + res.status;
       el.style.color = "#c00";
@@ -7523,6 +7614,24 @@ async function pullConfig(token) {
     localStorage.setItem(BD_LS.excluded, JSON.stringify(config.birdExcluded));
     bd_excluded = config.birdExcluded;
   }
+  // Fetch and cache log_category taxonomy terms (background, best-effort)
+  // Used for optional category tagging on all log types
+  try {
+    const catRes = await fetchWithTimeout(
+      apiUrl('/api/taxonomy_term/log_category?page[limit]=50'),
+      { headers: authHeaders }
+    );
+    if (catRes.ok) {
+      const catData = await catRes.json();
+      const cats = (catData.data || []).map(function(t) {
+        return { id: t.id, name: t.attributes.name || '' };
+      }).filter(function(t) { return t.name; });
+      if (cats.length) {
+        window._logCategories = cats;
+        localStorage.setItem('farmdesk_log_categories', JSON.stringify(cats));
+      }
+    }
+  } catch(e) { /* optional — no log categories configured is fine */ }
 }
 
 // ───── SHARED: fetch (animals + logs + config) from farmOS ─────
@@ -7660,7 +7769,8 @@ async function fetchAnimalUUIDs(silent = false) {
         notes:     fetchedNotes,
         flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
         photoUrl:  imgId ? (typeNames[imgId] || null) : null,
-        photo:     prevPhoto
+        photo:     prevPhoto,
+        nickname:  Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || "")
       };
       // Add to goat list only if not already present (case-insensitive check)
       const alreadyInList = goats.some(g => g.toLowerCase() === name.toLowerCase());
@@ -8254,24 +8364,29 @@ function buildFarmOSPayload(l) {
 
   // Link to animal asset if UUID is known
   if (l.type === 'birth') {
-    // farmOS birth logs: "asset" = the newborn(s) — linked separately once
-    // the kid assets exist (see KID ASSET CREATION in syncToFarmOS) — and
-    // "mother" = the dam. Confirmed against a real farmOS Quick Form export
-    // (CSV: asset="Daze|Knight", mother="Athena"). An animal can only be the
-    // subject of one birth log ever (it's her own birth record), so never
-    // point "asset" at the dam here — that's what caused the 422.
-    const damUUID = animalUUIDs[l.data.dam];
-    if (damUUID) {
-      payload.data.relationships = {
-        mother: { data: { type: "asset--animal", id: damUUID } }
-      };
-    }
+    const damUUID  = animalUUIDs[l.data.dam];
+    const sireUUID = animalUUIDs[l.data.sire];
+    payload.data.relationships = {};
+    if (damUUID)  payload.data.relationships.mother = { data: { type: "asset--animal", id: damUUID } };
+    if (sireUUID) payload.data.relationships.father = { data: { type: "asset--animal", id: sireUUID } };
   } else if (uuid) {
     payload.data.relationships = {
-      asset: {
-        data: [{ type: "asset--animal", id: uuid }]
-      }
+      asset: { data: [{ type: "asset--animal", id: uuid }] }
     };
+  } else {
+    payload.data.relationships = {};
+  }
+  // Set owner relationship for proper attribution in farmOS
+  const ownerUUID = getOwnerUUID();
+  if (ownerUUID) {
+    if (!payload.data.relationships) payload.data.relationships = {};
+    payload.data.relationships.owner = { data: [{ type: "user--user", id: ownerUUID }] };
+  }
+
+  // Set log_category if set on this log
+  if (l.logCategoryId) {
+    if (!payload.data.relationships) payload.data.relationships = {};
+    payload.data.relationships.category = { data: [{ type: "taxonomy_term--log_category", id: l.logCategoryId }] };
   }
 
   return payload;
@@ -8370,7 +8485,8 @@ async function processPendingBatchActions(token, logFn) {
       if (a.type === 'batchSell') {
         var qRef = await buildBatchSaleQuantityRef(a.payload.count, a.payload.unitPrice, b.productUUID, token);
         if (!qRef) throw new Error('Could not create inventory quantity');
-        var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] } };
+        var bOwner = getOwnerUUID();
+        var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
         var attrs = { name: 'Sale: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
         var res = await fetchWithTimeout(apiUrl('/api/log/sale'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: rel } }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -8381,7 +8497,7 @@ async function processPendingBatchActions(token, logFn) {
         var qData = await qRes.json();
         var qUUID = qData?.data?.id, qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
         var attrs2 = { name: 'Death: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
-        var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] } };
+        var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
         var res2 = await fetchWithTimeout(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs2, relationships: rel2 } }) });
         if (!res2.ok) throw new Error('HTTP ' + res2.status);
       } else if (a.type === 'batchPromote') {
@@ -8391,7 +8507,7 @@ async function processPendingBatchActions(token, logFn) {
         var qData3 = await qRes3.json();
         var qUUID3 = qData3?.data?.id, qRevId3 = qData3?.data?.attributes?.drupal_internal__revision_id;
         var attrs3 = { name: 'Promoted to individual: ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: 'One animal pulled from batch to be tracked individually', format: 'default' } };
-        var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] } };
+        var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
         var res3 = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
         if (!res3.ok) throw new Error('HTTP ' + res3.status);
       } else if (a.type === 'batchHatch') {
@@ -8403,7 +8519,7 @@ async function processPendingBatchActions(token, logFn) {
         var qUUIDH = qDataH?.data?.id, qRevIdH = qDataH?.data?.attributes?.drupal_internal__revision_id;
         var hatchNote = ['Added ' + a.payload.count + ' ' + a.payload.species + ' to existing batch', a.payload.parent ? 'Source: ' + a.payload.parent : '', a.payload.notes || ''].filter(Boolean).join('\n');
         var attrsH = { name: 'Hatch - ' + a.payload.species + ' batch x' + a.payload.count + (a.payload.parent ? ' (source: ' + a.payload.parent + ')' : ''), status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: hatchNote, format: 'default' } };
-        var relH = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUIDH, meta: { target_revision_id: qRevIdH } }] } };
+        var relH = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUIDH, meta: { target_revision_id: qRevIdH } }] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
         var resH = await fetchWithTimeout(apiUrl('/api/log/birth'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--birth', attributes: attrsH, relationships: relH } }) });
         if (!resH.ok) throw new Error('HTTP ' + resH.status);
       }
@@ -10569,6 +10685,7 @@ async function sd_syncToFarmOS() {
           const bMatch = birdAssets.find(b => (b.name === item.linkedAssetName || b.tag === item.linkedAssetName) && b.uuid);
           if (bMatch) assetRefs.push({ type: 'asset--animal', id: bMatch.uuid });
         }
+        const sdOwnerUUID = getOwnerUUID();
         const lBody = {
           data: {
             type: 'log--' + logBundle,
@@ -10584,7 +10701,8 @@ async function sd_syncToFarmOS() {
             },
             relationships: {
               asset:    { data: assetRefs },
-              quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] }
+              quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] },
+              ...(sdOwnerUUID ? { owner: { data: [{ type: 'user--user', id: sdOwnerUUID }] } } : {})
             }
           }
         };
@@ -11170,7 +11288,7 @@ async function bd_fetchAssets() {
         fetchedBreed = breedMatch ? breedMatch[1].trim() : '';
         fetchedNotes = rawNotes.replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
       }
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, synced: true };
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), synced: true };
     });
     var resEq = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
@@ -11681,6 +11799,8 @@ async function bd_pushLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
+  var ownerUUID = getOwnerUUID();
+  if (ownerUUID) payload.data.relationships.owner = { data: [{ type: 'user--user', id: ownerUUID }] };
 
   // Eggs increment the shared Eggs Product's inventory in farmOS, same
   // documented pattern as Stock's inventory adjustments.
@@ -11736,6 +11856,8 @@ async function bd_patchLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, id: log.farmosUUID, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
+  var patchOwnerUUID = getOwnerUUID();
+  if (patchOwnerUUID) payload.data.relationships.owner = { data: [{ type: 'user--user', id: patchOwnerUUID }] };
   var res = await fetchWithTimeout(apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Re-upload the photo if present — same gap as the POST path above, now closed on edit too.
@@ -11784,6 +11906,7 @@ async function bd_pushProfilePhoto(birdUUID, photoId, token) {
 async function bd_pushCreateBird(bird, token) {
   var payload = { data: { type: 'asset--animal', attributes: { name: bird.name || ('Bird ' + (bird.tag||'')), id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : [] } } };
   if (bird.sex) payload.data.attributes.sex = bird.sex;
+  if (bird.nickname) payload.data.attributes.nickname = bird.nickname.split(',').map(function(n) { return n.trim(); }).filter(Boolean);
   // breed: real attribute if this farmOS instance has one, otherwise fold
   // into notes as a universal fallback (strip any prior "Breed: ..." line
   // first so repeated saves don't pile up duplicates).
@@ -11823,6 +11946,7 @@ async function bd_pushUpdateBird(bird, token) {
     id_tag: bird.tag ? [{ id: bird.tag, type: 'ear_tag' }] : []
   };
   if (bird.sex) attrs.sex = bird.sex;
+  if (bird.nickname !== undefined) attrs.nickname = bird.nickname ? bird.nickname.split(',').map(function(n) { return n.trim(); }).filter(Boolean) : [];
   // breed: real attribute if this farmOS instance has one, otherwise fold
   // into notes as a universal fallback (strip any prior "Breed: ..." line
   // first so repeated saves don't pile up duplicates).
@@ -12016,7 +12140,7 @@ function bd_openBirdProfile(id) {
   contentEl.innerHTML =
     '<h3 style="margin:0 0 10px;color:#3a7;">' + (bird.name || bird.tag || 'Bird') + '</h3>' +
     photoHTML +
-    row('Tag', bird.tag) + row('Species', bird.species) + row('Breed', bird.breed) +
+    row('Tag', bird.tag) + row('Nickname', bird.nickname) + row('Species', bird.species) + row('Breed', bird.breed) +
     row('Sex', sexLabel) + row('Flock', bird.flock) + row('Notes', bird.notes) +
     '<div style="display:flex;gap:8px;margin-top:14px;">' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openLogSheet(b);" style="flex:1;margin:0;">&#x1F4CB; Log</button>' +
@@ -12374,7 +12498,7 @@ function bd_stockDeductFeed(feedName, amount, unit, feederName, ts) {
 async function bd_openAddBird() {
   bd_editBirdId = null;
   document.getElementById('bd-bird-modal-title').textContent = 'Add Bird';
-  ['bd-bird-tag','bd-bird-name','bd-bird-species-custom','bd-bird-breed-custom','bd-bird-notes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  ['bd-bird-tag','bd-bird-name','bd-bird-species-custom','bd-bird-breed-custom','bd-bird-notes','bd-bird-nickname'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
   // Populate species from BIRD_SPECIES_DEFAULTS config
   var speciesSel = document.getElementById('bd-bird-species');
   if (speciesSel) { speciesSel.innerHTML = BIRD_SPECIES_DEFAULTS.map(function(s) { return '<option>' + s + '</option>'; }).join(''); speciesSel.value = BIRD_SPECIES_DEFAULTS[0] || 'Chicken'; }
@@ -12393,6 +12517,7 @@ async function bd_openEditBird(id) {
   else { document.getElementById('bd-bird-species').value = 'Other'; document.getElementById('bd-bird-species-custom').value = bird.species || ''; }
   document.getElementById('bd-bird-sex').value   = bird.sex   || '';
   document.getElementById('bd-bird-notes').value = bird.notes || '';
+  if (document.getElementById('bd-bird-nickname')) document.getElementById('bd-bird-nickname').value = bird.nickname || '';
   document.getElementById('bd-bird-breed-custom').value = bird.breed || '';
   bd_updateBreedList(); bd_populateFlock('bd-bird-flock', bird.flock); await bd_birdShowPhoto(bird);
   document.getElementById('bd-bird-modal').style.display = 'block';
@@ -12415,7 +12540,8 @@ async function bd_saveBird() {
   var breed   = bc || bs;
   var sex     = document.getElementById('bd-bird-sex').value;
   var flock   = document.getElementById('bd-bird-flock').value;
-  var notes   = document.getElementById('bd-bird-notes').value.trim();
+  var notes    = document.getElementById('bd-bird-notes').value.trim();
+  var nickname = (document.getElementById('bd-bird-nickname') ? document.getElementById('bd-bird-nickname').value.trim() : '') || '';
   if (!tag && !name) { bd_toast('Enter a tag or name'); return; }
   if (bd_editBirdId) {
     var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_editBirdId; })[0];
@@ -12424,12 +12550,12 @@ async function bd_saveBird() {
       var _oldPhotoId = bird.photoId || null;
       var _newPhotoId = bd_currentBirdPhoto ? await Photos.save(bd_currentBirdPhoto) : null;
       if (_oldPhotoId && _oldPhotoId !== _newPhotoId) Photos.remove(_oldPhotoId);
-      bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.photoId = _newPhotoId; bird.synced = false;
+      bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.nickname = nickname; bird.photoId = _newPhotoId; bird.synced = false;
       if (bird.uuid) { bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); if ((flock || '') !== _oldFlock) bd_pending.push({ action: 'group_assign', birdUUID: bird.uuid, flockName: flock, id: 'ga_' + Date.now(), synced: false }); }
     }
   } else {
     var newPhotoId = bd_currentBirdPhoto ? await Photos.save(bd_currentBirdPhoto) : null;
-    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, photoId: newPhotoId, status: 'active', synced: false };
+    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, nickname: nickname, photoId: newPhotoId, status: 'active', synced: false };
     bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
   }
   document.getElementById('bd-bird-modal').style.display = 'none';
@@ -14274,6 +14400,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <select id="bd-bird-flock"></select>
     <label>Notes</label>
     <input id="bd-bird-notes" placeholder="Optional notes">
+    <label>Nickname (optional)</label>
+    <input id="bd-bird-nickname" placeholder="Common name or alias">
     <label style="margin-top:12px;">Profile Photo (optional)</label>
     <div style="display:flex;gap:6px;margin-top:4px;">
       <button type="button" onclick="bd_birdTakeCamera()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Camera</button>
