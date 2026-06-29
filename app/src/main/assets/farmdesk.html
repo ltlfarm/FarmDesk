@@ -1591,7 +1591,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = "1782508877"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -13571,13 +13571,20 @@ function show_ledger_init() {
   var isStandalone = localStorage.getItem(LS.standalone) === '1';
   var fetchBtn = document.getElementById('ledgerFetchBtn');
   if (fetchBtn) fetchBtn.style.display = isStandalone ? 'none' : '';
-  // Build from local pendingActions — always available offline
-  _ledgerEntries = [];
+
+  // Load previously fetched farmOS entries from cache
+  var cached = [];
+  try { cached = JSON.parse(localStorage.getItem('farmdesk_ledger_cache') || '[]'); } catch(e) {}
+  var cachedIds = new Set(cached.map(function(e) { return e.id; }));
+
+  // Add only unsynced local pending actions (synced ones are already in farmOS cache)
+  var localEntries = [];
   pendingActions.forEach(function(a) {
+    if (a.synced) return; // already in farmOS — cache covers it
     if (['sell','death','birdSell'].indexOf(a.type) >= 0) {
       var isSale = (a.type === 'sell' || a.type === 'birdSell');
       if (!isSale) return;
-      _ledgerEntries.push({
+      if (!cachedIds.has(a.id)) localEntries.push({
         id: a.id,
         logType: 'sale',
         name: a.payload.animalName || ('Bird: ' + a.payload.birdId),
@@ -13586,11 +13593,11 @@ function show_ledger_init() {
         totalPrice: a.payload.unitPrice || null,
         notes: a.payload.notes || '',
         time: a.createdAt,
-        synced: a.synced,
+        synced: false,
         source: 'local'
       });
     } else if (a.type === 'batchSell') {
-      _ledgerEntries.push({
+      if (!cachedIds.has(a.id)) localEntries.push({
         id: a.id,
         logType: 'sale',
         name: (a.payload.species || '') + ' batch',
@@ -13599,11 +13606,11 @@ function show_ledger_init() {
         totalPrice: a.payload.unitPrice ? (a.payload.unitPrice * (a.payload.count || 1)) : null,
         notes: a.payload.notes || '',
         time: a.createdAt,
-        synced: a.synced,
+        synced: false,
         source: 'local'
       });
     } else if (a.type === 'purchase') {
-      _ledgerEntries.push({
+      if (!cachedIds.has(a.id)) localEntries.push({
         id: a.id,
         logType: 'purchase',
         name: a.payload.animalName || 'Animal',
@@ -13612,11 +13619,14 @@ function show_ledger_init() {
         totalPrice: a.payload.unitPrice || null,
         notes: a.payload.notes || '',
         time: a.createdAt,
-        synced: a.synced,
+        synced: false,
         source: 'local'
       });
     }
   });
+
+  _ledgerEntries = cached.concat(localEntries);
+  _ledgerEntries.sort(function(a, b) { return new Date(b.time || 0) - new Date(a.time || 0); });
   ledgerRender();
 }
 
@@ -13716,6 +13726,8 @@ async function ledgerFetch() {
     var localOnly = _ledgerEntries.filter(function(l) {
       return l.source === 'local' && !l.synced && !farmoIds.has(l.farmosUUID);
     });
+    // Save farmOS entries to cache so Ledger screen survives re-opens and local log clears
+    try { localStorage.setItem('farmdesk_ledger_cache', JSON.stringify(farmoEntries)); } catch(e) {}
     _ledgerEntries = farmoEntries.concat(localOnly);
     _ledgerEntries.sort(function(a, b) {
       return new Date(b.time || 0) - new Date(a.time || 0);
