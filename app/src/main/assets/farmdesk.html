@@ -1591,7 +1591,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.28-2356"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9704,7 +9704,7 @@ async function refreshAssets(silent) {
             const amount = parseFloat(q.attributes?.value?.numerator || 0) /
                            parseFloat(q.attributes?.value?.denominator || 1);
             const ts     = log.attributes?.timestamp;
-            const isoTime = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
+            const isoTime = ts ? new Date(isNaN(Number(ts)) ? ts : Number(ts) * 1000).toISOString() : new Date().toISOString();
             const notes  = log.attributes?.notes?.value || '';
             const logId  = 'farmos_' + log.id + '_' + qRef.id;
             fetchedHistory.push({
@@ -11421,7 +11421,7 @@ async function bd_fetchLogs(token, cfg) {
     var assetIds = Array.isArray(assetRel) ? assetRel.map(function(a) { return a.id; }) : (assetRel ? [assetRel.id] : []);
     // Declare these early — needed by filters below
     var ts = log.attributes.timestamp;
-    var timeISO = ts ? new Date(parseInt(ts) * 1000).toISOString() : new Date().toISOString();
+    var timeISO = ts ? new Date(isNaN(Number(ts)) ? ts : Number(ts) * 1000).toISOString() : new Date().toISOString();
     var notesRaw = (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '';
     var logName  = (log.attributes.name || '').trim();
     // Find linked bird (asset--animal). Batch logs link to asset--product — no bird match, still import.
