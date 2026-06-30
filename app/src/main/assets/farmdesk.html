@@ -1591,7 +1591,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = "2026.06.29-2140"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.29-2219"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9664,17 +9664,33 @@ async function refreshAssets(silent) {
         apiUrl('/api/log/activity?page[limit]=100&sort=-timestamp&include=quantity'),
         { headers: h }
       );
+      // Priced restocks are stored as log--purchase — fetch those too so they
+      // still appear in Stock History (not just the Ledger).
+      let purchHistRes = null;
+      try {
+        purchHistRes = await fetchWithTimeout(
+          apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=quantity'),
+          { headers: h }
+        );
+      } catch (e) { /* purchase fetch optional */ }
       if (logRes.ok) {
         const logData = await logRes.json();
+        let combinedData     = (logData.data || []).slice();
+        let combinedIncluded = (logData.included || []).slice();
+        if (purchHistRes && purchHistRes.ok) {
+          const pHist = await purchHistRes.json();
+          combinedData     = combinedData.concat(pHist.data || []);
+          combinedIncluded = combinedIncluded.concat(pHist.included || []);
+        }
         // Build quantity map from included
         const qMap = {};
-        (logData.included || []).forEach(inc => {
+        combinedIncluded.forEach(inc => {
           if (inc.type === 'quantity--standard' || inc.type.startsWith('quantity--')) {
             qMap[inc.id] = inc;
           }
         });
         const fetchedHistory = [];
-        (logData.data || []).forEach(log => {
+        combinedData.forEach(log => {
           // Get quantities for this log
           const qRefs = log.relationships?.quantity?.data || [];
           qRefs.forEach(qRef => {
@@ -10347,6 +10363,16 @@ async function confirmAdjust() {
   const seller    = adjustAction === 'increment' ? (document.getElementById('restockSeller').value.trim()) : '';
   const lot       = adjustAction === 'increment' ? (document.getElementById('restockLot').value.trim()) : '';
   const ts        = sd_getTimestamp();
+  // Structured numeric price for the Ledger — only on increments (restocks).
+  // priceType 'each' => priceUnit is per-unit; 'lot' => priceUnit is the lot total.
+  var unitPriceNum = null, totalPriceNum = null;
+  if (adjustAction === 'increment') {
+    var priceInput = parseFloat(document.getElementById('priceUnit') && document.getElementById('priceUnit').value) || 0;
+    if (priceInput > 0 && amount > 0) {
+      if (priceType === 'lot') { totalPriceNum = priceInput; unitPriceNum = priceInput / amount; }
+      else { unitPriceNum = priceInput; totalPriceNum = priceInput * amount; }
+    }
+  }
   const adjustments = [{ asset: adjustAsset, action: adjustAction, amount }];
   // Injection extras
   if (document.getElementById('isInjection')?.checked) {
@@ -10362,7 +10388,9 @@ async function confirmAdjust() {
     }
   }
   for (const adj of adjustments) {
-    doAdjust(adj.asset, adj.action, adj.amount, notes, seller, lot, ts);
+    var aUnit  = adj.action === 'increment' ? unitPriceNum  : null;
+    var aTotal = adj.action === 'increment' ? totalPriceNum : null;
+    doAdjust(adj.asset, adj.action, adj.amount, notes, seller, lot, ts, aUnit, aTotal);
   }
   // Save photo to asset locally (replacing just the primary slot) and queue
   // photo upload if UUID is real — only if the user actually changed it.
@@ -10400,7 +10428,7 @@ async function confirmAdjust() {
 // ===== CORE LOCAL ADJUST =====
 // ───── SHARED: doAdjust (local pending queue) ─────
 // action: 'increment' | 'decrement' | 'reset'
-function doAdjust(asset, action, amount, notes, seller, lot, ts) {
+function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, totalPrice) {
   // Update local cache immediately
   const cached = assets.find(x => x.uuid === asset.uuid);
   if (cached) {
@@ -10423,6 +10451,8 @@ function doAdjust(asset, action, amount, notes, seller, lot, ts) {
     notes,
     seller:    seller || '',
     lot:       lot    || '',
+    unitPrice:  (unitPrice  != null ? unitPrice  : null),
+    totalPrice: (totalPrice != null ? totalPrice : null),
     timestamp,
     synced:    false
   };
@@ -10430,7 +10460,7 @@ function doAdjust(asset, action, amount, notes, seller, lot, ts) {
   localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
   // Local adjHistory — store ISO for display, unix for farmOS
   const isoTime = new Date(parseInt(timestamp) * 1000).toISOString();
-  adjHistory.unshift({ id: entry.id, name: asset.name, action, amount, notes, seller: seller||'', lot: lot||'', time: isoTime, synced: false });
+  adjHistory.unshift({ id: entry.id, name: asset.name, action, amount, notes, seller: seller||'', lot: lot||'', unitPrice: (unitPrice != null ? unitPrice : null), totalPrice: (totalPrice != null ? totalPrice : null), time: isoTime, synced: false });
   if (adjHistory.length > 100) adjHistory = adjHistory.slice(0, 100);
   localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
 }
@@ -10629,22 +10659,33 @@ async function sd_syncToFarmOS() {
         // POST quantity then log — farmOS inventory adjustment
         const num = Number.isInteger(item.amount) ? String(item.amount) : String(Math.round(item.amount * 100));
         const den = Number.isInteger(item.amount) ? '1' : '100';
+        // Priced restock (increment with a price) → store as quantity--price + log--purchase
+        // so it shows in the Ledger with structured cost. Everything else stays
+        // quantity--standard + log--activity (unchanged).
+        const isPricedRestock = item.action === 'increment' && item.unitPrice != null && item.unitPrice > 0;
+        const qBundle = isPricedRestock ? 'price' : 'standard';
+        const qAttrs = {
+          measure:              item.measure || 'count',
+          value:                { numerator: num, denominator: den },
+          inventory_adjustment: item.action,
+          ...(item.notes ? { label: item.notes } : {})
+        };
+        if (isPricedRestock) {
+          const totalP = (item.totalPrice != null ? item.totalPrice : item.unitPrice * item.amount);
+          qAttrs.unit_price  = { numerator: String(Math.round(item.unitPrice * 100)), denominator: '100' };
+          qAttrs.total_price = { numerator: String(Math.round(totalP * 100)),          denominator: '100' };
+        }
         const qBody = {
           data: {
-            type: 'quantity--standard',
-            attributes: {
-              measure:              item.measure || 'count',
-              value:                { numerator: num, denominator: den },
-              inventory_adjustment: item.action,
-              ...(item.notes ? { label: item.notes } : {})
-            },
+            type: 'quantity--' + qBundle,
+            attributes: qAttrs,
             relationships: {
               inventory_asset: { data: { type: 'asset--material', id: item.uuid } },
               ...(item.unitId ? { units: { data: { type: 'taxonomy_term--unit', id: item.unitId } } } : {})
             }
           }
         };
-        const qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
+        const qRes = await fetchWithTimeout(apiUrl('/api/quantity/' + qBundle), {
           method: 'POST', headers: h, body: JSON.stringify(qBody)
         });
         if (!qRes.ok) {
@@ -10654,7 +10695,7 @@ async function sd_syncToFarmOS() {
         const qData  = await qRes.json();
         const qUUID  = qData.data.id;
         const qRevId = qData.data.attributes?.drupal_internal__revision_id;
-        const logBundle = 'activity'; // log--activity works on all farmOS instances; input/output may not be enabled
+        const logBundle = isPricedRestock ? 'purchase' : 'activity'; // priced restock → purchase; else activity (works on all farmOS instances)
         // Cross-module link: if this deduction came from a goat or bird med
         // log, include that animal in the log's asset relationship too —
         // so the farmOS record connects the item used to the animal it was
@@ -10674,7 +10715,7 @@ async function sd_syncToFarmOS() {
           data: {
             type: 'log--' + logBundle,
             attributes: {
-              name:      'Stock ' + item.action + ': ' + item.name,
+              name:      (isPricedRestock ? 'Purchase: ' : 'Stock ' + item.action + ': ') + item.name,
               timestamp: item.timestamp,
               status:    'done',
               notes: { value: [
@@ -10685,7 +10726,7 @@ async function sd_syncToFarmOS() {
             },
             relationships: {
               asset:    { data: assetRefs },
-              quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] },
+              quantity: { data: [{ type: 'quantity--' + qBundle, id: qUUID, meta: { target_revision_id: qRevId } }] },
               ...(sdOwnerUUID ? { owner: { data: [{ type: 'user--user', id: sdOwnerUUID }] } } : {})
             }
           }
