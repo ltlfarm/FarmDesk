@@ -1591,7 +1591,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = "2026.06.29-2224"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.30-1103"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9764,8 +9764,21 @@ function guessMeasure(name) {
   if (n.includes('lbs') || n.includes('grain')) return 'weight';
   return 'count';
 }
+// Resolve a unit term UUID for THIS instance. Prefer the instance's actual
+// fetched unit terms (farmdesk_stock_taxonomy) so it works on any farmOS;
+// the hardcoded UNIT_MAP is only a last-resort fallback (e.g. units not yet fetched).
 function guessUnitId(name, measure) {
-  const n = name.toLowerCase();
+  const n = (name || '').toLowerCase();
+  var units = [];
+  try { units = (JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}').units) || []; } catch(e) {}
+  function pick(re) { var u = units.find(function(x){ return re.test((x.name || '').toLowerCase()); }); return u ? u.uuid : null; }
+  var id = null;
+  if (n.includes('hay') || n.includes('bale')) id = pick(/bale/);
+  else if (measure === 'volume')               id = pick(/milli|liter|litre|^ml$|^l$/);
+  else if (measure === 'weight')               id = pick(/lb|pound|kilo|\bkg\b|gram|ounce|\boz\b/);
+  else                                          id = pick(/count|each|unit|head|piece/);
+  if (id) return id;
+  // Fallback only if this instance's units weren't fetched into local cache.
   if (n.includes('hay') || n.includes('bale')) return UNIT_MAP.bales.uuid;
   if (measure === 'volume') return UNIT_MAP.ml.uuid;
   if (measure === 'weight') return UNIT_MAP.lbs.uuid;
@@ -10675,13 +10688,27 @@ async function sd_syncToFarmOS() {
           qAttrs.unit_price  = { numerator: String(Math.round(item.unitPrice * 100)), denominator: '100' };
           qAttrs.total_price = { numerator: String(Math.round(totalP * 100)),          denominator: '100' };
         }
+        // Resolve the unit against THIS instance's fetched unit terms. A unitId
+        // baked in from another instance (e.g. after a re-mirror, which assigns
+        // new UUIDs) won't exist here and farmOS would reject the quantity.
+        // Re-map by name/measure; if still not present on this instance, omit
+        // units entirely so the restock still syncs (just without a unit label).
+        let resolvedUnitId = item.unitId;
+        try {
+          const sdUnits = (JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}').units) || [];
+          if (sdUnits.length) {
+            const present = resolvedUnitId && sdUnits.some(function(u){ return u.uuid === resolvedUnitId; });
+            if (!present) resolvedUnitId = guessUnitId(item.name, item.measure);
+            if (resolvedUnitId && !sdUnits.some(function(u){ return u.uuid === resolvedUnitId; })) resolvedUnitId = null;
+          }
+        } catch (e) {}
         const qBody = {
           data: {
             type: 'quantity--' + qBundle,
             attributes: qAttrs,
             relationships: {
               inventory_asset: { data: { type: 'asset--material', id: item.uuid } },
-              ...(item.unitId ? { units: { data: { type: 'taxonomy_term--unit', id: item.unitId } } } : {})
+              ...(resolvedUnitId ? { units: { data: { type: 'taxonomy_term--unit', id: resolvedUnitId } } } : {})
             }
           }
         };
