@@ -1591,7 +1591,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = "2026.06.29-2113"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.29-2140"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4557,42 +4557,25 @@ async function priceFieldsSupported(token) {
   const cached = localStorage.getItem(PRICE_FIELDS_KEY);
   if (cached !== null) return cached === '1';
   try {
-    // Try multiple schema paths — farmOS versions differ in where price fields appear
-    const paths = [
-      '/api/schema/quantity/standard',
-      '/api/quantity/standard?page[limit]=1'
-    ];
-    for (const path of paths) {
-      try {
-        const res = await fetchWithTimeout(apiUrl(path), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
-        if (res.ok) {
-          const data = await res.json();
-          // Schema endpoint: check properties
-          if (data && data.properties) {
-            const supported = !!(data.properties.unit_price || data.properties.total_price);
-            localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
-            return supported;
-          }
-          // Live data endpoint: check first result's attributes
-          if (data && data.data) {
-            const first = Array.isArray(data.data) ? data.data[0] : data.data;
-            if (first) {
-              const supported = !!(first.attributes && ('unit_price' in first.attributes || 'total_price' in first.attributes));
-              localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
-              return supported;
-            }
-          }
-        }
-      } catch(e2) { /* try next path */ }
+    // Only the schema endpoint reflects what the field CAN hold.
+    // Checking a live sample record is unreliable — a priceless record
+    // (e.g. a feed decrement) would wrongly report price fields as unsupported
+    // and poison this cache for every future sale, silently dropping prices.
+    const res = await fetchWithTimeout(apiUrl('/api/schema/quantity/price'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.properties) {
+        const supported = !!(data.properties.unit_price || data.properties.total_price);
+        localStorage.setItem(PRICE_FIELDS_KEY, supported ? '1' : '0');
+        return supported;
+      }
     }
-    // Assume supported on Farmier-hosted instances (confirmed working)
-    localStorage.setItem(PRICE_FIELDS_KEY, '1');
-    return true;
   } catch(e) { /* best-effort */ }
   // Default to true — if the field doesn't exist, farmOS will ignore it gracefully
   localStorage.setItem(PRICE_FIELDS_KEY, '1');
   return true;
 }
+
 
 // Builds a 1-head price quantity (with unit_price/total_price if this
 // instance supports them) and returns a relationship reference ready to
@@ -4609,17 +4592,17 @@ async function buildPriceQuantityRef(unitPrice, token) {
       attrs.unit_price  = { numerator: String(priceCents), denominator: '100' };
       attrs.total_price = { numerator: String(priceCents), denominator: '100' };
     }
-    const qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
+    const qRes = await fetchWithTimeout(apiUrl('/api/quantity/price'), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
-      body: JSON.stringify({ data: { type: 'quantity--standard', attributes: attrs } })
+      body: JSON.stringify({ data: { type: 'quantity--price', attributes: attrs } })
     });
     if (!qRes.ok) return null;
     const qData = await qRes.json();
     const qUUID = qData?.data?.id;
     const qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
     if (!qUUID) return null;
-    return { type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } };
+    return { type: 'quantity--price', id: qUUID, meta: { target_revision_id: qRevId } };
   } catch(e) { return null; }
 }
 
@@ -4808,14 +4791,15 @@ async function buildBatchSaleQuantityRef(count, unitPrice, productUUID, token) {
       attrs.unit_price  = { numerator: String(unitCents), denominator: '100' };
       attrs.total_price = { numerator: String(totalCents), denominator: '100' };
     }
-    const payload = { data: { type: 'quantity--standard', attributes: attrs, relationships: { inventory_asset: { data: { type: 'asset--product', id: productUUID } } } } };
-    const res = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
+    const qType = (unitPrice && unitPrice > 0 && priceSupported) ? 'price' : 'standard';
+    const payload = { data: { type: 'quantity--' + qType, attributes: attrs, relationships: { inventory_asset: { data: { type: 'asset--product', id: productUUID } } } } };
+    const res = await fetchWithTimeout(apiUrl('/api/quantity/' + qType), { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' }, body: JSON.stringify(payload) });
     if (!res.ok) return null;
     const data = await res.json();
     const uuid = data?.data?.id;
     const revId = data?.data?.attributes?.drupal_internal__revision_id;
     if (!uuid) return null;
-    return { type: 'quantity--standard', id: uuid, meta: { target_revision_id: revId } };
+    return { type: 'quantity--' + qType, id: uuid, meta: { target_revision_id: revId } };
   } catch(e) { return null; }
 }
 
@@ -13656,7 +13640,7 @@ async function ledgerFetch() {
         });
         var quantities = {};
         included.forEach(function(inc) {
-          if (inc.type === 'quantity--standard') {
+          if (inc.type === 'quantity--standard' || inc.type === 'quantity--price') {
             var attrs = inc.attributes || {};
             var val = attrs.value ? (parseFloat(attrs.value.numerator) / parseFloat(attrs.value.denominator)) : null;
             var up = attrs.unit_price ? (parseFloat(attrs.unit_price.numerator) / parseFloat(attrs.unit_price.denominator)) : null;
@@ -13773,7 +13757,7 @@ function ledgerRender() {
     return;
   }
 
-  list.innerHTML = entries.map(function(e) {
+  list.innerHTML = entries.map(function(e, idx) {
     var d = new Date(e.time);
     var dateStr = (e.time && !isNaN(d) && d.getFullYear() > 1970) ? d.toLocaleDateString() : 'Date unknown';
     var typeLabel = e.logType === 'sale' ? '🏷️ Sale' : '📥 Purchase';
@@ -13787,15 +13771,33 @@ function ledgerRender() {
     }
     var syncTag = e.synced ? '<span style="color:#3a7;font-size:11px;">✓ synced</span>' : '<span style="color:#c90;font-size:11px;">⏳ pending</span>';
     var countStr = e.count > 1 ? ' × ' + e.count : '';
-    return '<div class="box">' +
+    var rowId = 'ledger-row-' + idx;
+    var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+    var farmosLink = (e.source === 'farmOS' && cfg.url) ? cfg.url.replace(/\/$/, '') + '/log/' + e.logType + '/' + e.id : null;
+    return '<div class="box" id="' + rowId + '" onclick="ledgerToggleExpand(\'' + rowId + '\')" style="cursor:pointer;">' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
         '<strong style="font-size:15px;">' + (e.name || '—') + countStr + '</strong>' +
         '<span style="color:' + typeColor + ';font-size:14px;font-weight:bold;">' + (priceStr || '—') + '</span>' +
       '</div>' +
       '<div style="font-size:13px;color:#888;margin-top:2px;">' + typeLabel + ' · ' + dateStr + ' · ' + syncTag + '</div>' +
       (e.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + e.notes + '</div>' : '') +
+      '<div class="ledger-details" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #333;font-size:13px;color:#aaa;">' +
+        '<div>Count: ' + (e.count || 1) + '</div>' +
+        (e.unitPrice != null ? '<div>Unit price: $' + e.unitPrice.toFixed(2) + '</div>' : '') +
+        (e.totalPrice != null ? '<div>Total price: $' + e.totalPrice.toFixed(2) + '</div>' : '') +
+        '<div>Synced: ' + (e.synced ? 'Yes' : 'No') + '</div>' +
+        (farmosLink ? '<div style="margin-top:6px;"><a href="' + farmosLink + '" target="_blank" style="color:#3a7;" onclick="event.stopPropagation();">Open in farmOS →</a></div>' : '') +
+      '</div>' +
     '</div>';
   }).join('');
+}
+
+function ledgerToggleExpand(rowId) {
+  var row = document.getElementById(rowId);
+  if (!row) return;
+  var details = row.querySelector('.ledger-details');
+  if (!details) return;
+  details.style.display = details.style.display === 'none' ? '' : 'none';
 }
 
 function openDashboard() {
