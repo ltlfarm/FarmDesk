@@ -1591,7 +1591,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = "2026.06.28-2356"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.06.29-2024"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -13659,8 +13659,8 @@ async function ledgerFetch() {
           if (inc.type === 'quantity--standard') {
             var attrs = inc.attributes || {};
             var val = attrs.value ? (parseFloat(attrs.value.numerator) / parseFloat(attrs.value.denominator)) : null;
-            var up = attrs.unit_price ? (parseFloat(attrs.unit_price.numerator) / parseFloat(attrs.unit_price.denominator) / 100) : null;
-            var tp = attrs.total_price ? (parseFloat(attrs.total_price.numerator) / parseFloat(attrs.total_price.denominator) / 100) : null;
+            var up = attrs.unit_price ? (parseFloat(attrs.unit_price.numerator) / parseFloat(attrs.unit_price.denominator)) : null;
+            var tp = attrs.total_price ? (parseFloat(attrs.total_price.numerator) / parseFloat(attrs.total_price.denominator)) : null;
             quantities[inc.id] = { count: val, unitPrice: up, totalPrice: tp };
           }
         });
