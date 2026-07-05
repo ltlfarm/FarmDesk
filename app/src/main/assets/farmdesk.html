@@ -1384,6 +1384,34 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 </div>
 
 <script>
+// ===== DIAGNOSTIC ERROR BANNER — TEMPORARY — shows any startup crash on screen =====
+// Added to find why home/settings/module tabs are blank on device. Remove once fixed.
+function showFatalErrorBanner(msg) {
+  try {
+    var existing = document.getElementById('fatalErrorBanner');
+    if (existing) { existing.textContent += '\n---\n' + msg; return; }
+    var b = document.createElement('div');
+    b.id = 'fatalErrorBanner';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#a00;color:#fff;font-family:monospace;font-size:12px;padding:10px;white-space:pre-wrap;max-height:60vh;overflow:auto;';
+    b.textContent = '\u26A0\uFE0F FarmDesk startup error:\n' + msg;
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715 Dismiss';
+    closeBtn.style.cssText = 'display:block;margin-top:8px;padding:6px 12px;';
+    closeBtn.onclick = function() { b.remove(); };
+    b.appendChild(closeBtn);
+    document.body.appendChild(b);
+  } catch (e2) { /* nothing more we can do */ }
+}
+window.addEventListener('error', function(e) {
+  var msg = (e.error && e.error.stack) ? e.error.stack : (e.message + ' (' + e.filename + ':' + e.lineno + ':' + e.colno + ')');
+  showFatalErrorBanner(msg);
+});
+window.addEventListener('unhandledrejection', function(e) {
+  var msg = (e.reason && e.reason.stack) ? e.reason.stack : String(e.reason);
+  showFatalErrorBanner('Unhandled promise rejection: ' + msg);
+});
+// ===== END DIAGNOSTIC BANNER =====
+
 // ============================================================
 // FARMDESK — SCRIPT TABLE OF CONTENTS
 // ============================================================
@@ -1591,7 +1619,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783285027
+const APP_VERSION = 1783294159
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
