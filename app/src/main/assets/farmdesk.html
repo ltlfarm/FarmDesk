@@ -1082,12 +1082,17 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   </div>
   <div class="box">
     <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button onclick="openLedgerEntryModal('sale')" class="wide" style="margin:0;">🏷️ Add Sale</button>
+      <button onclick="openLedgerEntryModal('purchase')" class="secondary wide" style="margin:0;">📥 Add Purchase</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
       <button id="ledgerFetchBtn" onclick="ledgerFetch()" class="secondary wide" style="margin:0;">⬇️ Fetch from farmOS</button>
     </div>
     <div class="filter-chips">
       <button class="chip active" onclick="ledgerSetFilter('all',this)">All</button>
       <button class="chip" onclick="ledgerSetFilter('sale',this)">🏷️ Sales</button>
       <button class="chip" onclick="ledgerSetFilter('purchase',this)">📥 Purchases</button>
+      <button class="chip" onclick="ledgerSetFilter('contacts',this)">📇 Contacts</button>
     </div>
   </div>
   <div id="ledger-summary" class="box" style="display:none;"></div>
@@ -1581,6 +1586,7 @@ const LS = {
   userUUID:       "farmdesk_user_uuid",  // farmOS user UUID for owner relationship on logs
   // Per-URL log storage — key is farmdesk_logs_<urlhash>
   logsForUrl: (url) => "farmdesk_logs_" + btoa(url).replace(/[^a-z0-9]/gi,"").slice(0,20),
+  contacts:       "farmdesk_contacts",
 };
 
 // ===== ROLE HELPERS =====
@@ -1619,7 +1625,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783294947;
+const APP_VERSION = 1783368684;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4684,6 +4690,17 @@ function saveBatches() { localStorage.setItem(BATCHES_LS_KEY, JSON.stringify(bat
 // nothing is lost or blocked.
 const PENDING_ACTIONS_LS_KEY = 'farmdesk_pending_actions';
 let pendingActions = JSON.parse(localStorage.getItem(PENDING_ACTIONS_LS_KEY) || '[]');
+
+// ===== SHARED: Contacts (customers/suppliers) =====
+// Stored locally AND synced through the shared FarmDesk Config blob (see
+// buildConfigPayload/pullConfig) so any device that pulls config gets the
+// same contact list — not just whichever device originally entered them.
+let contacts = JSON.parse(localStorage.getItem(LS.contacts) || '[]');
+function saveContacts() { localStorage.setItem(LS.contacts, JSON.stringify(contacts)); }
+// role: 'customer' | 'supplier' — returns contacts tagged with that role (or both)
+function contactsByRole(role) {
+  return contacts.filter(function(c) { return c.roles && c.roles.indexOf(role) >= 0; });
+}
 function savePendingActions() { localStorage.setItem(PENDING_ACTIONS_LS_KEY, JSON.stringify(pendingActions)); }
 // dedupeByAnimal: for "current state" actions (profile/retype) only the
 // latest local edit matters, so replace any not-yet-synced entry of the
@@ -13640,9 +13657,15 @@ let _ledgerFilter = 'all';
 let _ledgerEntries = []; // combined local + farmOS entries
 
 function ledgerSetFilter(f, btn) {
-  _ledgerFilter = f;
   document.querySelectorAll('#screen-ledger .chip').forEach(function(c) { c.classList.remove('active'); });
   if (btn) btn.classList.add('active');
+  if (f === 'contacts') {
+    var sum = document.getElementById('ledger-summary');
+    if (sum) sum.style.display = 'none';
+    contactsRender();
+    return;
+  }
+  _ledgerFilter = f;
   ledgerRender();
 }
 
@@ -13894,6 +13917,391 @@ function ledgerToggleExpand(rowId) {
   var details = row.querySelector('.ledger-details');
   if (!details) return;
   details.style.display = details.style.display === 'none' ? '' : 'none';
+}
+
+// ===== CONTACTS (customers / suppliers) =====
+// Stored as real farmOS log--activity records (name: "Contact: X") so anyone
+// using the farmOS web UI can find them too — not hidden inside app-only
+// config. notes.value holds human-readable text for the web UI; the hidden
+// data field holds a JSON copy for the app to parse reliably. If a contact
+// was created straight from the farmOS web UI (no data field), the app falls
+// back to parsing the notes text.
+const CONTACT_LOG_PREFIX = "Contact: ";
+
+function contactNotesText(c) {
+  var roleLabel = (c.roles||[]).map(function(r){ return r==='customer'?'Customer':'Supplier'; }).join(', ') || '—';
+  var lines = [
+    'Type: ' + roleLabel,
+    'Phone: ' + (c.phone||''),
+    'Email: ' + (c.email||''),
+    'Address: ' + (c.address||'')
+  ];
+  if (c.notes) lines.push('', c.notes);
+  return lines.join('\n');
+}
+function parseContactNotesText(text) {
+  var out = { phone:'', email:'', address:'', notes:'', roles:[] };
+  var lines = (text||'').split('\n');
+  var extraLines = [];
+  var pastFields = false;
+  lines.forEach(function(line) {
+    var m;
+    if (!pastFields && (m = line.match(/^Type:\s*(.*)$/i))) {
+      if (/customer/i.test(m[1])) out.roles.push('customer');
+      if (/supplier/i.test(m[1])) out.roles.push('supplier');
+    } else if (!pastFields && (m = line.match(/^Phone:\s*(.*)$/i))) {
+      out.phone = m[1].trim();
+    } else if (!pastFields && (m = line.match(/^Email:\s*(.*)$/i))) {
+      out.email = m[1].trim();
+    } else if (!pastFields && (m = line.match(/^Address:\s*(.*)$/i))) {
+      out.address = m[1].trim();
+    } else {
+      pastFields = true;
+      extraLines.push(line);
+    }
+  });
+  out.notes = extraLines.join('\n').trim();
+  return out;
+}
+
+async function fetchContactsFromFarmOS(token) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+  var res = await fetchWithTimeout(
+    apiUrl("/api/log/activity?filter[name][operator]=STARTS_WITH&filter[name][value]=" + encodeURIComponent(CONTACT_LOG_PREFIX) + "&page[limit]=200"),
+    { headers: headers }
+  );
+  if (!res.ok) return;
+  var data = await res.json();
+  var fetched = (data.data || []).map(function(rec) {
+    var a = rec.attributes;
+    var displayName = (a.name || '').slice(CONTACT_LOG_PREFIX.length);
+    var parsed = null;
+    if (a.data) {
+      try { parsed = JSON.parse(a.data); } catch(e) { parsed = null; }
+    }
+    if (!parsed) {
+      var rawNotes = (a.notes && a.notes.value || '').replace(/<[^>]+>/g, '\n').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+      parsed = parseContactNotesText(rawNotes);
+    }
+    return {
+      id: 'contact_' + rec.id,
+      farmosUUID: rec.id,
+      name: displayName || '(unnamed)',
+      phone: parsed.phone || '',
+      email: parsed.email || '',
+      address: parsed.address || '',
+      notes: parsed.notes || '',
+      roles: parsed.roles || [],
+      updated: new Date(a.changed || a.created || 0).getTime()
+    };
+  });
+  contacts = fetched;
+  saveContacts();
+}
+
+function contactsRender() {
+  var list = document.getElementById('ledger-list');
+  if (!list) return;
+  var loadBtn = '<button onclick="openContactModal()" class="wide" style="margin-bottom:10px;">➕ Add Contact</button>';
+  if (!contacts.length) {
+    list.innerHTML = loadBtn + '<div class="box" style="color:#888;text-align:center;padding:20px;">No contacts yet. Tap Fetch below to load from farmOS, or add one.</div>' +
+      '<button onclick="contactsFetch()" class="secondary wide">⬇️ Fetch Contacts from farmOS</button>';
+    return;
+  }
+  var sorted = contacts.slice().sort(function(a,b) { return (a.name||'').localeCompare(b.name||''); });
+  list.innerHTML = loadBtn +
+    '<button onclick="contactsFetch()" class="secondary wide" style="margin-bottom:10px;">⬇️ Fetch Contacts from farmOS</button>' +
+    sorted.map(function(c) {
+      var roleTags = (c.roles||[]).map(function(r) {
+        return '<span style="background:' + (r==='customer'?'#2a5':'#a52') + ';color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;margin-right:4px;">' + (r==='customer'?'Customer':'Supplier') + '</span>';
+      }).join('');
+      return '<div class="box" onclick="openContactModal(\'' + c.id + '\')" style="cursor:pointer;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+          '<strong style="font-size:15px;">' + (c.name || '—') + '</strong>' +
+          '<span>' + roleTags + '</span>' +
+        '</div>' +
+        (c.phone ? '<div style="font-size:13px;color:#8bd;margin-top:4px;"><a href="tel:' + c.phone.replace(/[^0-9+]/g,'') + '" onclick="event.stopPropagation();" style="color:#8bd;">📞 ' + c.phone + '</a></div>' : '') +
+        (c.email ? '<div style="font-size:13px;color:#8bd;margin-top:2px;"><a href="mailto:' + c.email + '" onclick="event.stopPropagation();" style="color:#8bd;">✉️ ' + c.email + '</a></div>' : '') +
+        (c.address ? '<div style="font-size:13px;color:#8bd;margin-top:2px;"><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) + '" target="_blank" onclick="event.stopPropagation();" style="color:#8bd;">📍 ' + c.address + '</a></div>' : '') +
+        (c.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + c.notes + '</div>' : '') +
+      '</div>';
+    }).join('');
+}
+
+async function contactsFetch() {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
+  try {
+    var token = await getCachedToken(cfg);
+    await fetchContactsFromFarmOS(token);
+    contactsRender();
+  } catch(e) {
+    alert('Fetch failed: ' + e.message);
+  }
+}
+
+function openContactModal(id) {
+  var c = id ? contacts.find(function(x) { return x.id === id; }) : null;
+  document.getElementById('contactModalTitle').textContent = c ? 'Edit Contact' : 'Add Contact';
+  document.getElementById('contact_id').value = c ? c.id : '';
+  document.getElementById('contact_name').value = c ? (c.name||'') : '';
+  document.getElementById('contact_phone').value = c ? (c.phone||'') : '';
+  document.getElementById('contact_email').value = c ? (c.email||'') : '';
+  document.getElementById('contact_address').value = c ? (c.address||'') : '';
+  document.getElementById('contact_notes').value = c ? (c.notes||'') : '';
+  document.getElementById('contact_role_customer').checked = c ? (c.roles||[]).indexOf('customer') >= 0 : false;
+  document.getElementById('contact_role_supplier').checked = c ? (c.roles||[]).indexOf('supplier') >= 0 : false;
+  document.getElementById('contactDeleteBtn').style.display = c ? '' : 'none';
+  document.getElementById('contactModal').style.display = '';
+}
+function closeContactModal() {
+  document.getElementById('contactModal').style.display = 'none';
+}
+
+// Pushes one contact to farmOS as a log--activity (POST if new, PATCH if it
+// already has a farmosUUID). Returns the updated contact object with its
+// farmosUUID set, or throws on failure.
+async function pushContactToFarmOS(c, token) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var attrs = {
+    name: CONTACT_LOG_PREFIX + c.name,
+    status: 'done',
+    notes: { value: contactNotesText(c), format: 'default' },
+    data: JSON.stringify({ phone: c.phone, email: c.email, address: c.address, notes: c.notes, roles: c.roles })
+  };
+  if (c.farmosUUID) {
+    var res = await fetchWithTimeout(apiUrl('/api/log/activity/' + c.farmosUUID), {
+      method: 'PATCH', headers: headers,
+      body: JSON.stringify({ data: { type: 'log--activity', id: c.farmosUUID, attributes: attrs } })
+    });
+    if (!res.ok) throw new Error('Contact update failed: ' + res.status);
+  } else {
+    var res2 = await fetchWithTimeout(apiUrl('/api/log/activity'), {
+      method: 'POST', headers: headers,
+      body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs } })
+    });
+    if (!res2.ok) throw new Error('Contact create failed: ' + res2.status);
+    var resData = await res2.json();
+    c.farmosUUID = resData.data.id;
+  }
+  return c;
+}
+
+async function saveContact() {
+  var id = document.getElementById('contact_id').value;
+  var name = document.getElementById('contact_name').value.trim();
+  if (!name) { alert('Name is required.'); return; }
+  var roles = [];
+  if (document.getElementById('contact_role_customer').checked) roles.push('customer');
+  if (document.getElementById('contact_role_supplier').checked) roles.push('supplier');
+  var existing = id ? contacts.find(function(c) { return c.id === id; }) : null;
+  var data = {
+    id: id || ('contact_' + Date.now() + '_' + Math.random().toString(36).slice(2)),
+    farmosUUID: existing ? existing.farmosUUID : null,
+    name: name,
+    phone: document.getElementById('contact_phone').value.trim(),
+    email: document.getElementById('contact_email').value.trim(),
+    address: document.getElementById('contact_address').value.trim(),
+    notes: document.getElementById('contact_notes').value.trim(),
+    roles: roles,
+    updated: Date.now()
+  };
+
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
+
+  try {
+    var token = await getCachedToken(cfg);
+    data = await pushContactToFarmOS(data, token);
+  } catch(e) {
+    alert('Save failed: ' + e.message);
+    return;
+  }
+
+  var idx = contacts.findIndex(function(c) { return c.id === data.id; });
+  if (idx >= 0) contacts[idx] = data; else contacts.push(data);
+  saveContacts();
+  closeContactModal();
+  contactsRender();
+}
+
+async function deleteContact() {
+  var id = document.getElementById('contact_id').value;
+  if (!id) return;
+  if (!confirm('Delete this contact?')) return;
+  var c = contacts.find(function(x) { return x.id === id; });
+  if (c && c.farmosUUID) {
+    var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+    if (cfg.url && cfg.user && cfg.pass) {
+      try {
+        var token = await getCachedToken(cfg);
+        await fetchWithTimeout(apiUrl('/api/log/activity/' + c.farmosUUID), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+      } catch(e) {
+        alert('Could not delete from farmOS (' + e.message + '). Removed locally only — it may reappear on next Fetch.');
+      }
+    }
+  }
+  contacts = contacts.filter(function(c) { return c.id !== id; });
+  saveContacts();
+  closeContactModal();
+  contactsRender();
+}
+
+// ===== ADD SALE / ADD PURCHASE (Ledger) =====
+function openLedgerEntryModal(kind) {
+  document.getElementById('ledgerEntryModalTitle').textContent = kind === 'sale' ? '🏷️ Add Sale' : '📥 Add Purchase';
+  document.getElementById('ledgerEntryKind').value = kind;
+  document.getElementById('le_name').value = '';
+  var now = new Date();
+  var pad = function(n) { return String(n).padStart(2,'0'); };
+  document.getElementById('le_date').value = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate());
+  document.getElementById('le_time').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  document.getElementById('le_qty').value = '1';
+  document.getElementById('le_unitprice').value = '';
+  document.getElementById('le_totalprice').value = '';
+  document.getElementById('le_partyLabel').textContent = kind === 'sale' ? 'Customer' : 'Seller';
+  var partyList = document.getElementById('le_party_list');
+  var roleContacts = contactsByRole(kind === 'sale' ? 'customer' : 'supplier');
+  partyList.innerHTML = roleContacts.map(function(c) { return '<option value="' + c.name + '">'; }).join('');
+  document.getElementById('le_party').value = '';
+  document.getElementById('le_invoice').value = '';
+  document.getElementById('le_lot').value = '';
+  document.getElementById('le_notes').value = '';
+  document.getElementById('ledgerEntryModal').style.display = '';
+}
+function closeLedgerEntryModal() {
+  document.getElementById('ledgerEntryModal').style.display = 'none';
+}
+// Auto-calculate total when qty or unit price changes (only if total wasn't hand-edited last)
+function le_recalcTotal() {
+  var qty = parseFloat(document.getElementById('le_qty').value) || 0;
+  var unit = parseFloat(document.getElementById('le_unitprice').value) || 0;
+  if (qty > 0 && unit > 0) {
+    document.getElementById('le_totalprice').value = (qty * unit).toFixed(2);
+  }
+}
+async function saveLedgerEntry() {
+  var kind = document.getElementById('ledgerEntryKind').value;
+  var name = document.getElementById('le_name').value.trim();
+  var dateVal = document.getElementById('le_date').value;
+  var timeVal = document.getElementById('le_time').value || '00:00';
+  var qty = parseFloat(document.getElementById('le_qty').value) || 1;
+  var unitPrice = parseFloat(document.getElementById('le_unitprice').value) || 0;
+  var totalPrice = parseFloat(document.getElementById('le_totalprice').value) || (qty * unitPrice);
+  var party = document.getElementById('le_party').value.trim();
+  var invoice = document.getElementById('le_invoice').value.trim();
+  var lot = document.getElementById('le_lot').value.trim();
+  var notes = document.getElementById('le_notes').value.trim();
+
+  if (!dateVal) { alert('Date is required.'); return; }
+  var localDT = new Date(dateVal + 'T' + timeVal + ':00');
+  var tsUnix = String(Math.floor(localDT.getTime() / 1000));
+
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
+
+  var saveBtn = document.getElementById('ledgerEntrySaveBtn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+  try {
+    var token = await getCachedToken(cfg);
+    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+
+    // Build the price quantity (supports arbitrary qty, unlike the 1-head-only
+    // shared helper used by animal sale/death flows — kept separate so those
+    // working flows are never touched).
+    var qRef = null;
+    if (unitPrice > 0 || totalPrice > 0) {
+      var unitCents = Math.round((unitPrice || (totalPrice / qty)) * 100);
+      var totalCents = Math.round(totalPrice * 100);
+      var qAttrs = {
+        measure: 'count',
+        value: { numerator: String(qty), denominator: '1' },
+        unit_price: { numerator: String(unitCents), denominator: '100' },
+        total_price: { numerator: String(totalCents), denominator: '100' }
+      };
+      var qRes = await fetchWithTimeout(apiUrl('/api/quantity/price'), {
+        method: 'POST', headers: headers,
+        body: JSON.stringify({ data: { type: 'quantity--price', attributes: qAttrs } })
+      });
+      if (qRes.ok) {
+        var qData = await qRes.json();
+        qRef = { type: 'quantity--price', id: qData.data.id };
+        if (qData.data.attributes && qData.data.attributes.drupal_internal__revision_id != null) {
+          qRef.meta = { target_revision_id: qData.data.attributes.drupal_internal__revision_id };
+        }
+      }
+    }
+
+    var logType = kind === 'sale' ? 'sale' : 'purchase';
+    var attrs = {
+      status: 'done',
+      timestamp: tsUnix,
+      notes: { value: notes, format: 'default' },
+      invoice_number: invoice || null,
+      lot_number: lot || null
+    };
+    if (name) attrs.name = name;
+    if (kind === 'sale') attrs.customer = party || null;
+    else attrs.seller = party || null;
+
+    var payload = { data: { type: 'log--' + logType, attributes: attrs, relationships: {} } };
+    if (qRef) payload.data.relationships.quantity = { data: [qRef] };
+
+    var logRes = await fetchWithTimeout(apiUrl('/api/log/' + logType), {
+      method: 'POST', headers: headers, body: JSON.stringify(payload)
+    });
+    if (!logRes.ok) throw new Error('Log save failed: ' + logRes.status);
+    var logData = await logRes.json();
+
+    // Remember this contact for next time if it's new — pushed to farmOS too,
+    // same as a contact added directly via the Contacts tab.
+    if (party) {
+      var role = kind === 'sale' ? 'customer' : 'supplier';
+      var existingContact = contacts.find(function(c) { return c.name.toLowerCase() === party.toLowerCase(); });
+      try {
+        if (!existingContact) {
+          var newContact = { id: 'contact_' + Date.now() + '_' + Math.random().toString(36).slice(2), farmosUUID: null, name: party, phone:'', email:'', address:'', notes:'', roles:[role], updated: Date.now() };
+          newContact = await pushContactToFarmOS(newContact, token);
+          contacts.push(newContact);
+          saveContacts();
+        } else if (existingContact.roles.indexOf(role) < 0) {
+          existingContact.roles.push(role);
+          existingContact.updated = Date.now();
+          await pushContactToFarmOS(existingContact, token);
+          saveContacts();
+        }
+      } catch(e) { /* contact save is best-effort — never blocks the sale/purchase itself */ }
+    }
+
+    // Add to local ledger cache immediately so it shows without a re-fetch
+    var cached = [];
+    try { cached = JSON.parse(localStorage.getItem('farmdesk_ledger_cache') || '[]'); } catch(e) {}
+    cached.unshift({
+      id: logData.data.id,
+      logType: logType,
+      name: name || (logData.data.attributes && logData.data.attributes.name) || (kind === 'sale' ? 'Sale' : 'Purchase'),
+      count: qty,
+      unitPrice: unitPrice || null,
+      totalPrice: totalPrice || null,
+      notes: notes,
+      time: localDT.toISOString(),
+      synced: true,
+      source: 'farmOS'
+    });
+    localStorage.setItem('farmdesk_ledger_cache', JSON.stringify(cached));
+    _ledgerEntries = cached.concat(_ledgerEntries.filter(function(e) { return e.source !== 'farmOS'; }));
+    _ledgerEntries.sort(function(a, b) { return new Date(b.time || 0) - new Date(a.time || 0); });
+
+    closeLedgerEntryModal();
+    ledgerRender();
+  } catch(e) {
+    alert('Save failed: ' + e.message);
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
+  }
 }
 
 function openDashboard() {
@@ -14595,6 +15003,82 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button id="confirm-modal-btn" onclick="closeConfirm()" style="flex:1;margin:0;">Confirm</button>
       <button onclick="closeConfirm()" class="secondary" style="flex:1;margin:0;">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- ===== CONTACT MODAL (customers/suppliers) ===== -->
+<div id="contactModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeContactModal()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong id="contactModalTitle" style="font-size:18px;">Add Contact</strong>
+      <button onclick="closeContactModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <input type="hidden" id="contact_id">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name *</label>
+    <input id="contact_name" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Phone</label>
+    <input id="contact_phone" type="tel" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Email</label>
+    <input id="contact_email" type="email" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Address</label>
+    <input id="contact_address" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
+    <textarea id="contact_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Type</label>
+    <div style="display:flex;gap:16px;margin-bottom:12px;">
+      <label style="color:#eee;font-size:14px;"><input type="checkbox" id="contact_role_customer"> Customer</label>
+      <label style="color:#eee;font-size:14px;"><input type="checkbox" id="contact_role_supplier"> Supplier</label>
+    </div>
+    <button onclick="saveContact()" style="width:100%;margin:0 0 8px;">💾 Save</button>
+    <button id="contactDeleteBtn" onclick="deleteContact()" class="secondary" style="width:100%;margin:0;display:none;">🗑️ Delete</button>
+  </div>
+</div>
+
+<!-- ===== LEDGER ADD SALE/PURCHASE MODAL ===== -->
+<div id="ledgerEntryModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeLedgerEntryModal()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong id="ledgerEntryModalTitle" style="font-size:18px;">Add Sale</strong>
+      <button onclick="closeLedgerEntryModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <input type="hidden" id="ledgerEntryKind">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name (optional)</label>
+    <input id="le_name" type="text" placeholder="Leave blank to auto-generate" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <div style="display:flex;gap:8px;">
+      <div style="flex:1;">
+        <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Date *</label>
+        <input id="le_date" type="date" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+      <div style="flex:1;">
+        <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Time</label>
+        <input id="le_time" type="time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+    </div>
+    <p style="color:#666;font-size:12px;margin:-4px 0 8px;">Defaults to now — only change if this happened earlier.</p>
+    <div style="display:flex;gap:8px;">
+      <div style="flex:1;">
+        <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Quantity</label>
+        <input id="le_qty" type="number" step="any" value="1" oninput="le_recalcTotal()" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+      <div style="flex:1;">
+        <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Unit price</label>
+        <input id="le_unitprice" type="number" step="0.01" placeholder="0.00" oninput="le_recalcTotal()" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+      <div style="flex:1;">
+        <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Total price</label>
+        <input id="le_totalprice" type="number" step="0.01" placeholder="0.00" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      </div>
+    </div>
+    <label id="le_partyLabel" style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Customer</label>
+    <input id="le_party" type="text" list="le_party_list" placeholder="Type a name..." style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <datalist id="le_party_list"></datalist>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Invoice number</label>
+    <input id="le_invoice" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Lot number</label>
+    <input id="le_lot" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
+    <textarea id="le_notes" rows="2" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <button id="ledgerEntrySaveBtn" onclick="saveLedgerEntry()" style="width:100%;margin:0;">💾 Save</button>
   </div>
 </div>
 
