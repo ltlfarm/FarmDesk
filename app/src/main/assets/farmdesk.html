@@ -1625,7 +1625,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783368684;
+const APP_VERSION = 1783372648;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8563,6 +8563,90 @@ async function processPendingBatchActions(token, logFn) {
   return { ok: ok, skipped: skipped, fail: fail };
 }
 
+// Processes queued Ledger (Add Sale/Purchase) and Contact save/delete
+// actions — the network half of the local-first flow. Called during sync,
+// same as processPendingGoatActions/processPendingBatchActions.
+async function processPendingLedgerActions(token, logFn) {
+  var items = pendingActions.filter(function(a) { return !a.synced && ['ledgerSale','ledgerPurchase','contactSave','contactDelete'].indexOf(a.type) !== -1; });
+  var ok = 0, fail = 0;
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  for (var i = 0; i < items.length; i++) {
+    var a = items[i];
+    try {
+      if (a.type === 'ledgerSale' || a.type === 'ledgerPurchase') {
+        var kind = a.type === 'ledgerSale' ? 'sale' : 'purchase';
+        var p = a.payload;
+        var qRef = null;
+        if (p.unitPrice > 0 || p.totalPrice > 0) {
+          var unitCents = Math.round((p.unitPrice || (p.totalPrice / p.qty)) * 100);
+          var totalCents = Math.round(p.totalPrice * 100);
+          var qAttrs = {
+            measure: 'count',
+            value: { numerator: String(p.qty), denominator: '1' },
+            unit_price: { numerator: String(unitCents), denominator: '100' },
+            total_price: { numerator: String(totalCents), denominator: '100' }
+          };
+          var qRes = await fetchWithTimeout(apiUrl('/api/quantity/price'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'quantity--price', attributes: qAttrs } }) });
+          if (qRes.ok) {
+            var qData = await qRes.json();
+            qRef = { type: 'quantity--price', id: qData.data.id };
+            if (qData.data.attributes && qData.data.attributes.drupal_internal__revision_id != null) {
+              qRef.meta = { target_revision_id: qData.data.attributes.drupal_internal__revision_id };
+            }
+          }
+        }
+        var attrs = {
+          status: 'done',
+          timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)),
+          notes: { value: p.notes, format: 'default' },
+          invoice_number: p.invoice || null,
+          lot_number: p.lot || null
+        };
+        if (p.name) attrs.name = p.name;
+        if (kind === 'sale') attrs.customer = p.party || null; else attrs.seller = p.party || null;
+        var logPayload = { data: { type: 'log--' + kind, attributes: attrs, relationships: {} } };
+        if (qRef) logPayload.data.relationships.quantity = { data: [qRef] };
+        var logRes = await fetchWithTimeout(apiUrl('/api/log/' + kind), { method: 'POST', headers: headers, body: JSON.stringify(logPayload) });
+        if (!logRes.ok) throw new Error('HTTP ' + logRes.status);
+        var logData = await logRes.json();
+
+        // Update the local ledger cache entry so its ID/source/synced flag
+        // reflect the real farmOS record instead of the temporary local one.
+        var cached = [];
+        try { cached = JSON.parse(localStorage.getItem('farmdesk_ledger_cache') || '[]'); } catch(e2) {}
+        var cacheIdx = cached.findIndex(function(e) { return e.paId === a.id; });
+        var updatedEntry = { id: logData.data.id, paId: a.id, logType: kind, name: p.name || (kind==='sale'?'Sale':'Purchase'), count: p.qty, unitPrice: p.unitPrice||null, totalPrice: p.totalPrice||null, notes: p.notes, time: a.createdAt, synced: true, source: 'farmOS' };
+        if (cacheIdx >= 0) cached[cacheIdx] = updatedEntry; else cached.unshift(updatedEntry);
+        localStorage.setItem('farmdesk_ledger_cache', JSON.stringify(cached));
+        _ledgerEntries = cached.concat(_ledgerEntries.filter(function(e) { return e.source !== 'farmOS' && e.source !== 'local'; }));
+        _ledgerEntries.sort(function(x, y) { return new Date(y.time || 0) - new Date(x.time || 0); });
+
+      } else if (a.type === 'contactSave') {
+        var c = contacts.find(function(x) { return x.id === a.payload.localId; });
+        if (!c) { a.synced = true; continue; } // deleted locally before it synced — nothing to push
+        var pushed = await pushContactToFarmOS(c, token);
+        pushed.synced = true;
+        var cIdx = contacts.findIndex(function(x) { return x.id === c.id; });
+        if (cIdx >= 0) contacts[cIdx] = pushed;
+        saveContacts();
+      } else if (a.type === 'contactDelete') {
+        await fetchWithTimeout(apiUrl('/api/log/activity/' + a.payload.farmosUUID), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+      }
+      a.synced = true; a.lastError = null; ok++;
+      if (logFn) logFn('✅ ' + a.type + ' pushed\n');
+    } catch(e) {
+      a.lastError = e.message; fail++;
+      if (logFn) logFn('⚠️ ' + a.type + ' failed: ' + e.message + '\n');
+    }
+  }
+  savePendingActions();
+  if (typeof ledgerRender === 'function' && document.getElementById('screen-ledger') && document.getElementById('screen-ledger').classList.contains('active')) ledgerRender();
+  return { ok: ok, fail: fail };
+}
+
 // ===== MED MATERIAL HELPERS =====
 // GET search for asset--material by name. Returns UUID or null.
 async function getOrCreateMedMaterial(medName, token) {
@@ -9052,9 +9136,10 @@ async function syncToFarmOS() {
     try {
       const batchActionResult = await processPendingBatchActions(token, function(msg) { logEl.textContent += msg; });
       const goatActionResult = await processPendingGoatActions(token, function(msg) { logEl.textContent += msg; });
-      logEl.textContent += 'Queued actions: ' + (batchActionResult.ok + goatActionResult.ok) + ' ok, ' +
+      const ledgerActionResult = await processPendingLedgerActions(token, function(msg) { logEl.textContent += msg; });
+      logEl.textContent += 'Queued actions: ' + (batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok) + ' ok, ' +
         (batchActionResult.skipped + goatActionResult.skipped) + ' skipped (not synced yet), ' +
-        (batchActionResult.fail + goatActionResult.fail) + ' failed.\n';
+        (batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail) + ' failed.\n';
     } catch(e) {
       logEl.textContent += '⚠️ Queued action sync error: ' + e.message + '\n';
     }
@@ -11782,8 +11867,9 @@ async function bd_syncToFarmOS() {
       try {
         var batchActionResult = await processPendingBatchActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var goatActionResult = await processPendingGoatActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
-        synced += batchActionResult.ok + goatActionResult.ok;
-        failed += batchActionResult.fail + goatActionResult.fail;
+        var ledgerActionResult = await processPendingLedgerActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
+        synced += batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok;
+        failed += batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail;
       } catch(be) {
         if (logEl) logEl.textContent += '⚠️ Queued action sync error: ' + be.message + '\n';
       }
@@ -13920,6 +14006,19 @@ function ledgerToggleExpand(rowId) {
 }
 
 // ===== CONTACTS (customers / suppliers) =====
+// Formats a phone number to (XXX) XXX-XXXX for readability. Leaves numbers
+// that aren't a recognizable 10- or 11-digit US number exactly as entered,
+// rather than guessing at a foreign format.
+function formatPhoneDisplay(raw) {
+  var digits = (raw || '').replace(/\D/g, '');
+  if (digits.length === 10) {
+    return '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6);
+  }
+  if (digits.length === 11 && digits[0] === '1') {
+    return '(' + digits.slice(1,4) + ') ' + digits.slice(4,7) + '-' + digits.slice(7);
+  }
+  return raw;
+}
 // Stored as real farmOS log--activity records (name: "Contact: X") so anyone
 // using the farmOS web UI can find them too — not hidden inside app-only
 // config. notes.value holds human-readable text for the web UI; the hidden
@@ -13987,7 +14086,7 @@ async function fetchContactsFromFarmOS(token) {
       id: 'contact_' + rec.id,
       farmosUUID: rec.id,
       name: displayName || '(unnamed)',
-      phone: parsed.phone || '',
+      phone: formatPhoneDisplay(parsed.phone || ''),
       email: parsed.email || '',
       address: parsed.address || '',
       notes: parsed.notes || '',
@@ -14015,11 +14114,13 @@ function contactsRender() {
       var roleTags = (c.roles||[]).map(function(r) {
         return '<span style="background:' + (r==='customer'?'#2a5':'#a52') + ';color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;margin-right:4px;">' + (r==='customer'?'Customer':'Supplier') + '</span>';
       }).join('');
+      var syncTag = c.synced === false ? '<span style="color:#c90;font-size:11px;">⏳ pending</span>' : '<span style="color:#3a7;font-size:11px;">✓ synced</span>';
       return '<div class="box" onclick="openContactModal(\'' + c.id + '\')" style="cursor:pointer;">' +
         '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
           '<strong style="font-size:15px;">' + (c.name || '—') + '</strong>' +
           '<span>' + roleTags + '</span>' +
         '</div>' +
+        '<div style="margin-top:2px;">' + syncTag + '</div>' +
         (c.phone ? '<div style="font-size:13px;color:#8bd;margin-top:4px;"><a href="tel:' + c.phone.replace(/[^0-9+]/g,'') + '" onclick="event.stopPropagation();" style="color:#8bd;">📞 ' + c.phone + '</a></div>' : '') +
         (c.email ? '<div style="font-size:13px;color:#8bd;margin-top:2px;"><a href="mailto:' + c.email + '" onclick="event.stopPropagation();" style="color:#8bd;">✉️ ' + c.email + '</a></div>' : '') +
         (c.address ? '<div style="font-size:13px;color:#8bd;margin-top:2px;"><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) + '" target="_blank" onclick="event.stopPropagation();" style="color:#8bd;">📍 ' + c.address + '</a></div>' : '') +
@@ -14087,7 +14188,7 @@ async function pushContactToFarmOS(c, token) {
   return c;
 }
 
-async function saveContact() {
+function saveContact() {
   var id = document.getElementById('contact_id').value;
   var name = document.getElementById('contact_name').value.trim();
   if (!name) { alert('Name is required.'); return; }
@@ -14104,50 +14205,34 @@ async function saveContact() {
     address: document.getElementById('contact_address').value.trim(),
     notes: document.getElementById('contact_notes').value.trim(),
     roles: roles,
-    updated: Date.now()
+    updated: Date.now(),
+    synced: false
   };
-
-  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
-
-  try {
-    var token = await getCachedToken(cfg);
-    data = await pushContactToFarmOS(data, token);
-  } catch(e) {
-    alert('Save failed: ' + e.message);
-    return;
-  }
 
   var idx = contacts.findIndex(function(c) { return c.id === data.id; });
   if (idx >= 0) contacts[idx] = data; else contacts.push(data);
   saveContacts();
+  queuePendingAction('contactSave', { localId: data.id });
+
+  showToast('✅ Saved locally — will sync to farmOS next push');
   closeContactModal();
   contactsRender();
 }
 
-async function deleteContact() {
+function deleteContact() {
   var id = document.getElementById('contact_id').value;
   if (!id) return;
   if (!confirm('Delete this contact?')) return;
   var c = contacts.find(function(x) { return x.id === id; });
   if (c && c.farmosUUID) {
-    var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-    if (cfg.url && cfg.user && cfg.pass) {
-      try {
-        var token = await getCachedToken(cfg);
-        await fetchWithTimeout(apiUrl('/api/log/activity/' + c.farmosUUID), {
-          method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
-        });
-      } catch(e) {
-        alert('Could not delete from farmOS (' + e.message + '). Removed locally only — it may reappear on next Fetch.');
-      }
-    }
+    queuePendingAction('contactDelete', { farmosUUID: c.farmosUUID });
   }
   contacts = contacts.filter(function(c) { return c.id !== id; });
   saveContacts();
+  showToast('✅ Deleted locally — will sync to farmOS next push');
   closeContactModal();
   contactsRender();
+
 }
 
 // ===== ADD SALE / ADD PURCHASE (Ledger) =====
@@ -14183,7 +14268,7 @@ function le_recalcTotal() {
     document.getElementById('le_totalprice').value = (qty * unit).toFixed(2);
   }
 }
-async function saveLedgerEntry() {
+function saveLedgerEntry() {
   var kind = document.getElementById('ledgerEntryKind').value;
   var name = document.getElementById('le_name').value.trim();
   var dateVal = document.getElementById('le_date').value;
@@ -14198,110 +14283,54 @@ async function saveLedgerEntry() {
 
   if (!dateVal) { alert('Date is required.'); return; }
   var localDT = new Date(dateVal + 'T' + timeVal + ':00');
-  var tsUnix = String(Math.floor(localDT.getTime() / 1000));
 
-  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
-  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
+  var actionType = kind === 'sale' ? 'ledgerSale' : 'ledgerPurchase';
+  var payload = { name: name, qty: qty, unitPrice: unitPrice, totalPrice: totalPrice, party: party, invoice: invoice, lot: lot, notes: notes };
+  var action = queuePendingAction(actionType, payload, false, localDT.toISOString());
 
-  var saveBtn = document.getElementById('ledgerEntrySaveBtn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
-  try {
-    var token = await getCachedToken(cfg);
-    var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
-
-    // Build the price quantity (supports arbitrary qty, unlike the 1-head-only
-    // shared helper used by animal sale/death flows — kept separate so those
-    // working flows are never touched).
-    var qRef = null;
-    if (unitPrice > 0 || totalPrice > 0) {
-      var unitCents = Math.round((unitPrice || (totalPrice / qty)) * 100);
-      var totalCents = Math.round(totalPrice * 100);
-      var qAttrs = {
-        measure: 'count',
-        value: { numerator: String(qty), denominator: '1' },
-        unit_price: { numerator: String(unitCents), denominator: '100' },
-        total_price: { numerator: String(totalCents), denominator: '100' }
-      };
-      var qRes = await fetchWithTimeout(apiUrl('/api/quantity/price'), {
-        method: 'POST', headers: headers,
-        body: JSON.stringify({ data: { type: 'quantity--price', attributes: qAttrs } })
-      });
-      if (qRes.ok) {
-        var qData = await qRes.json();
-        qRef = { type: 'quantity--price', id: qData.data.id };
-        if (qData.data.attributes && qData.data.attributes.drupal_internal__revision_id != null) {
-          qRef.meta = { target_revision_id: qData.data.attributes.drupal_internal__revision_id };
-        }
-      }
+  // Remember this contact locally right away too (queued to push next sync,
+  // same as adding one directly via the Contacts tab).
+  if (party) {
+    var role = kind === 'sale' ? 'customer' : 'supplier';
+    var existingContact = contacts.find(function(c) { return c.name.toLowerCase() === party.toLowerCase(); });
+    if (!existingContact) {
+      var newContact = { id: 'contact_' + Date.now() + '_' + Math.random().toString(36).slice(2), farmosUUID: null, name: party, phone:'', email:'', address:'', notes:'', roles:[role], updated: Date.now(), synced: false };
+      contacts.push(newContact);
+      saveContacts();
+      queuePendingAction('contactSave', { localId: newContact.id });
+    } else if (existingContact.roles.indexOf(role) < 0) {
+      existingContact.roles.push(role);
+      existingContact.updated = Date.now();
+      existingContact.synced = false;
+      saveContacts();
+      queuePendingAction('contactSave', { localId: existingContact.id });
     }
-
-    var logType = kind === 'sale' ? 'sale' : 'purchase';
-    var attrs = {
-      status: 'done',
-      timestamp: tsUnix,
-      notes: { value: notes, format: 'default' },
-      invoice_number: invoice || null,
-      lot_number: lot || null
-    };
-    if (name) attrs.name = name;
-    if (kind === 'sale') attrs.customer = party || null;
-    else attrs.seller = party || null;
-
-    var payload = { data: { type: 'log--' + logType, attributes: attrs, relationships: {} } };
-    if (qRef) payload.data.relationships.quantity = { data: [qRef] };
-
-    var logRes = await fetchWithTimeout(apiUrl('/api/log/' + logType), {
-      method: 'POST', headers: headers, body: JSON.stringify(payload)
-    });
-    if (!logRes.ok) throw new Error('Log save failed: ' + logRes.status);
-    var logData = await logRes.json();
-
-    // Remember this contact for next time if it's new — pushed to farmOS too,
-    // same as a contact added directly via the Contacts tab.
-    if (party) {
-      var role = kind === 'sale' ? 'customer' : 'supplier';
-      var existingContact = contacts.find(function(c) { return c.name.toLowerCase() === party.toLowerCase(); });
-      try {
-        if (!existingContact) {
-          var newContact = { id: 'contact_' + Date.now() + '_' + Math.random().toString(36).slice(2), farmosUUID: null, name: party, phone:'', email:'', address:'', notes:'', roles:[role], updated: Date.now() };
-          newContact = await pushContactToFarmOS(newContact, token);
-          contacts.push(newContact);
-          saveContacts();
-        } else if (existingContact.roles.indexOf(role) < 0) {
-          existingContact.roles.push(role);
-          existingContact.updated = Date.now();
-          await pushContactToFarmOS(existingContact, token);
-          saveContacts();
-        }
-      } catch(e) { /* contact save is best-effort — never blocks the sale/purchase itself */ }
-    }
-
-    // Add to local ledger cache immediately so it shows without a re-fetch
-    var cached = [];
-    try { cached = JSON.parse(localStorage.getItem('farmdesk_ledger_cache') || '[]'); } catch(e) {}
-    cached.unshift({
-      id: logData.data.id,
-      logType: logType,
-      name: name || (logData.data.attributes && logData.data.attributes.name) || (kind === 'sale' ? 'Sale' : 'Purchase'),
-      count: qty,
-      unitPrice: unitPrice || null,
-      totalPrice: totalPrice || null,
-      notes: notes,
-      time: localDT.toISOString(),
-      synced: true,
-      source: 'farmOS'
-    });
-    localStorage.setItem('farmdesk_ledger_cache', JSON.stringify(cached));
-    _ledgerEntries = cached.concat(_ledgerEntries.filter(function(e) { return e.source !== 'farmOS'; }));
-    _ledgerEntries.sort(function(a, b) { return new Date(b.time || 0) - new Date(a.time || 0); });
-
-    closeLedgerEntryModal();
-    ledgerRender();
-  } catch(e) {
-    alert('Save failed: ' + e.message);
-  } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
   }
+
+  // Add to local ledger cache immediately (optimistic) so it shows without
+  // needing a push first — matches every other module's local-first pattern.
+  var cached = [];
+  try { cached = JSON.parse(localStorage.getItem('farmdesk_ledger_cache') || '[]'); } catch(e) {}
+  cached.unshift({
+    id: action.id,
+    paId: action.id,
+    logType: kind,
+    name: name || (kind === 'sale' ? 'Sale' : 'Purchase'),
+    count: qty,
+    unitPrice: unitPrice || null,
+    totalPrice: totalPrice || null,
+    notes: notes,
+    time: localDT.toISOString(),
+    synced: false,
+    source: 'local'
+  });
+  localStorage.setItem('farmdesk_ledger_cache', JSON.stringify(cached));
+  _ledgerEntries = cached.concat(_ledgerEntries.filter(function(e) { return e.source !== 'farmOS' && e.source !== 'local'; }));
+  _ledgerEntries.sort(function(a, b) { return new Date(b.time || 0) - new Date(a.time || 0); });
+
+  showToast('✅ Saved locally — will sync to farmOS next push');
+  closeLedgerEntryModal();
+  ledgerRender();
 }
 
 function openDashboard() {
@@ -15017,7 +15046,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name *</label>
     <input id="contact_name" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Phone</label>
-    <input id="contact_phone" type="tel" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <input id="contact_phone" type="tel" onblur="this.value = formatPhoneDisplay(this.value)" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Email</label>
     <input id="contact_email" type="email" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Address</label>
