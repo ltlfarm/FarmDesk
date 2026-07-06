@@ -1625,7 +1625,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783372648;
+const APP_VERSION = 1783373145;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7067,8 +7067,12 @@ function clearLogs() {
       bd_updateSyncBadge(); bd_renderBirds(); bd_renderHistory();
       batches = []; saveBatches();
       pendingActions = []; savePendingActions();
+      localStorage.removeItem('farmdesk_ledger_cache');
+      _ledgerEntries = [];
+      localStorage.setItem(LS.contacts, JSON.stringify([]));
+      contacts = [];
       renderSettings(); renderRecent(); renderDashboard();
-      showToast("✅ All logs and inventory cleared");
+      showToast("✅ All logs, ledger, and inventory cleared");
     }
   });
 }
