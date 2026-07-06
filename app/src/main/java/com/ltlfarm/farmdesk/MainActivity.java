@@ -96,7 +96,14 @@ public class MainActivity extends Activity {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Camera ready", Toast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(this, "Camera permission denied — tap Camera to try again", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Camera permission denied - tap Camera to try again", Toast.LENGTH_LONG).show();
+            }
+        }
+        if (requestCode == LOCATION_PERMISSION_REQUEST) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Location ready", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Location permission denied - map wont auto-center", Toast.LENGTH_LONG).show();
             }
         }
     }
