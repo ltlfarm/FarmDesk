@@ -1641,7 +1641,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783389847;
+const APP_VERSION = 1783395667;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -14574,16 +14574,23 @@ function _loadLeaflet(callback) {
     drawLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css';
     document.head.appendChild(drawLink);
   }
+  // Diagnostic: try a plain fetch() first to learn the REAL failure reason
+  // (network block, CORS, timeout, DNS) instead of the generic <script> onerror,
+  // which never reports why it failed.
+  fetch('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js', { method: 'HEAD', mode: 'no-cors' })
+    .then(function() { console.log('FarmDesk map: fetch HEAD to cdnjs succeeded'); })
+    .catch(function(err) { console.log('FarmDesk map: fetch HEAD to cdnjs FAILED: ' + err.message); showFatalErrorBanner('Map library fetch() failed: ' + err.message); });
+
   var script = document.createElement('script');
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
   script.onload = function() {
     var drawScript = document.createElement('script');
     drawScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.min.js';
     drawScript.onload = function() { _leafletLoaded = true; callback(); };
-    drawScript.onerror = function() { alert('Could not load map library — check your connection and try again.'); };
+    drawScript.onerror = function(e) { showFatalErrorBanner('Leaflet.Draw script failed to load. window.L is ' + (typeof window.L) + '. Check the banner above for the fetch() diagnostic.'); };
     document.head.appendChild(drawScript);
   };
-  script.onerror = function() { alert('Could not load map library — check your connection and try again.'); };
+  script.onerror = function(e) { showFatalErrorBanner('Leaflet script failed to load (script.onerror fired). Check the banner above for the fetch() diagnostic.'); };
   document.head.appendChild(script);
 }
 
