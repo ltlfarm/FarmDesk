@@ -1641,7 +1641,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783395667;
+const APP_VERSION = 1783396062;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -14585,7 +14585,7 @@ function _loadLeaflet(callback) {
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
   script.onload = function() {
     var drawScript = document.createElement('script');
-    drawScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.min.js';
+    drawScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js';
     drawScript.onload = function() { _leafletLoaded = true; callback(); };
     drawScript.onerror = function(e) { showFatalErrorBanner('Leaflet.Draw script failed to load. window.L is ' + (typeof window.L) + '. Check the banner above for the fetch() diagnostic.'); };
     document.head.appendChild(drawScript);
