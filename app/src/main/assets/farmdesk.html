@@ -655,6 +655,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   <div class="box" style="padding:10px 14px;">
     <h3 style="margin:0;">⚙️ Settings</h3>
   </div>
+  <div class="box">
+    <button class="wide" onclick="show('locations')">📍 Manage Locations</button>
+  </div>
 
   <!-- ════ GENERIC — applies to the whole app ════ -->
   <div class="set-group open" id="setgrp-general">
@@ -1098,6 +1101,19 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   <div id="ledger-summary" class="box" style="display:none;"></div>
   <div id="ledger-list"></div>
   <div id="ledger-status" style="font-size:13px;color:#888;padding:10px;text-align:center;"></div>
+</div>
+
+<div id="screen-locations" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="settingsHome()">← Home</button>
+    <h3 style="margin:10px 0 4px;">📍 Locations</h3>
+    <p style="color:#888;font-size:13px;margin:0;">Land, structures, and water sources — used by Move across every module.</p>
+  </div>
+  <div class="box">
+    <button onclick="openLocationModal()" class="wide" style="margin-bottom:8px;">➕ Add Location</button>
+    <button onclick="locationsFetch()" class="secondary wide">⬇️ Fetch Locations from farmOS</button>
+  </div>
+  <div id="locations-list"></div>
 </div>
 
 </div><!-- end app-screens -->
@@ -1625,7 +1641,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783373145;
+const APP_VERSION = 1783389847;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1782,6 +1798,7 @@ function showAppScreenInternal(id) {
   if (id === 'dashboard') { renderDashboardScreen(); _updateHeaderActiveState('home'); }
   if (id === 'scheduler') { renderScheduler(); _updateHeaderActiveState(null); }
   if (id === 'ledger') { show_ledger_init(); _updateHeaderActiveState('ledger'); }
+  if (id === 'locations') { renderLocationsScreen(); _updateHeaderActiveState(null); }
 }
 
 // Internal: actually display a goat module screen. No stack push.
@@ -1802,7 +1819,7 @@ function showGoatScreenInternal(id) {
 }
 
 function show(id) {
-  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger'];
+  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger','locations'];
   if (appScreenIds.includes(id)) {
     showAppScreenInternal(id);
     pushNav('app', id);
@@ -7071,8 +7088,10 @@ function clearLogs() {
       _ledgerEntries = [];
       localStorage.setItem(LS.contacts, JSON.stringify([]));
       contacts = [];
+      localStorage.setItem(LS.locations, JSON.stringify({}));
+      locations = {};
       renderSettings(); renderRecent(); renderDashboard();
-      showToast("✅ All logs, ledger, and inventory cleared");
+      showToast("✅ All logs, ledger, locations, and inventory cleared");
     }
   });
 }
@@ -7852,38 +7871,44 @@ async function fetchAnimalUUIDs(silent = false) {
     saveProfilesSafely();
     populateGoatSelect();
 
-    // ===== STEP 4: Fetch locations (land + structure assets) and current animal positions =====
+    // ===== STEP 4: Fetch locations (land + structure + water assets) and current animal positions =====
     // Template pattern: any future module (birds, equipment, etc.) can reuse this exact
-    // fetch + cache pattern against the same farmOS land/structure assets.
+    // fetch + cache pattern against the same farmOS land/structure/water assets.
     if (!silent && el) el.textContent = "Fetching locations...";
     try {
-      const [landRes, structRes] = await Promise.all([
+      const [landRes, structRes, waterRes] = await Promise.all([
         fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100'), { headers: authHeaders })
+        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100'), { headers: authHeaders })
       ]);
       const newLocations = {};
-      if (landRes.ok) {
-        const landData = await landRes.json();
-        (landData.data || []).forEach(function(l) {
-          if (l.attributes.archived) return;
-          newLocations[l.id] = {
-            name: l.attributes.name || '(unnamed)',
-            type: 'land',
-            notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim()
-          };
+      function absorbLocationRes(res, typeName) {
+        if (!res.ok) return;
+        return res.json().then(function(d) {
+          (d.data || []).forEach(function(l) {
+            if (l.attributes.archived) return;
+            const geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
+            newLocations[l.id] = {
+              name: l.attributes.name || '(unnamed)',
+              type: typeName,
+              notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
+              wkt: geomVal || null,
+              synced: true,
+              farmosUUID: l.id
+            };
+          });
         });
       }
-      if (structRes.ok) {
-        const structData = await structRes.json();
-        (structData.data || []).forEach(function(s) {
-          if (s.attributes.archived) return;
-          newLocations[s.id] = {
-            name: s.attributes.name || '(unnamed)',
-            type: 'structure',
-            notes: ((s.attributes.notes && (s.attributes.notes.value || s.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim()
-          };
-        });
-      }
+      await Promise.all([
+        absorbLocationRes(landRes, 'land'),
+        absorbLocationRes(structRes, 'structure'),
+        absorbLocationRes(waterRes, 'water')
+      ]);
+      // Preserve any not-yet-synced local-only locations (added via the
+      // Locations screen but not pushed yet) — a fetch shouldn't erase them.
+      Object.keys(locations).forEach(function(k) {
+        if (locations[k] && locations[k].synced === false) newLocations[k] = locations[k];
+      });
       locations = newLocations;
       localStorage.setItem(LS.locations, JSON.stringify(locations));
 
@@ -8651,6 +8676,71 @@ async function processPendingLedgerActions(token, logFn) {
   return { ok: ok, fail: fail };
 }
 
+// Processes queued Location save/delete actions — the network half of the
+// local-first Locations flow. Called BEFORE processPendingGoatActions so a
+// brand-new location can be resolved to a real UUID in the same sync batch
+// as a Move that references it.
+async function processPendingLocationActions(token, logFn) {
+  var items = pendingActions.filter(function(a) { return !a.synced && ['locationSave','locationDelete'].indexOf(a.type) !== -1; });
+  var ok = 0, fail = 0;
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  for (var i = 0; i < items.length; i++) {
+    var a = items[i];
+    try {
+      if (a.type === 'locationSave') {
+        var loc = locations[a.payload.key];
+        if (!loc) { a.synced = true; continue; } // deleted locally before it synced
+        var bundle = loc.type === 'structure' ? 'structure' : (loc.type === 'water' ? 'water' : 'land');
+        var attrs = {
+          name: loc.name,
+          notes: { value: loc.notes || '', format: 'default' },
+          is_location: true,
+          is_fixed: !!loc.wkt
+        };
+        if (loc.wkt) attrs.intrinsic_geometry = { value: loc.wkt };
+        var res;
+        if (loc.farmosUUID) {
+          res = await fetchWithTimeout(apiUrl('/api/asset/' + bundle + '/' + loc.farmosUUID), {
+            method: 'PATCH', headers: headers,
+            body: JSON.stringify({ data: { type: 'asset--' + bundle, id: loc.farmosUUID, attributes: attrs } })
+          });
+        } else {
+          res = await fetchWithTimeout(apiUrl('/api/asset/' + bundle), {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: { type: 'asset--' + bundle, attributes: attrs } })
+          });
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var resData = await res.json();
+        var realUUID = resData.data.id;
+        loc.farmosUUID = realUUID;
+        loc.synced = true;
+        // Move the entry from its temp local key to the real farmOS UUID key
+        // so anything referencing it (Move's dropdown) picks up the real id.
+        if (a.payload.key !== realUUID) {
+          locations[realUUID] = loc;
+          delete locations[a.payload.key];
+        }
+        localStorage.setItem(LS.locations, JSON.stringify(locations));
+
+      } else if (a.type === 'locationDelete') {
+        await fetchWithTimeout(apiUrl('/api/asset/' + a.payload.type + '/' + a.payload.farmosUUID), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+      }
+      a.synced = true; a.lastError = null; ok++;
+      if (logFn) logFn('✅ ' + a.type + ' pushed\n');
+    } catch(e) {
+      a.lastError = e.message; fail++;
+      if (logFn) logFn('⚠️ ' + a.type + ' failed: ' + e.message + '\n');
+    }
+  }
+  savePendingActions();
+  if (typeof renderLocationsScreen === 'function' && document.getElementById('screen-locations') && document.getElementById('screen-locations').classList.contains('active')) renderLocationsScreen();
+  return { ok: ok, fail: fail };
+}
+
 // ===== MED MATERIAL HELPERS =====
 // GET search for asset--material by name. Returns UUID or null.
 async function getOrCreateMedMaterial(medName, token) {
@@ -9138,12 +9228,13 @@ async function syncToFarmOS() {
   if (pendingCount > 0) {
     logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
     try {
+      const locationActionResult = await processPendingLocationActions(token, function(msg) { logEl.textContent += msg; });
       const batchActionResult = await processPendingBatchActions(token, function(msg) { logEl.textContent += msg; });
       const goatActionResult = await processPendingGoatActions(token, function(msg) { logEl.textContent += msg; });
       const ledgerActionResult = await processPendingLedgerActions(token, function(msg) { logEl.textContent += msg; });
-      logEl.textContent += 'Queued actions: ' + (batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok) + ' ok, ' +
+      logEl.textContent += 'Queued actions: ' + (locationActionResult.ok + batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok) + ' ok, ' +
         (batchActionResult.skipped + goatActionResult.skipped) + ' skipped (not synced yet), ' +
-        (batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail) + ' failed.\n';
+        (locationActionResult.fail + batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail) + ' failed.\n';
     } catch(e) {
       logEl.textContent += '⚠️ Queued action sync error: ' + e.message + '\n';
     }
@@ -11869,11 +11960,12 @@ async function bd_syncToFarmOS() {
     if (pendingCount > 0) {
       if (logEl) logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
       try {
+        var locationActionResult = await processPendingLocationActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var batchActionResult = await processPendingBatchActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var goatActionResult = await processPendingGoatActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var ledgerActionResult = await processPendingLedgerActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
-        synced += batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok;
-        failed += batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail;
+        synced += locationActionResult.ok + batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok;
+        failed += locationActionResult.fail + batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail;
       } catch(be) {
         if (logEl) logEl.textContent += '⚠️ Queued action sync error: ' + be.message + '\n';
       }
@@ -14337,6 +14429,265 @@ function saveLedgerEntry() {
   ledgerRender();
 }
 
+// ===== LOCATIONS (Land / Structure / Water) =====
+// Same shared-object pattern as Contacts: local-first, queued via
+// queuePendingAction, pushed to farmOS as real asset--land/structure/water
+// records during sync. Move (goat/bird) already reads directly from the
+// `locations` object, so anything added here shows up there automatically.
+
+async function locationsFetch() {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
+  try {
+    var token = await getCachedToken(cfg);
+    var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    var [landRes, structRes, waterRes] = await Promise.all([
+      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100'), { headers: headers })
+    ]);
+    var newLocations = {};
+    async function absorb(res, typeName) {
+      if (!res.ok) return;
+      var d = await res.json();
+      (d.data || []).forEach(function(l) {
+        if (l.attributes.archived) return;
+        var geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
+        newLocations[l.id] = {
+          name: l.attributes.name || '(unnamed)',
+          type: typeName,
+          notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
+          wkt: geomVal || null,
+          synced: true,
+          farmosUUID: l.id
+        };
+      });
+    }
+    await Promise.all([absorb(landRes, 'land'), absorb(structRes, 'structure'), absorb(waterRes, 'water')]);
+    Object.keys(locations).forEach(function(k) {
+      if (locations[k] && locations[k].synced === false) newLocations[k] = locations[k];
+    });
+    locations = newLocations;
+    localStorage.setItem(LS.locations, JSON.stringify(locations));
+    renderLocationsScreen();
+    showToast('✅ Locations fetched from farmOS');
+  } catch(e) {
+    alert('Fetch failed: ' + e.message);
+  }
+}
+
+function renderLocationsScreen() {
+  var list = document.getElementById('locations-list');
+  if (!list) return;
+  var keys = Object.keys(locations);
+  if (!keys.length) {
+    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No locations yet.</div>';
+    return;
+  }
+  var typeIcon = { land: '\ud83c\udf3e', structure: '\ud83c\udfe1', water: '\ud83d\udca7' };
+  var sorted = keys.slice().sort(function(a,b) { return (locations[a].name||'').localeCompare(locations[b].name||''); });
+  list.innerHTML = sorted.map(function(k) {
+    var loc = locations[k];
+    var syncTag = loc.synced === false ? '<span style="color:#c90;font-size:11px;">\u23f3 pending</span>' : '<span style="color:#3a7;font-size:11px;">\u2713 synced</span>';
+    var shapeTag = loc.wkt ? '<span style="color:#8bd;font-size:11px;">\ud83d\udccd shape saved</span>' : '<span style="color:#666;font-size:11px;">no shape drawn</span>';
+    return '<div class="box" onclick="openLocationModal(\'' + k + '\')" style="cursor:pointer;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+        '<strong style="font-size:15px;">' + (typeIcon[loc.type] || '') + ' ' + (loc.name || '\u2014') + '</strong>' +
+      '</div>' +
+      '<div style="margin-top:2px;">' + syncTag + ' &middot; ' + shapeTag + '</div>' +
+      (loc.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + loc.notes + '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function openLocationModal(key) {
+  var loc = key ? locations[key] : null;
+  document.getElementById('locationModalTitle').textContent = loc ? 'Edit Location' : 'Add Location';
+  document.getElementById('location_key').value = key || '';
+  document.getElementById('location_name').value = loc ? (loc.name||'') : '';
+  document.getElementById('location_type').value = loc ? (loc.type||'land') : 'land';
+  document.getElementById('location_notes').value = loc ? (loc.notes||'') : '';
+  document.getElementById('location_wkt').value = loc ? (loc.wkt||'') : '';
+  document.getElementById('locationShapeStatus').textContent = (loc && loc.wkt) ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
+  document.getElementById('locationDeleteBtn').style.display = loc ? '' : 'none';
+  document.getElementById('locationModal').style.display = '';
+}
+function closeLocationModal() {
+  document.getElementById('locationModal').style.display = 'none';
+}
+
+function saveLocationLocal() {
+  var key = document.getElementById('location_key').value;
+  var name = document.getElementById('location_name').value.trim();
+  if (!name) { alert('Name is required.'); return; }
+  var existing = key ? locations[key] : null;
+  var newKey = key || ('local_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+  var data = {
+    name: name,
+    type: document.getElementById('location_type').value,
+    notes: document.getElementById('location_notes').value.trim(),
+    wkt: document.getElementById('location_wkt').value || null,
+    synced: false,
+    farmosUUID: existing ? existing.farmosUUID : null
+  };
+  locations[newKey] = data;
+  if (key && key !== newKey) delete locations[key];
+  localStorage.setItem(LS.locations, JSON.stringify(locations));
+  queuePendingAction('locationSave', { key: newKey });
+  showToast('✅ Saved locally — will sync to farmOS next push');
+  closeLocationModal();
+  renderLocationsScreen();
+}
+
+function deleteLocationLocal() {
+  var key = document.getElementById('location_key').value;
+  if (!key) return;
+  if (!confirm('Delete this location?')) return;
+  var loc = locations[key];
+  if (loc && loc.farmosUUID) {
+    queuePendingAction('locationDelete', { farmosUUID: loc.farmosUUID, type: loc.type });
+  }
+  delete locations[key];
+  localStorage.setItem(LS.locations, JSON.stringify(locations));
+  showToast('✅ Deleted locally — will sync to farmOS next push');
+  closeLocationModal();
+  renderLocationsScreen();
+}
+
+// ===== MAP DRAWING (lazy-loaded Leaflet + Leaflet.Draw, live tiles only) =====
+var _leafletLoaded = false;
+var _locationMap = null;
+var _locationDrawnLayer = null;
+var _locationDrawControl = null;
+
+function _loadLeaflet(callback) {
+  if (_leafletLoaded && window.L) { callback(); return; }
+  var cssId = 'leaflet-css';
+  if (!document.getElementById(cssId)) {
+    var link = document.createElement('link');
+    link.id = cssId;
+    link.rel = 'stylesheet';
+    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+    document.head.appendChild(link);
+    var drawLink = document.createElement('link');
+    drawLink.rel = 'stylesheet';
+    drawLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css';
+    document.head.appendChild(drawLink);
+  }
+  var script = document.createElement('script');
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+  script.onload = function() {
+    var drawScript = document.createElement('script');
+    drawScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.min.js';
+    drawScript.onload = function() { _leafletLoaded = true; callback(); };
+    drawScript.onerror = function() { alert('Could not load map library — check your connection and try again.'); };
+    document.head.appendChild(drawScript);
+  };
+  script.onerror = function() { alert('Could not load map library — check your connection and try again.'); };
+  document.head.appendChild(script);
+}
+
+// Parses a WKT POINT or POLYGON into Leaflet-friendly [lat,lng] pairs.
+// farmOS stores WKT as "lng lat" order (standard WKT/GeoJSON axis order);
+// Leaflet wants [lat, lng] — every conversion below swaps accordingly.
+function _wktParse(wkt) {
+  if (!wkt) return null;
+  var m = wkt.match(/^POINT\s*\(\s*([\-0-9.]+)\s+([\-0-9.]+)\s*\)/i);
+  if (m) return { type: 'point', latlng: [parseFloat(m[2]), parseFloat(m[1])] };
+  m = wkt.match(/^POLYGON\s*\(\(([^)]+)\)\)/i);
+  if (m) {
+    var pts = m[1].split(',').map(function(pair) {
+      var xy = pair.trim().split(/\s+/);
+      return [parseFloat(xy[1]), parseFloat(xy[0])];
+    });
+    return { type: 'polygon', latlngs: pts };
+  }
+  return null;
+}
+function _layerToWkt(layer) {
+  if (layer instanceof L.Marker) {
+    var p = layer.getLatLng();
+    return 'POINT(' + p.lng + ' ' + p.lat + ')';
+  }
+  if (layer instanceof L.Polygon) {
+    var latlngs = layer.getLatLngs()[0];
+    var coords = latlngs.map(function(p) { return p.lng + ' ' + p.lat; });
+    coords.push(coords[0]); // WKT polygons must close the ring
+    return 'POLYGON((' + coords.join(', ') + '))';
+  }
+  return null;
+}
+
+function openLocationMap() {
+  _loadLeaflet(function() {
+    document.getElementById('locationMapModal').style.display = '';
+    setTimeout(function() {
+      if (_locationMap) { _locationMap.remove(); _locationMap = null; }
+      _locationMap = L.map('locationMapDiv');
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 20
+      }).addTo(_locationMap);
+
+      var drawnItems = new L.FeatureGroup();
+      _locationMap.addLayer(drawnItems);
+      _locationDrawnLayer = drawnItems;
+
+      var existingWkt = document.getElementById('location_wkt').value;
+      var parsed = _wktParse(existingWkt);
+      if (parsed) {
+        var layer;
+        if (parsed.type === 'point') {
+          layer = L.marker(parsed.latlng);
+          _locationMap.setView(parsed.latlng, 18);
+        } else {
+          layer = L.polygon(parsed.latlngs);
+          _locationMap.fitBounds(layer.getBounds());
+        }
+        drawnItems.addLayer(layer);
+      } else {
+        _locationMap.setView([39.8283, -98.5795], 4); // center of US, default when nothing drawn yet and no GPS
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(function(pos) {
+            _locationMap.setView([pos.coords.latitude, pos.coords.longitude], 18);
+          }, function() { /* permission denied or unavailable - stay at default view */ });
+        }
+      }
+
+      _locationDrawControl = new L.Control.Draw({
+        draw: {
+          polygon: { allowIntersection: false, showArea: true },
+          marker: true,
+          polyline: false,
+          circle: false,
+          circlemarker: false,
+          rectangle: false
+        },
+        edit: { featureGroup: drawnItems }
+      });
+      _locationMap.addControl(_locationDrawControl);
+
+      _locationMap.on(L.Draw.Event.CREATED, function(e) {
+        drawnItems.clearLayers(); // only one shape per location, keep it simple
+        drawnItems.addLayer(e.layer);
+      });
+
+      _locationMap.invalidateSize();
+    }, 100);
+  });
+}
+function closeLocationMap() {
+  document.getElementById('locationMapModal').style.display = 'none';
+}
+function saveLocationShape() {
+  var layers = _locationDrawnLayer ? _locationDrawnLayer.getLayers() : [];
+  if (!layers.length) { alert('Draw a point or boundary first, or Cancel to leave it unset.'); return; }
+  var wkt = _layerToWkt(layers[0]);
+  document.getElementById('location_wkt').value = wkt || '';
+  document.getElementById('locationShapeStatus').textContent = wkt ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
+  closeLocationMap();
+}
+
 function openDashboard() {
   MODULES.forEach(m => {
     const el = document.getElementById(m.containerId);
@@ -15113,6 +15464,44 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <textarea id="le_notes" rows="2" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
     <button id="ledgerEntrySaveBtn" onclick="saveLedgerEntry()" style="width:100%;margin:0;">💾 Save</button>
   </div>
+</div>
+
+<!-- ===== LOCATION MODAL (Land/Structure/Water add/edit) ===== -->
+<div id="locationModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeLocationModal()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong id="locationModalTitle" style="font-size:18px;">Add Location</strong>
+      <button onclick="closeLocationModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <input type="hidden" id="location_key">
+    <input type="hidden" id="location_wkt">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name *</label>
+    <input id="location_name" type="text" placeholder="e.g. North Pasture, Main Barn" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Type</label>
+    <select id="location_type" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="land">🌾 Land</option>
+      <option value="structure">🏡 Structure</option>
+      <option value="water">💧 Water</option>
+    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
+    <textarea id="location_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <div class="box" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px;">
+      <span id="locationShapeStatus" style="font-size:13px;color:#aaa;">No shape drawn yet</span>
+      <button onclick="openLocationMap()" class="secondary" style="margin:0;padding:8px 12px;">📍 Draw on Map</button>
+    </div>
+    <button onclick="saveLocationLocal()" style="width:100%;margin:0 0 8px;">💾 Save</button>
+    <button id="locationDeleteBtn" onclick="deleteLocationLocal()" class="secondary" style="width:100%;margin:0;display:none;">🗑️ Delete</button>
+  </div>
+</div>
+
+<!-- ===== LOCATION MAP DRAWING OVERLAY (Leaflet, lazy-loaded, live tiles) ===== -->
+<div id="locationMapModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#111;z-index:1000;">
+  <div style="position:absolute;top:0;left:0;right:0;z-index:1001;background:#2a2a2a;padding:10px;display:flex;justify-content:space-between;align-items:center;">
+    <button onclick="closeLocationMap()" class="secondary" style="margin:0;">✕ Cancel</button>
+    <span style="color:#aaa;font-size:13px;">Draw a boundary or drop a pin</span>
+    <button onclick="saveLocationShape()" style="margin:0;">💾 Save Shape</button>
+  </div>
+  <div id="locationMapDiv" style="position:absolute;top:52px;left:0;right:0;bottom:0;"></div>
 </div>
 
 <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeEdit()">
