@@ -39,6 +39,7 @@ public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1;
     private static final int CAMERA_BRIDGE_REQUEST = 3;
     private static final int CAMERA_PERMISSION_REQUEST = 10;
+    private static final int LOCATION_PERMISSION_REQUEST = 11;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
