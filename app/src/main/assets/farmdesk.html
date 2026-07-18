@@ -687,6 +687,13 @@ body.role-viewer #setgrp-farmname { display: none !important; }
         <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
 
+      <div class="set-sub" id="setgrp-arcgis">
+        <strong>🛰️ Satellite Imagery (optional)</strong>
+        <p style="font-size:13px;color:#888;margin:4px 0 8px;">Adds a satellite view option when drawing locations on the map. Not required — the map works fine without this using standard street tiles.</p>
+        <label>ArcGIS API Key</label>
+        <input id="arcgisApiKey" placeholder="Paste your ArcGIS API key here" type="password" oninput="saveArcgisKey()">
+      </div>
+
       <div class="set-sub">
         <strong>🧩 Modules</strong>
         <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Each module works on its own — at least one must stay on.</p>
@@ -1641,7 +1648,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1783396062;
+const APP_VERSION = 1784392411;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -3990,6 +3997,8 @@ function renderSettings() {
   if (cfg.url  && document.getElementById("farmosUrl"))  document.getElementById("farmosUrl").value  = cfg.url;
   if (cfg.user && document.getElementById("farmosUser")) document.getElementById("farmosUser").value = cfg.user;
   if (cfg.pass && document.getElementById("farmosPass")) document.getElementById("farmosPass").value = cfg.pass;
+  var arcgisKeyEl = document.getElementById("arcgisApiKey");
+  if (arcgisKeyEl) arcgisKeyEl.value = localStorage.getItem("farmdesk_arcgis_key") || "";
   renderRecentUrlList();
   const urls = getRecentUrls();
   const urlEl = document.getElementById("farmosUrl");
@@ -7191,6 +7200,11 @@ function saveFarmOSCfg() {
     loadUnsyncedForUrl(url); // restore any unsynced logs for this farm
   }
   return cfg;
+}
+
+function saveArcgisKey() {
+  var key = document.getElementById("arcgisApiKey")?.value.trim() || "";
+  localStorage.setItem("farmdesk_arcgis_key", key);
 }
 
 // ───── SHARED: OAuth2 authentication ─────
@@ -14559,6 +14573,24 @@ var _leafletLoaded = false;
 var _locationMap = null;
 var _locationDrawnLayer = null;
 var _locationDrawControl = null;
+var _streetTileLayer = null;
+var _satelliteTileLayer = null;
+var _satelliteActive = false;
+
+function toggleSatelliteView() {
+  if (!_satelliteTileLayer || !_locationMap) return;
+  var btn = document.getElementById('satelliteToggleBtn');
+  if (_satelliteActive) {
+    _locationMap.removeLayer(_satelliteTileLayer);
+    _locationMap.addLayer(_streetTileLayer);
+    btn.textContent = '🛰️ Satellite';
+  } else {
+    _locationMap.removeLayer(_streetTileLayer);
+    _locationMap.addLayer(_satelliteTileLayer);
+    btn.textContent = '🗺️ Map';
+  }
+  _satelliteActive = !_satelliteActive;
+}
 
 function _loadLeaflet(callback) {
   if (_leafletLoaded && window.L) { callback(); return; }
@@ -14631,14 +14663,50 @@ function openLocationMap() {
     setTimeout(function() {
       if (_locationMap) { _locationMap.remove(); _locationMap = null; }
       _locationMap = L.map('locationMapDiv');
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      _streetTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 20
       }).addTo(_locationMap);
 
+      var arcgisKey = localStorage.getItem('farmdesk_arcgis_key') || '';
+      var satBtn = document.getElementById('satelliteToggleBtn');
+      if (arcgisKey) {
+        _satelliteTileLayer = L.tileLayer('https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + arcgisKey, {
+          attribution: '&copy; Esri',
+          maxZoom: 20
+        });
+        satBtn.style.display = '';
+        _satelliteActive = false;
+      } else {
+        satBtn.style.display = 'none';
+      }
+
       var drawnItems = new L.FeatureGroup();
       _locationMap.addLayer(drawnItems);
       _locationDrawnLayer = drawnItems;
+
+      // Show every OTHER saved location as a non-editable gray reference
+      // shape, so there's something to compare against while drawing —
+      // same idea as farmOS's own web UI showing existing assets on the map.
+      var currentKey = document.getElementById('location_key').value;
+      var refBounds = [];
+      Object.keys(locations).forEach(function(k) {
+        if (k === currentKey) return;
+        var refLoc = locations[k];
+        if (!refLoc || !refLoc.wkt) return;
+        var refParsed = _wktParse(refLoc.wkt);
+        if (!refParsed) return;
+        var refLayer;
+        if (refParsed.type === 'point') {
+          refLayer = L.circleMarker(refParsed.latlng, { radius: 6, color: '#888', fillColor: '#888', fillOpacity: 0.6, weight: 1 });
+          refBounds.push(refParsed.latlng);
+        } else {
+          refLayer = L.polygon(refParsed.latlngs, { color: '#888', weight: 2, dashArray: '5,5', fillOpacity: 0.1, interactive: false });
+          refBounds = refBounds.concat(refParsed.latlngs);
+        }
+        refLayer.bindTooltip(refLoc.name || '(unnamed)', { permanent: false });
+        refLayer.addTo(_locationMap);
+      });
 
       var existingWkt = document.getElementById('location_wkt').value;
       var parsed = _wktParse(existingWkt);
@@ -14652,6 +14720,10 @@ function openLocationMap() {
           _locationMap.fitBounds(layer.getBounds());
         }
         drawnItems.addLayer(layer);
+      } else if (refBounds.length) {
+        // Nothing drawn yet for THIS location, but other locations exist —
+        // center on those so there's context to draw against immediately.
+        _locationMap.fitBounds(L.latLngBounds(refBounds), { maxZoom: 17, padding: [40,40] });
       } else {
         _locationMap.setView([39.8283, -98.5795], 4); // center of US, default when nothing drawn yet and no GPS
         if (navigator.geolocation) {
@@ -15509,6 +15581,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <button onclick="saveLocationShape()" style="margin:0;">💾 Save Shape</button>
   </div>
   <div id="locationMapDiv" style="position:absolute;top:52px;left:0;right:0;bottom:0;"></div>
+  <button id="satelliteToggleBtn" onclick="toggleSatelliteView()" style="display:none;position:absolute;top:62px;right:10px;z-index:1002;margin:0;padding:8px 12px;background:#2a2a2a;">🛰️ Satellite</button>
 </div>
 
 <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeEdit()">
