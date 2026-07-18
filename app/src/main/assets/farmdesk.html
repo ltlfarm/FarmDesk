@@ -1151,7 +1151,10 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   <div class="box">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
       <h3 id="adjustTitle" style="margin:0;color:#3a7;font-size:20px;"></h3>
-      <button class="secondary" onclick="sd_show('dashboard')" style="padding:8px 14px;font-size:14px;margin:0;">✕</button>
+      <div style="display:flex;gap:6px;">
+        <button class="secondary" onclick="sd_openMoveModal()" style="padding:8px 12px;font-size:14px;margin:0;">📍 Move</button>
+        <button class="secondary" onclick="sd_show('dashboard')" style="padding:8px 14px;font-size:14px;margin:0;">✕</button>
+      </div>
     </div>
     <div id="currentStock" style="font-size:26px;color:#3a7;text-align:center;padding:8px 0;font-weight:bold;"></div>
     <div id="adjustAssetNotes" style="color:#888;font-size:13px;display:none;margin-top:4px;"></div>
@@ -1658,7 +1661,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784404229;
+const APP_VERSION = 1784408143;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9656,7 +9659,8 @@ const SD_LS = {
   photos:     'farmdesk_stock_photos',   // LEGACY — raw base64 keyed by asset UUID, migrated to photoIds below
   photoIds:   'farmdesk_stock_photoids', // {uuid: [photoId,...]} — actual bytes live in the Photos store, not localStorage
   categories: 'farmdesk_stock_categories',
-  tasks:      'farmdesk_stock_tasks'     // local-only reminders — no farmOS log type fits "intend to restock later"
+  tasks:      'farmdesk_stock_tasks',    // local-only reminders — no farmOS log type fits "intend to restock later"
+  locations:  'farmdesk_stock_locations' // current location per item uuid, mirrors animalLocations
 };
 
 // ───── SHARED: farmOS taxonomy UUIDs ─────
@@ -9697,6 +9701,7 @@ let stockTasks  = JSON.parse(localStorage.getItem(SD_LS.tasks) || '[]'); // loca
 let sdCategories = JSON.parse(localStorage.getItem(SD_LS.categories) || 'null') || ['Feed','Medical','Lab'];
 let pending    = JSON.parse(localStorage.getItem(SD_LS.pending)    || '[]');
 let photoIds   = JSON.parse(localStorage.getItem(SD_LS.photoIds)   || '{}'); // {uuid: [photoId,...]} — survives refreshAssets() rebuilding the assets array from farmOS
+let stockLocations = JSON.parse(localStorage.getItem(SD_LS.locations) || '{}'); // keyed by item uuid: {locationUuid, locationName, timestamp}
 currentPhoto = null; // declared once in the Goats section; reset here for Stock asset photos
 var adjustOriginalPhoto = null; // resolved photo at openAdjust() time, to detect whether the user actually changed it
 let currentTab   = 'Feed';
@@ -10008,6 +10013,36 @@ async function refreshAssets(silent) {
       }
     } catch(e) { /* log history fetch is optional — don't break on failure */ }
 
+    // ===== Fetch current locations for Stock items (movement logs) =====
+    try {
+      const stockAssetIds = new Set(assets.map(a => a.uuid));
+      const moveRes = await fetchWithTimeout(apiUrl('/api/log/activity?filter[is_movement]=1&sort=-timestamp&page[limit]=100&include=asset,location'), { headers: h });
+      if (moveRes.ok) {
+        const moveData = await moveRes.json();
+        const newStockLocations = { ...stockLocations };
+        (moveData.data || []).forEach(log => {
+          const ts = log.attributes.timestamp;
+          const locRel = log.relationships?.location?.data;
+          const locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
+          if (!locArr.length) return;
+          const locUuid = locArr[0].id;
+          const locName = locations[locUuid] ? locations[locUuid].name : null;
+          if (!locName) return;
+          const assetRel = log.relationships?.asset?.data;
+          const assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          assetArr.forEach(a => {
+            if (!stockAssetIds.has(a.id)) return; // only material assets we track
+            const existing = newStockLocations[a.id];
+            if (!existing || new Date(ts) > new Date(existing.timestamp)) {
+              newStockLocations[a.id] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+            }
+          });
+        });
+        stockLocations = newStockLocations;
+        localStorage.setItem(SD_LS.locations, JSON.stringify(stockLocations));
+      }
+    } catch(e) { /* location fetch is best-effort — never blocks the rest of sync */ }
+
     const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     localStorage.setItem(SD_LS.lastSync, now);
     document.getElementById('syncStatus').textContent = 'Synced ' + now;
@@ -10299,6 +10334,76 @@ async function openAdjust(uuid) {
   sd_show('adjust');
   document.getElementById('sd-nav-dashboard').classList.add('active');
 }
+
+// ===== STOCK MOVE (location tracking, mirrors Goat Move) =====
+function sd_openMoveModal() {
+  if (!adjustAsset) return;
+  var modal = document.getElementById('sdMoveModal');
+  var fields = document.getElementById('sdMoveFields');
+  if (!modal || !fields) return;
+  var locArr = Object.entries(locations).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var current = stockLocations[adjustAsset.uuid];
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;margin:0 0 8px;">' + adjustAsset.name + (current ? ' — currently at ' + current.locationName : ' — no location set') + '</p>' +
+    (adjustAsset.localOnly ? '<p style="color:#c66;font-size:13px;margin:0 0 8px;">Not yet synced to farmOS — sync this item first, then Move.</p>' : '') +
+    '<label>Move to</label>' +
+    '<select id="sdMoveLocationSelect">' +
+      '<option value="">— select location —</option>' +
+      locArr.map(function(l){ return '<option value="' + l.uuid + '">' + (l.type === 'structure' ? '🏚️ ' : l.type === 'water' ? '💧 ' : '🌾 ') + l.name + '</option>'; }).join('') +
+    '</select>' +
+    (locArr.length ? '' : '<p style="color:#888;font-size:13px;margin-top:4px;">No locations found — add one in the Locations tab first.</p>') +
+    '<label style="margin-top:10px;">Notes</label>' +
+    '<textarea id="sdMoveNotes" rows="2" placeholder="Optional notes"></textarea>';
+  modal.style.display = 'block';
+}
+
+function sd_closeMoveModal() {
+  var modal = document.getElementById('sdMoveModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function sd_saveMoveLog() {
+  if (!adjustAsset) return;
+  if (adjustAsset.localOnly) { showToast('⚠️ Sync this item to farmOS first'); return; }
+  var locUuid = document.getElementById('sdMoveLocationSelect').value;
+  var notes = document.getElementById('sdMoveNotes').value || '';
+  if (!locUuid) { showToast('⚠️ Select a location'); return; }
+  var locName = locations[locUuid] ? locations[locUuid].name : '';
+  var locType = locations[locUuid] ? locations[locUuid].type : '';
+  var ts = String(Math.floor(Date.now() / 1000));
+
+  stockLocations[adjustAsset.uuid] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+  localStorage.setItem(SD_LS.locations, JSON.stringify(stockLocations));
+  pending.push({ id: 'move_' + Date.now(), type: 'move', itemUUID: adjustAsset.uuid, itemName: adjustAsset.name, locationUuid: locUuid, locationName: locName, locationType: locType, notes: notes, ts: ts, synced: false });
+  localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
+
+  showToast('✅ Moved ' + adjustAsset.name + ' to ' + locName + ' locally — will sync to farmOS next push');
+  sd_closeMoveModal();
+}
+
+// Network-only half of a Stock move — called from sd_syncToFarmOS's dispatch loop.
+async function sd_pushMoveLog(item, token) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  if (!item.itemUUID) throw new Error('No synced item UUID yet — will retry next sync');
+  var locBundle = item.locationType === 'structure' ? 'asset--structure' : item.locationType === 'water' ? 'asset--water' : 'asset--land';
+  var payload = { data: {
+    type: 'log--activity',
+    attributes: {
+      name: 'Move: ' + item.itemName + ' → ' + item.locationName,
+      timestamp: item.ts,
+      status: 'done',
+      is_movement: true,
+      notes: { value: item.notes, format: 'default' }
+    },
+    relationships: {
+      asset: { data: [{ type: 'asset--material', id: item.itemUUID }] },
+      location: { data: [{ type: locBundle, id: item.locationUuid }] }
+    }
+  }};
+  var res = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+}
+
 function updateStockDisplay() {
   if (!adjustAsset) return;
   const ul = adjustAsset.units;
@@ -11036,6 +11141,11 @@ async function sd_syncToFarmOS() {
         ok++;
         const icon = item.action === 'increment' ? '📥' : (item.action === 'decrement' ? '📤' : '🔢');
         logEl.textContent += `✅ ${icon} ${item.name} ${item.action === 'reset' ? '=' : (item.action === 'increment' ? '+' : '−')}${item.amount}\n`;
+      } else if (item.type === 'move') {
+        await sd_pushMoveLog({ itemUUID: item.itemUUID, itemName: item.itemName, locationUuid: item.locationUuid, locationName: item.locationName, locationType: item.locationType, notes: item.notes, ts: item.ts }, token);
+        item.synced = true;
+        ok++;
+        logEl.textContent += `✅ 📍 Moved ${item.itemName} → ${item.locationName}\n`;
       }
     } catch(e) {
       fail++;
@@ -11247,11 +11357,13 @@ const BD_LS = {
   excluded: "farmdesk_bird_excluded",
   flocks:   "farmdesk_bird_flocks",
   species:  "farmdesk_bird_species",
-  formulas: "farmdesk_bird_formulas"
+  formulas: "farmdesk_bird_formulas",
+  locations: "farmdesk_bird_locations" // current location per bird uuid, mirrors animalLocations
 };
 
 let bd_birds   = JSON.parse(localStorage.getItem(BD_LS.assets)  || "[]");
 let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
+let birdLocations = JSON.parse(localStorage.getItem(BD_LS.locations) || "{}"); // keyed by bird uuid: {locationUuid, locationName, timestamp}
 
 // ===== ONE-TIME MIGRATION: orphan batch entries in logs[] → bd_history[] =====
 // Earlier builds wrote bird batch sell/died/promote events to logs[] (the
@@ -11659,6 +11771,38 @@ async function bd_fetchAssets() {
       await fetchBatchesFromFarmOS(token, null);
     } catch(e) { /* best-effort */ }
 
+    // Pull current locations for individually-tracked birds (movement logs) —
+    // batches have no farmOS asset so they're excluded, same as farmOS itself.
+    try {
+      var birdUuidSet = {};
+      bd_birds.forEach(function(b) { if (b.uuid) birdUuidSet[b.uuid] = true; });
+      var bdMoveRes = await fetchWithTimeout(apiUrl('/api/log/activity?filter[is_movement]=1&sort=-timestamp&page[limit]=100&include=asset,location'), { headers: h });
+      if (bdMoveRes.ok) {
+        var bdMoveData = await bdMoveRes.json();
+        var newBirdLocations = Object.assign({}, birdLocations);
+        (bdMoveData.data || []).forEach(function(log) {
+          var ts = log.attributes.timestamp;
+          var locRel = log.relationships && log.relationships.location && log.relationships.location.data;
+          var locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
+          if (!locArr.length) return;
+          var locUuid = locArr[0].id;
+          var locName = locations[locUuid] ? locations[locUuid].name : null;
+          if (!locName) return;
+          var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+          var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          assetArr.forEach(function(a) {
+            if (!birdUuidSet[a.id]) return; // only birds we track, not goats/other assets
+            var existing = newBirdLocations[a.id];
+            if (!existing || new Date(ts) > new Date(existing.timestamp)) {
+              newBirdLocations[a.id] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+            }
+          });
+        });
+        birdLocations = newBirdLocations;
+        localStorage.setItem(BD_LS.locations, JSON.stringify(birdLocations));
+      }
+    } catch(e) { /* location fetch is best-effort — never blocks the rest of sync */ }
+
     // Update last sync time here too — previously only the push path did
     // this, so a fetch-only sync left the Dashboard showing "Never synced"
     // despite real, successful activity.
@@ -11920,6 +12064,7 @@ async function bd_syncToFarmOS() {
         else if (item.action === 'archive_bird') await bd_pushArchiveBird(item.birdUUID, token);
         else if (item.action === 'create_group')  await bd_pushCreateGroup(item.flockName, token);
         else if (item.action === 'group_assign')  await bd_pushGroupAssign(item.birdUUID, item.flockName, token);
+        else if (item.action === 'move_bird')     await bd_pushMoveLog(item, token);
         item.synced = true; synced++;
         if (logEl) logEl.textContent += 'OK: ' + (item.log ? item.log.logName : item.action) + '\n';
       } catch(e) {
@@ -12464,6 +12609,7 @@ function bd_openBirdProfile(id) {
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openLogSheet(b);" style="flex:1;margin:0;">&#x1F4CB; Log</button>' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openHatchForBird(b);" style="flex:0 0 auto;margin:0;padding:10px 12px;background:#1a4a2e;" title="Hatch">🥚</button>' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openEditBird(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 16px;">&#x270F;&#xFE0F; Edit</button>' +
+      '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openMoveModal(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 12px;" title="Move">📍</button>' +
       '<button data-bid="' + id + '" onclick="var b=this.dataset.bid;bd_closeBirdProfile();bd_openSellModal(b);" class="secondary" style="flex:0 0 auto;margin:0;padding:10px 12px;background:#5a4400;">&#x1F3F7;&#xFE0F;</button>' +
     '</div>';
   lazyLoadPhotos(contentEl); // fill in <img data-photoid> from the Photos store
@@ -12495,6 +12641,79 @@ function bd_openHatchForBird(id) {
 function bd_closeBirdProfile() {
   var modal = document.getElementById('bd-profile-modal');
   if (modal) modal.style.display = 'none';
+}
+
+// ===== BIRD MOVE (location tracking, mirrors Goat Move) — individual tagged birds only.
+// Batches (untracked count-based birds) have no farmOS asset to attach a movement log to.
+var bd_moveBirdId = null;
+function bd_openMoveModal(id) {
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === id; })[0];
+  if (!bird) return;
+  bd_moveBirdId = id;
+  var modal = document.getElementById('bdMoveModal');
+  var fields = document.getElementById('bdMoveFields');
+  if (!modal || !fields) return;
+  var locArr = Object.entries(locations).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var current = birdLocations[bird.uuid];
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;margin:0 0 8px;">' + (bird.name || bird.tag || 'Bird') + (current ? ' — currently at ' + current.locationName : ' — no location set') + '</p>' +
+    (bird.uuid ? '' : '<p style="color:#c66;font-size:13px;margin:0 0 8px;">Not yet synced to farmOS — sync this bird first, then Move.</p>') +
+    '<label>Move to</label>' +
+    '<select id="bdMoveLocationSelect">' +
+      '<option value="">— select location —</option>' +
+      locArr.map(function(l){ return '<option value="' + l.uuid + '">' + (l.type === 'structure' ? '🏚️ ' : l.type === 'water' ? '💧 ' : '🌾 ') + l.name + '</option>'; }).join('') +
+    '</select>' +
+    (locArr.length ? '' : '<p style="color:#888;font-size:13px;margin-top:4px;">No locations found — add one in the Locations tab first.</p>') +
+    '<label style="margin-top:10px;">Notes</label>' +
+    '<textarea id="bdMoveNotes" rows="2" placeholder="Optional notes"></textarea>';
+  modal.style.display = 'block';
+}
+
+function bd_closeMoveModal() {
+  var modal = document.getElementById('bdMoveModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function bd_saveMoveLog() {
+  var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_moveBirdId; })[0];
+  if (!bird) return;
+  if (!bird.uuid) { showToast('⚠️ Sync this bird to farmOS first'); return; }
+  var locUuid = document.getElementById('bdMoveLocationSelect').value;
+  var notes = document.getElementById('bdMoveNotes').value || '';
+  if (!locUuid) { showToast('⚠️ Select a location'); return; }
+  var locName = locations[locUuid] ? locations[locUuid].name : '';
+  var locType = locations[locUuid] ? locations[locUuid].type : '';
+  var ts = String(Math.floor(Date.now() / 1000));
+
+  birdLocations[bird.uuid] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+  localStorage.setItem(BD_LS.locations, JSON.stringify(birdLocations));
+  bd_pending.push({ id: 'move_' + Date.now(), action: 'move_bird', birdUUID: bird.uuid, birdName: bird.name || bird.tag || 'Bird', locationUuid: locUuid, locationName: locName, locationType: locType, notes: notes, ts: ts, synced: false });
+  localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+
+  showToast('✅ Moved ' + (bird.name || bird.tag) + ' to ' + locName + ' locally — will sync to farmOS next push');
+  bd_closeMoveModal();
+}
+
+// Network-only half of a Bird move — called from bd_syncToFarmOS's dispatch loop.
+async function bd_pushMoveLog(item, token) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var locBundle = item.locationType === 'structure' ? 'asset--structure' : item.locationType === 'water' ? 'asset--water' : 'asset--land';
+  var payload = { data: {
+    type: 'log--activity',
+    attributes: {
+      name: 'Move: ' + item.birdName + ' → ' + item.locationName,
+      timestamp: item.ts,
+      status: 'done',
+      is_movement: true,
+      notes: { value: item.notes, format: 'default' }
+    },
+    relationships: {
+      asset: { data: [{ type: 'asset--animal', id: item.birdUUID }] },
+      location: { data: [{ type: locBundle, id: item.locationUuid }] }
+    }
+  }};
+  var res = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
 }
 
 function openBatchProfile(batchId) {
@@ -14725,7 +14944,59 @@ function openLocationModal(key) {
   document.getElementById('location_wkt').value = loc ? (loc.wkt||'') : '';
   document.getElementById('locationShapeStatus').textContent = (loc && loc.wkt) ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
   document.getElementById('locationDeleteBtn').style.display = loc ? '' : 'none';
+  renderLocationAssetsList(key);
   document.getElementById('locationModal').style.display = '';
+}
+
+function renderLocationAssetsList(key) {
+  var box = document.getElementById('locationAssetsBox');
+  var list = document.getElementById('locationAssetsList');
+  if (!box || !list) return;
+  if (!key) { box.style.display = 'none'; return; }
+
+  var goatsHere = Object.keys(animalLocations).filter(function(name) {
+    return animalLocations[name] && animalLocations[name].locationUuid === key;
+  }).sort();
+
+  var birdsHere = Object.keys(birdLocations).filter(function(uuid) {
+    return birdLocations[uuid] && birdLocations[uuid].locationUuid === key;
+  }).map(function(uuid) {
+    var b = bd_birds.find(function(x) { return x.uuid === uuid; });
+    return { uuid: uuid, label: b ? (b.name || b.tag || 'Bird') : 'Bird' };
+  }).sort(function(a,b){ return a.label.localeCompare(b.label); });
+
+  var stockHere = Object.keys(stockLocations).filter(function(uuid) {
+    return stockLocations[uuid] && stockLocations[uuid].locationUuid === key;
+  }).map(function(uuid) {
+    var a = assets.find(function(x) { return x.uuid === uuid; });
+    return { uuid: uuid, label: a ? a.name : 'Item' };
+  }).sort(function(a,b){ return a.label.localeCompare(b.label); });
+
+  if (!goatsHere.length && !birdsHere.length && !stockHere.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+
+  var goatRows = goatsHere.map(function(name) {
+    return '<div onclick="closeLocationModal();goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + JSON.stringify(name) + ');},150);" ' +
+      'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+      '🐐 ' + name +
+    '</div>';
+  }).join('');
+
+  var birdRows = birdsHere.map(function(b) {
+    return '<div onclick="closeLocationModal();goModule(\'birds\');bd_show(\'birds\');setTimeout(function(){bd_openBirdProfile(' + JSON.stringify(b.uuid) + ');},150);" ' +
+      'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+      '🐦 ' + b.label +
+    '</div>';
+  }).join('');
+
+  var stockRows = stockHere.map(function(a) {
+    return '<div onclick="closeLocationModal();goModule(\'stock\');setTimeout(function(){openAdjust(' + JSON.stringify(a.uuid) + ');},150);" ' +
+      'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+      '📦 ' + a.label +
+    '</div>';
+  }).join('');
+
+  list.innerHTML = goatRows + birdRows + stockRows;
 }
 function closeLocationModal() {
   document.getElementById('locationModal').style.display = 'none';
@@ -15779,6 +16050,10 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     </select>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="location_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <div id="locationAssetsBox" style="display:none;margin-bottom:12px;">
+      <strong style="font-size:14px;color:#aaa;">📍 Here now</strong>
+      <div id="locationAssetsList" style="margin-top:6px;"></div>
+    </div>
     <div class="box" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px;">
       <span id="locationShapeStatus" style="font-size:13px;color:#aaa;">No shape drawn yet</span>
       <button onclick="openLocationMap()" class="secondary" style="margin:0;padding:8px 12px;">📍 Draw on Map</button>
@@ -15823,6 +16098,34 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <div id="moveFields"></div>
     <div style="margin-top:12px;">
       <button id="moveSaveBtn" onclick="saveMoveLog()" style="width:100%;margin:0;">💾 Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== STOCK MOVE MODAL ===== -->
+<div id="sdMoveModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">📍 Move Item</strong>
+      <button onclick="sd_closeMoveModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="sdMoveFields"></div>
+    <div style="margin-top:12px;">
+      <button onclick="sd_saveMoveLog()" style="width:100%;margin:0;">💾 Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BIRD MOVE MODAL ===== -->
+<div id="bdMoveModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">📍 Move Bird</strong>
+      <button onclick="bd_closeMoveModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="bdMoveFields"></div>
+    <div style="margin-top:12px;">
+      <button onclick="bd_saveMoveLog()" style="width:100%;margin:0;">💾 Save</button>
     </div>
   </div>
 </div>
