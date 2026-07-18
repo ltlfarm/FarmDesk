@@ -655,9 +655,6 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   <div class="box" style="padding:10px 14px;">
     <h3 style="margin:0;">⚙️ Settings</h3>
   </div>
-  <div class="box">
-    <button class="wide" onclick="show('locations')">📍 Manage Locations</button>
-  </div>
 
   <!-- ════ GENERIC — applies to the whole app ════ -->
   <div class="set-group open" id="setgrp-general">
@@ -1110,19 +1107,6 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   <div id="ledger-status" style="font-size:13px;color:#888;padding:10px;text-align:center;"></div>
 </div>
 
-<div id="screen-locations" class="screen">
-  <div class="box">
-    <button class="secondary" onclick="settingsHome()">← Home</button>
-    <h3 style="margin:10px 0 4px;">📍 Locations</h3>
-    <p style="color:#888;font-size:13px;margin:0;">Land, structures, and water sources — used by Move across every module.</p>
-  </div>
-  <div class="box">
-    <button onclick="openLocationModal()" class="wide" style="margin-bottom:8px;">➕ Add Location</button>
-    <button onclick="locationsFetch()" class="secondary wide">⬇️ Fetch Locations from farmOS</button>
-  </div>
-  <div id="locations-list"></div>
-</div>
-
 </div><!-- end app-screens -->
 
 <!-- ===== STOCKDESK MODULE ===== -->
@@ -1411,6 +1395,29 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 </nav>
 </div>
 
+<!-- ===== LOCATIONS MODULE ===== -->
+<div id="module-locations" style="display:none;">
+<div id="ld-screen-dashboard" class="screen active">
+  <div class="box">
+    <h3 style="margin:10px 0 4px;">📍 Locations</h3>
+    <p style="color:#888;font-size:13px;margin:0;">Land, structures, and water sources — used by Move across every module.</p>
+  </div>
+  <div class="box" id="ld-overview-map-box" style="display:none;padding:0;overflow:hidden;">
+    <div id="ld-overview-map" style="height:180px;"></div>
+  </div>
+  <div class="box">
+    <button onclick="openLocationModal()" class="wide" style="margin-bottom:8px;">➕ Add Location</button>
+    <button onclick="locationsFetch()" class="secondary wide">⬇️ Fetch Locations from farmOS</button>
+  </div>
+  <div id="locations-list"></div>
+</div>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav ld-bottom-nav">
+  <button id="ld-nav-dashboard" class="active" onclick="ld_show('dashboard')">📍<br>Locations</button>
+</nav>
+</div>
+
 <script>
 // ===== DIAGNOSTIC ERROR BANNER — TEMPORARY — shows any startup crash on screen =====
 // Added to find why home/settings/module tabs are blank on device. Remove once fixed.
@@ -1648,7 +1655,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784392411;
+const APP_VERSION = 1784402336;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1805,7 +1812,6 @@ function showAppScreenInternal(id) {
   if (id === 'dashboard') { renderDashboardScreen(); _updateHeaderActiveState('home'); }
   if (id === 'scheduler') { renderScheduler(); _updateHeaderActiveState(null); }
   if (id === 'ledger') { show_ledger_init(); _updateHeaderActiveState('ledger'); }
-  if (id === 'locations') { renderLocationsScreen(); _updateHeaderActiveState(null); }
 }
 
 // Internal: actually display a goat module screen. No stack push.
@@ -1826,7 +1832,7 @@ function showGoatScreenInternal(id) {
 }
 
 function show(id) {
-  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger','locations'];
+  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger'];
   if (appScreenIds.includes(id)) {
     showAppScreenInternal(id);
     pushNav('app', id);
@@ -8751,7 +8757,7 @@ async function processPendingLocationActions(token, logFn) {
     }
   }
   savePendingActions();
-  if (typeof renderLocationsScreen === 'function' && document.getElementById('screen-locations') && document.getElementById('screen-locations').classList.contains('active')) renderLocationsScreen();
+  if (typeof renderLocationsScreen === 'function' && document.getElementById('ld-screen-dashboard') && document.getElementById('ld-screen-dashboard').classList.contains('active')) renderLocationsScreen();
   return { ok: ok, fail: fail };
 }
 
@@ -9752,6 +9758,23 @@ function sd_show(id) {
   if (id === 'settings') { openSharedSettings(); return; }
   sd_showInternal(id);
   pushNav('stock', id);
+}
+
+// Internal: actually display a locations module screen. No stack push.
+function ld_showInternal(id) {
+  document.querySelectorAll('#module-locations .screen').forEach(s => s.classList.remove('active'));
+  const ldScreenEl = document.getElementById('ld-screen-' + id);
+  if (ldScreenEl) ldScreenEl.classList.add('active');
+  document.querySelectorAll('.ld-bottom-nav button').forEach(b => b.classList.remove('active'));
+  const ldNavBtn = document.getElementById('ld-nav-' + id);
+  if (ldNavBtn) ldNavBtn.classList.add('active');
+  if (id === 'dashboard') { renderLocationsScreen(); renderLocationsOverviewMap(); }
+}
+
+function ld_show(id) {
+  if (id === 'settings') { openSharedSettings(); return; }
+  ld_showInternal(id);
+  pushNav('locations', id);
 }
 
 // showToast — shared, defined in GoatDesk module above
@@ -13584,6 +13607,13 @@ const MODULES = [
       bd_updateSyncBadge();
     },
     onPullFromFarmOS: async function() { await bd_fetchAssets(); }
+  },
+  { id: 'locations', label: '📍 Locations', title: '📍 FarmDesk',
+    containerId: 'module-locations',
+    onActivate: function() {
+      ld_showInternal('dashboard');
+    },
+    onPullFromFarmOS: async function() { await locationsFetch(); }
   }
 ];
 
@@ -14512,6 +14542,40 @@ function renderLocationsScreen() {
       (loc.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + loc.notes + '</div>' : '') +
     '</div>';
   }).join('');
+}
+
+var _locationsOverviewMap = null;
+
+function renderLocationsOverviewMap() {
+  var box = document.getElementById('ld-overview-map-box');
+  if (!box) return;
+  var keys = Object.keys(locations).filter(function(k) { return locations[k] && locations[k].wkt; });
+  if (!keys.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  _loadLeaflet(function() {
+    setTimeout(function() {
+      if (_locationsOverviewMap) { _locationsOverviewMap.remove(); _locationsOverviewMap = null; }
+      _locationsOverviewMap = L.map('ld-overview-map', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, tap: false });
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 20 }).addTo(_locationsOverviewMap);
+      var typeColor = { land: '#3a7', structure: '#c90', water: '#3af' };
+      var allBounds = [];
+      keys.forEach(function(k) {
+        var loc = locations[k];
+        var parsed = _wktParse(loc.wkt);
+        if (!parsed) return;
+        var color = typeColor[loc.type] || '#888';
+        if (parsed.type === 'point') {
+          L.circleMarker(parsed.latlng, { radius: 6, color: color, fillColor: color, fillOpacity: 0.7, weight: 1 }).addTo(_locationsOverviewMap);
+          allBounds.push(parsed.latlng);
+        } else {
+          L.polygon(parsed.latlngs, { color: color, weight: 2, fillOpacity: 0.15 }).addTo(_locationsOverviewMap);
+          allBounds = allBounds.concat(parsed.latlngs);
+        }
+      });
+      if (allBounds.length) _locationsOverviewMap.fitBounds(L.latLngBounds(allBounds), { padding: [20,20] });
+      _locationsOverviewMap.invalidateSize();
+    }, 50);
+  });
 }
 
 function openLocationModal(key) {
