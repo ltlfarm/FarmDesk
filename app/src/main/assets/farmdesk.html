@@ -640,7 +640,6 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 <!-- ===== DASHBOARD ===== -->
 <div id="screen-dashboard" class="screen">
   <div class="box">
-    <button class="secondary" onclick="settingsHome()">← Home</button>
     <h3 style="margin:10px 0 6px;">🏠 Dashboard</h3>
   </div>
   <div id="dashboardContent"></div>
@@ -656,15 +655,13 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <h3 style="margin:0;">⚙️ Settings</h3>
   </div>
 
-  <!-- ════ GENERIC — applies to the whole app ════ -->
-  <div class="set-group open" id="setgrp-general">
+  <!-- ════ FARMOS CONNECTION — its own dropdown ════ -->
+  <div class="set-group" id="setgrp-farmos">
     <div class="set-head" onclick="toggleSetGroup(this)">
-      <span style="color:#3a7;">⚙️ General</span><span class="set-arrow">▲</span>
+      <span style="color:#3a7;">🔗 FarmOS Connection</span><span class="set-arrow">▼</span>
     </div>
     <div class="set-body">
-
       <div class="set-sub" id="setgrp-farmos-conn">
-        <strong>🔗 FarmOS Connection</strong>
         <div id="connStatusLine" style="font-size:13px;color:#888;margin-top:4px;"></div>
         <label>FarmOS URL</label>
         <input id="farmosUrl" placeholder="https://yourfarm.farmos.net" type="url" oninput="saveFarmOSCfg()">
@@ -683,13 +680,15 @@ body.role-viewer #setgrp-farmname { display: none !important; }
         <button id="syncAllBtn" onclick="syncAllModules()" class="wide" style="margin-top:10px;">⬇️ Sync All (Pull from farmOS)</button>
         <div id="syncAllStatus" style="font-size:13px;color:#888;margin-top:6px;display:none;"></div>
       </div>
+    </div>
+  </div>
 
-      <div class="set-sub" id="setgrp-arcgis">
-        <strong>🛰️ Satellite Imagery (optional)</strong>
-        <p style="font-size:13px;color:#888;margin:4px 0 8px;">Adds a satellite view option when drawing locations on the map. Not required — the map works fine without this using standard street tiles.</p>
-        <label>ArcGIS API Key</label>
-        <input id="arcgisApiKey" placeholder="Paste your ArcGIS API key here" type="password" oninput="saveArcgisKey()">
-      </div>
+  <!-- ════ GENERIC — applies to the whole app ════ -->
+  <div class="set-group open" id="setgrp-general">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span style="color:#3a7;">⚙️ General</span><span class="set-arrow">▲</span>
+    </div>
+    <div class="set-body">
 
       <div class="set-sub">
         <strong>🧩 Modules</strong>
@@ -829,6 +828,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 
   <!-- ════ BIRD DESK — renders its own drawer when the Birds module is on ════ -->
   <div id="bd-settings-inject"></div>
+
+  <!-- ════ LOCATIONS — renders its own drawer when the Locations module is on ════ -->
+  <div id="ld-settings-inject"></div>
 
 </div><!-- end screen-settings -->
 
@@ -1402,8 +1404,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <h3 style="margin:10px 0 4px;">📍 Locations</h3>
     <p style="color:#888;font-size:13px;margin:0;">Land, structures, and water sources — used by Move across every module.</p>
   </div>
-  <div class="box" id="ld-overview-map-box" style="display:none;padding:0;overflow:hidden;">
-    <div id="ld-overview-map" style="height:180px;"></div>
+  <div class="box" id="ld-overview-map-box" style="display:none;padding:0;overflow:hidden;position:relative;">
+    <div id="ld-overview-map" style="height:280px;"></div>
+    <button id="ovSatelliteToggleBtn" onclick="toggleOverviewSatellite()" style="display:none;position:absolute;top:10px;right:10px;z-index:1000;margin:0;padding:6px 10px;font-size:13px;background:#2a2a2a;">🗺️ Map</button>
   </div>
   <div class="box">
     <button onclick="openLocationModal()" class="wide" style="margin-bottom:8px;">➕ Add Location</button>
@@ -1655,7 +1658,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784402336;
+const APP_VERSION = 1784404229;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4003,8 +4006,6 @@ function renderSettings() {
   if (cfg.url  && document.getElementById("farmosUrl"))  document.getElementById("farmosUrl").value  = cfg.url;
   if (cfg.user && document.getElementById("farmosUser")) document.getElementById("farmosUser").value = cfg.user;
   if (cfg.pass && document.getElementById("farmosPass")) document.getElementById("farmosPass").value = cfg.pass;
-  var arcgisKeyEl = document.getElementById("arcgisApiKey");
-  if (arcgisKeyEl) arcgisKeyEl.value = localStorage.getItem("farmdesk_arcgis_key") || "";
   renderRecentUrlList();
   const urls = getRecentUrls();
   const urlEl = document.getElementById("farmosUrl");
@@ -4159,6 +4160,7 @@ function renderSettings() {
   }
   // Re-apply role gating after settings re-render
   if (typeof applyRoleUI === "function") applyRoleUI();
+  if (typeof ld_renderSettings === "function") ld_renderSettings();
 }
 
 // Renders one checkbox per registered module into Settings
@@ -13434,6 +13436,30 @@ function bd_renderSettings() {
   }
 }
 
+// ===== LOCATIONS SETTINGS DRAWER =====
+function ld_renderSettings() {
+  var container = document.getElementById('ld-settings-inject');
+  if (!container) return;
+  var locationsOn = typeof moduleEnabled === 'function' ? moduleEnabled('locations') : true;
+  container.innerHTML = locationsOn ? (
+    '<div class="set-group" id="setgrp-locations">' +
+      '<div class="set-head" onclick="toggleSetGroup(this)">' +
+        '<span style="color:#3a7;">📍 Locations</span><span class="set-arrow">▼</span>' +
+      '</div>' +
+      '<div class="set-body">' +
+        '<div class="set-sub" id="setgrp-arcgis">' +
+          '<strong>🛰️ Satellite Imagery (optional)</strong>' +
+          '<p style="font-size:13px;color:#888;margin:4px 0 8px;">Adds a satellite view when drawing or viewing locations on the map. Not required — the map works fine without this using standard street tiles.</p>' +
+          '<label>ArcGIS API Key</label>' +
+          '<input id="arcgisApiKey" placeholder="Paste your ArcGIS API key here" type="password" oninput="saveArcgisKey()">' +
+        '</div>' +
+      '</div>' +
+    '</div>'
+  ) : '';
+  var arcgisKeyEl = document.getElementById('arcgisApiKey');
+  if (arcgisKeyEl) arcgisKeyEl.value = localStorage.getItem('farmdesk_arcgis_key') || '';
+}
+
 var _bd_settingsTypes = [];
 function bd_renderExcludedTypesInSettings() {
   var el = document.getElementById('bd-settings-type-list'); if (!el) return;
@@ -13745,6 +13771,18 @@ function renderDashboardScreen() {
     html += '<button onclick="show(\'scheduler\')" class="secondary wide" style="margin-top:8px;">View Scheduler</button></div>';
   }
 
+  // ===== LOCATIONS PREVIEW MAP =====
+  if (enabled.includes('locations')) {
+    const hasLocShapes = Object.keys(locations || {}).some(k => locations[k] && locations[k].wkt);
+    if (hasLocShapes) {
+      html += '<div class="box" style="padding:0;overflow:hidden;cursor:pointer;position:relative;" onclick="goModule(\'locations\')">' +
+        '<div id="dash-locations-map" style="height:130px;"></div>' +
+        '<button id="dashSatelliteToggleBtn" onclick="event.stopPropagation();toggleDashSatellite()" style="display:none;position:absolute;top:8px;right:8px;z-index:1000;margin:0;padding:4px 8px;font-size:12px;background:#2a2a2a;">🗺️ Map</button>' +
+        '<div style="padding:8px 12px;color:#888;font-size:13px;">📍 Tap to view Locations</div>' +
+      '</div>';
+    }
+  }
+
   // ===== WARNING TAGS (flagged animals — Goats only, where flags exist) =====
   if (enabled.includes('goats')) {
     const flagged = Object.keys(animalProfiles).filter(name => animalProfiles[name].flags && animalProfiles[name].flags.length);
@@ -13876,6 +13914,70 @@ function renderDashboardScreen() {
   html += '<div class="box"><button onclick="show(\'ledger\')" class="secondary wide">💰 View Ledger</button></div>';
 
   box.innerHTML = html;
+  if (enabled.includes('locations')) renderDashboardMiniMap();
+}
+
+var _dashLocationsMap = null;
+
+var _dashStreetLayer = null;
+var _dashSatelliteLayer = null;
+var _dashSatelliteActive = false;
+
+function renderDashboardMiniMap() {
+  var mapDiv = document.getElementById('dash-locations-map');
+  if (!mapDiv) return;
+  _loadLeaflet(function() {
+    setTimeout(function() {
+      if (_dashLocationsMap) { _dashLocationsMap.remove(); _dashLocationsMap = null; }
+      _dashLocationsMap = L.map('dash-locations-map', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, tap: false });
+      _dashStreetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 20 });
+
+      var arcgisKey = localStorage.getItem('farmdesk_arcgis_key') || '';
+      var dashSatBtn = document.getElementById('dashSatelliteToggleBtn');
+      if (arcgisKey) {
+        _dashSatelliteLayer = L.tileLayer('https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + arcgisKey, { attribution: '&copy; Esri', maxZoom: 20 }).addTo(_dashLocationsMap);
+        _dashSatelliteActive = true;
+        if (dashSatBtn) { dashSatBtn.style.display = ''; dashSatBtn.textContent = '🗺️ Map'; }
+      } else {
+        _dashStreetLayer.addTo(_dashLocationsMap);
+        if (dashSatBtn) dashSatBtn.style.display = 'none';
+      }
+
+      var typeColor = { land: '#3a7', structure: '#c90', water: '#3af' };
+      var allBounds = [];
+      Object.keys(locations).forEach(function(k) {
+        var loc = locations[k];
+        if (!loc || !loc.wkt) return;
+        var parsed = _wktParse(loc.wkt);
+        if (!parsed) return;
+        var color = typeColor[loc.type] || '#888';
+        if (parsed.type === 'point') {
+          L.circleMarker(parsed.latlng, { radius: 5, color: color, fillColor: color, fillOpacity: 0.7, weight: 1 }).addTo(_dashLocationsMap);
+          allBounds.push(parsed.latlng);
+        } else {
+          L.polygon(parsed.latlngs, { color: color, weight: 2, fillOpacity: 0.15 }).addTo(_dashLocationsMap);
+          allBounds = allBounds.concat(parsed.latlngs);
+        }
+      });
+      if (allBounds.length) _dashLocationsMap.fitBounds(L.latLngBounds(allBounds), { padding: [10,10] });
+      _dashLocationsMap.invalidateSize();
+    }, 50);
+  });
+}
+
+function toggleDashSatellite() {
+  if (!_dashSatelliteLayer || !_dashLocationsMap) return;
+  var btn = document.getElementById('dashSatelliteToggleBtn');
+  if (_dashSatelliteActive) {
+    _dashLocationsMap.removeLayer(_dashSatelliteLayer);
+    _dashLocationsMap.addLayer(_dashStreetLayer);
+    btn.textContent = '🛰️ Satellite';
+  } else {
+    _dashLocationsMap.removeLayer(_dashStreetLayer);
+    _dashLocationsMap.addLayer(_dashSatelliteLayer);
+    btn.textContent = '🗺️ Map';
+  }
+  _dashSatelliteActive = !_dashSatelliteActive;
 }
 
 // ===== LEDGER =====
@@ -14546,6 +14648,10 @@ function renderLocationsScreen() {
 
 var _locationsOverviewMap = null;
 
+var _ovStreetLayer = null;
+var _ovSatelliteLayer = null;
+var _ovSatelliteActive = false;
+
 function renderLocationsOverviewMap() {
   var box = document.getElementById('ld-overview-map-box');
   if (!box) return;
@@ -14555,8 +14661,20 @@ function renderLocationsOverviewMap() {
   _loadLeaflet(function() {
     setTimeout(function() {
       if (_locationsOverviewMap) { _locationsOverviewMap.remove(); _locationsOverviewMap = null; }
-      _locationsOverviewMap = L.map('ld-overview-map', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, tap: false });
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 20 }).addTo(_locationsOverviewMap);
+      _locationsOverviewMap = L.map('ld-overview-map');
+      _ovStreetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 20 });
+
+      var arcgisKey = localStorage.getItem('farmdesk_arcgis_key') || '';
+      var ovSatBtn = document.getElementById('ovSatelliteToggleBtn');
+      if (arcgisKey) {
+        _ovSatelliteLayer = L.tileLayer('https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + arcgisKey, { attribution: '&copy; Esri', maxZoom: 20 }).addTo(_locationsOverviewMap);
+        _ovSatelliteActive = true;
+        if (ovSatBtn) { ovSatBtn.style.display = ''; ovSatBtn.textContent = '🗺️ Map'; }
+      } else {
+        _ovStreetLayer.addTo(_locationsOverviewMap);
+        if (ovSatBtn) ovSatBtn.style.display = 'none';
+      }
+
       var typeColor = { land: '#3a7', structure: '#c90', water: '#3af' };
       var allBounds = [];
       keys.forEach(function(k) {
@@ -14564,18 +14682,37 @@ function renderLocationsOverviewMap() {
         var parsed = _wktParse(loc.wkt);
         if (!parsed) return;
         var color = typeColor[loc.type] || '#888';
+        var shapeLayer;
         if (parsed.type === 'point') {
-          L.circleMarker(parsed.latlng, { radius: 6, color: color, fillColor: color, fillOpacity: 0.7, weight: 1 }).addTo(_locationsOverviewMap);
+          shapeLayer = L.circleMarker(parsed.latlng, { radius: 7, color: color, fillColor: color, fillOpacity: 0.7, weight: 1 });
           allBounds.push(parsed.latlng);
         } else {
-          L.polygon(parsed.latlngs, { color: color, weight: 2, fillOpacity: 0.15 }).addTo(_locationsOverviewMap);
+          shapeLayer = L.polygon(parsed.latlngs, { color: color, weight: 2, fillOpacity: 0.15 });
           allBounds = allBounds.concat(parsed.latlngs);
         }
+        shapeLayer.bindTooltip(loc.name || '(unnamed)', { permanent: false });
+        shapeLayer.on('click', function() { openLocationModal(k); });
+        shapeLayer.addTo(_locationsOverviewMap);
       });
       if (allBounds.length) _locationsOverviewMap.fitBounds(L.latLngBounds(allBounds), { padding: [20,20] });
       _locationsOverviewMap.invalidateSize();
     }, 50);
   });
+}
+
+function toggleOverviewSatellite() {
+  if (!_ovSatelliteLayer || !_locationsOverviewMap) return;
+  var btn = document.getElementById('ovSatelliteToggleBtn');
+  if (_ovSatelliteActive) {
+    _locationsOverviewMap.removeLayer(_ovSatelliteLayer);
+    _locationsOverviewMap.addLayer(_ovStreetLayer);
+    btn.textContent = '🛰️ Satellite';
+  } else {
+    _locationsOverviewMap.removeLayer(_ovStreetLayer);
+    _locationsOverviewMap.addLayer(_ovSatelliteLayer);
+    btn.textContent = '🗺️ Map';
+  }
+  _ovSatelliteActive = !_ovSatelliteActive;
 }
 
 function openLocationModal(key) {
@@ -14656,6 +14793,17 @@ function toggleSatelliteView() {
   _satelliteActive = !_satelliteActive;
 }
 
+function recenterOnGPS() {
+  if (!_locationMap) return;
+  if (!navigator.geolocation) { showToast('GPS not available on this device'); return; }
+  showToast('Getting location...');
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    _locationMap.setView([pos.coords.latitude, pos.coords.longitude], 18);
+  }, function(err) {
+    showToast('Could not get location — check location permission for this app');
+  }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
 function _loadLeaflet(callback) {
   if (_leafletLoaded && window.L) { callback(); return; }
   var cssId = 'leaflet-css';
@@ -14730,7 +14878,7 @@ function openLocationMap() {
       _streetTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 20
-      }).addTo(_locationMap);
+      });
 
       var arcgisKey = localStorage.getItem('farmdesk_arcgis_key') || '';
       var satBtn = document.getElementById('satelliteToggleBtn');
@@ -14738,10 +14886,12 @@ function openLocationMap() {
         _satelliteTileLayer = L.tileLayer('https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + arcgisKey, {
           attribution: '&copy; Esri',
           maxZoom: 20
-        });
+        }).addTo(_locationMap);
         satBtn.style.display = '';
-        _satelliteActive = false;
+        satBtn.textContent = '🗺️ Map';
+        _satelliteActive = true;
       } else {
+        _streetTileLayer.addTo(_locationMap);
         satBtn.style.display = 'none';
       }
 
@@ -14860,6 +15010,7 @@ function openSharedSettings() {
   updateFarmNameSubtitle();
   if (typeof sd_renderSettings === 'function') sd_renderSettings();
   if (typeof bd_renderSettings === 'function') bd_renderSettings();
+  if (typeof ld_renderSettings === 'function') ld_renderSettings();
   renderSettings();
   pushNav('app', 'settings');
   _updateHeaderActiveState('settings');
@@ -15646,6 +15797,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   </div>
   <div id="locationMapDiv" style="position:absolute;top:52px;left:0;right:0;bottom:0;"></div>
   <button id="satelliteToggleBtn" onclick="toggleSatelliteView()" style="display:none;position:absolute;top:62px;right:10px;z-index:1002;margin:0;padding:8px 12px;background:#2a2a2a;">🛰️ Satellite</button>
+  <button id="gpsRecenterBtn" onclick="recenterOnGPS()" style="position:absolute;top:114px;right:10px;z-index:1002;margin:0;padding:8px 12px;background:#2a2a2a;">📍 GPS</button>
 </div>
 
 <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeEdit()">
