@@ -1608,6 +1608,7 @@ const LS = {
   goatTypeUUID:   "farmdesk_goatTypeUUID",
   flagSchema:     "farmdesk_flagSchema",
   locations:      "farmdesk_locations",
+  locationLogs:   "farmdesk_locationLogs",
   animalLocations:"farmdesk_animalLocations",
   goatGroups:     "farmdesk_goatGroups",
   profiles:       "farmdesk_animal_profiles",
@@ -1661,7 +1662,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784472907;
+const APP_VERSION = 1784482488;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1697,6 +1698,7 @@ let logs  = JSON.parse(localStorage.getItem(LS.logs)  || "[]");
 let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
 let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // keyed by animal name
 let locations = JSON.parse(localStorage.getItem(LS.locations) || "{}"); // keyed by farmOS UUID: {name, type, notes}
+let locationLogs = JSON.parse(localStorage.getItem(LS.locationLogs) || "[]"); // [{id, locationKey, logType, notes, ts, synced, farmosUUID}]
 let animalLocations = JSON.parse(localStorage.getItem(LS.animalLocations) || "{}"); // keyed by animal name: {locationUuid, locationName, timestamp}
 let goatGroups = JSON.parse(localStorage.getItem(LS.goatGroups) || "[]"); // [{name, uuid}] — farmOS asset--group, same pattern as bird flocks
 
@@ -7992,22 +7994,25 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) el.textContent = "Fetching locations...";
     try {
       const [landRes, structRes, waterRes] = await Promise.all([
-        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100'), { headers: authHeaders })
+        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent'), { headers: authHeaders })
       ]);
       const newLocations = {};
       function absorbLocationRes(res, typeName) {
         if (!res.ok) return;
         return res.json().then(function(d) {
           (d.data || []).forEach(function(l) {
-            if (l.attributes.archived) return;
             const geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
+            const parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
+            const parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
             newLocations[l.id] = {
               name: l.attributes.name || '(unnamed)',
               type: typeName,
               notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
               wkt: geomVal || null,
+              archived: !!l.attributes.archived,
+              parentKey: parentArr.length ? parentArr[0].id : null,
               synced: true,
               farmosUUID: l.id
             };
@@ -8814,16 +8819,31 @@ async function processPendingLocationActions(token, logFn) {
           archived: !!loc.archived
         };
         if (loc.wkt) attrs.intrinsic_geometry = { value: loc.wkt };
+        var relationships = {};
+        if (loc.parentKey) {
+          var parentLoc = locations[loc.parentKey];
+          if (parentLoc && parentLoc.farmosUUID) {
+            var parentBundle = parentLoc.type === 'structure' ? 'structure' : (parentLoc.type === 'water' ? 'water' : 'land');
+            relationships.parent = { data: [{ type: 'asset--' + parentBundle, id: parentLoc.farmosUUID }] };
+          }
+          // If the parent hasn't synced yet, skip the relationship this round —
+          // processPendingLocationActions runs newest-queued-first isn't guaranteed,
+          // so the parent link catches up automatically on the next sync pass.
+        } else {
+          relationships.parent = { data: [] }; // explicitly clear any previous parent
+        }
+        var payloadData = { type: 'asset--' + bundle, attributes: attrs, relationships: relationships };
         var res;
         if (loc.farmosUUID) {
+          payloadData.id = loc.farmosUUID;
           res = await fetchWithTimeout(apiUrl('/api/asset/' + bundle + '/' + loc.farmosUUID), {
             method: 'PATCH', headers: headers,
-            body: JSON.stringify({ data: { type: 'asset--' + bundle, id: loc.farmosUUID, attributes: attrs } })
+            body: JSON.stringify({ data: payloadData })
           });
         } else {
           res = await fetchWithTimeout(apiUrl('/api/asset/' + bundle), {
             method: 'POST', headers: headers,
-            body: JSON.stringify({ data: { type: 'asset--' + bundle, attributes: attrs } })
+            body: JSON.stringify({ data: payloadData })
           });
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -8836,6 +8856,17 @@ async function processPendingLocationActions(token, logFn) {
         if (a.payload.key !== realUUID) {
           locations[realUUID] = loc;
           delete locations[a.payload.key];
+          // Cascade: any children pointing at the old temp key must follow it,
+          // or they'd silently become orphaned top-level locations.
+          Object.keys(locations).forEach(function(k) {
+            if (locations[k].parentKey === a.payload.key) locations[k].parentKey = realUUID;
+          });
+          // Cascade: any location-logs created before this location finished
+          // syncing were queued against the temp key too.
+          locationLogs.forEach(function(l) {
+            if (l.locationKey === a.payload.key) l.locationKey = realUUID;
+          });
+          localStorage.setItem(LS.locationLogs, JSON.stringify(locationLogs));
         }
         localStorage.setItem(LS.locations, JSON.stringify(locations));
 
@@ -8854,6 +8885,54 @@ async function processPendingLocationActions(token, logFn) {
   }
   savePendingActions();
   if (typeof renderLocationsScreen === 'function' && document.getElementById('ld-screen-dashboard') && document.getElementById('ld-screen-dashboard').classList.contains('active')) renderLocationsScreen();
+  return { ok: ok, fail: fail };
+}
+
+// Pushes logs created directly against a location (Observation/Activity/Input/
+// Maintenance) — same is_movement-free log model as any other farmOS log,
+// just with the location itself as the referenced asset. Runs AFTER
+// processPendingLocationActions so a location created in this same sync
+// batch already has its real farmOS UUID resolved.
+async function processPendingLocationLogActions(token, logFn) {
+  var items = pendingActions.filter(function(a) { return !a.synced && a.type === 'locationLogSave'; });
+  var ok = 0, fail = 0;
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  for (var i = 0; i < items.length; i++) {
+    var a = items[i];
+    try {
+      var entry = locationLogs.find(function(l) { return l.id === a.payload.id; });
+      if (!entry) { a.synced = true; continue; } // deleted locally before it synced
+      var loc = locations[entry.locationKey];
+      if (!loc || !loc.farmosUUID) throw new Error('Location not synced yet — will retry next sync');
+      var locBundle = loc.type === 'structure' ? 'asset--structure' : (loc.type === 'water' ? 'asset--water' : 'asset--land');
+      var ts = String(Math.floor(new Date(entry.ts).getTime() / 1000));
+      var payload = { data: {
+        type: 'log--' + entry.logType,
+        attributes: {
+          name: entry.logType.charAt(0).toUpperCase() + entry.logType.slice(1) + ': ' + loc.name,
+          timestamp: ts,
+          status: 'done',
+          notes: { value: entry.notes || '', format: 'default' }
+        },
+        relationships: {
+          asset: { data: [{ type: locBundle, id: loc.farmosUUID }] }
+        }
+      }};
+      var res = await fetchWithTimeout(apiUrl('/api/log/' + entry.logType), { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var resData = await res.json();
+      entry.farmosUUID = resData.data.id;
+      entry.synced = true;
+      localStorage.setItem(LS.locationLogs, JSON.stringify(locationLogs));
+      a.synced = true; a.lastError = null; ok++;
+      if (logFn) logFn('✅ location log pushed\n');
+    } catch(e) {
+      a.lastError = e.message; fail++;
+      if (logFn) logFn('⚠️ location log failed: ' + e.message + '\n');
+    }
+  }
+  savePendingActions();
+  if (_locationDetailKey) renderLocationDetailLogsList(_locationDetailKey);
   return { ok: ok, fail: fail };
 }
 
@@ -9353,6 +9432,7 @@ async function syncToFarmOS() {
     logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
     try {
       const locationActionResult = await processPendingLocationActions(token, function(msg) { logEl.textContent += msg; });
+      const locationLogActionResult = await processPendingLocationLogActions(token, function(msg) { logEl.textContent += msg; });
       const batchActionResult = await processPendingBatchActions(token, function(msg) { logEl.textContent += msg; });
       const goatActionResult = await processPendingGoatActions(token, function(msg) { logEl.textContent += msg; });
       const ledgerActionResult = await processPendingLedgerActions(token, function(msg) { logEl.textContent += msg; });
@@ -12244,6 +12324,7 @@ async function bd_syncToFarmOS() {
       if (logEl) logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
       try {
         var locationActionResult = await processPendingLocationActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
+        var locationLogActionResult = await processPendingLocationLogActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var batchActionResult = await processPendingBatchActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var goatActionResult = await processPendingGoatActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var ledgerActionResult = await processPendingLedgerActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
@@ -14906,22 +14987,25 @@ async function locationsFetch() {
     var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
     var [landRes, structRes, waterRes] = await Promise.all([
-      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100'), { headers: headers }),
-      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100'), { headers: headers }),
-      fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100'), { headers: headers })
+      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent'), { headers: headers })
     ]);
     var newLocations = {};
     async function absorb(res, typeName) {
       if (!res.ok) return;
       var d = await res.json();
       (d.data || []).forEach(function(l) {
-        if (l.attributes.archived) return;
         var geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
+        var parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
+        var parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
         newLocations[l.id] = {
           name: l.attributes.name || '(unnamed)',
           type: typeName,
           notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
           wkt: geomVal || null,
+          archived: !!l.attributes.archived,
+          parentKey: parentArr.length ? parentArr[0].id : null,
           synced: true,
           farmosUUID: l.id
         };
@@ -14933,6 +15017,42 @@ async function locationsFetch() {
     });
     locations = newLocations;
     localStorage.setItem(LS.locations, JSON.stringify(locations));
+
+    // ===== Pull location-referencing logs (Observation/Activity/Input/Maintenance) =====
+    try {
+      var locUuidSet = {};
+      Object.keys(locations).forEach(function(k) { if (locations[k].farmosUUID) locUuidSet[locations[k].farmosUUID] = k; });
+      var logTypes = ['observation', 'activity', 'input', 'maintenance'];
+      var fetchedLocLogs = [];
+      await Promise.all(logTypes.map(async function(lt) {
+        var lr = await fetchWithTimeout(apiUrl('/api/log/' + lt + '?page[limit]=100&sort=-timestamp&include=asset'), { headers: headers });
+        if (!lr.ok) return;
+        var ld = await lr.json();
+        (ld.data || []).forEach(function(log) {
+          var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+          var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          assetArr.forEach(function(a) {
+            var locKey = locUuidSet[a.id];
+            if (!locKey) return; // this log's asset isn't one of our tracked locations
+            var ts = log.attributes.timestamp;
+            fetchedLocLogs.push({
+              id: 'farmos_' + log.id,
+              locationKey: locKey,
+              logType: lt,
+              notes: (log.attributes.notes && (log.attributes.notes.value || log.attributes.notes)) || '',
+              ts: (isNaN(Number(ts)) ? ts : new Date(Number(ts) * 1000).toISOString()),
+              synced: true,
+              farmosUUID: log.id
+            });
+          });
+        });
+      }));
+      // Keep local unsynced entries — farmOS wins on anything already synced
+      var localPendingLogs = locationLogs.filter(function(l) { return !l.synced; });
+      locationLogs = fetchedLocLogs.concat(localPendingLogs);
+      localStorage.setItem(LS.locationLogs, JSON.stringify(locationLogs));
+    } catch(e) { /* location-log fetch is best-effort — never blocks the rest of sync */ }
+
     renderLocationsScreen();
     showToast('✅ Locations fetched from farmOS');
   } catch(e) {
@@ -14966,11 +15086,12 @@ function renderLocationsScreen() {
     var syncTag = loc.synced === false ? '<span style="color:#c90;font-size:11px;">\u23f3 pending</span>' : '<span style="color:#3a7;font-size:11px;">\u2713 synced</span>';
     var shapeTag = loc.wkt ? '<span style="color:#8bd;font-size:11px;">\ud83d\udccd shape saved</span>' : '<span style="color:#666;font-size:11px;">no shape drawn</span>';
     var archivedTag = loc.archived ? ' <span style="color:#888;font-size:11px;">\ud83d\udce6 archived</span>' : '';
-    return '<div class="box" onclick="openLocationDetail(\'' + k + '\')" style="cursor:pointer;' + (loc.archived ? 'opacity:0.6;' : '') + '">' +
+    var parentTag = (loc.parentKey && locations[loc.parentKey]) ? ' <span style="color:#8bd;font-size:11px;">\ud83d\udcc1 in ' + (locations[loc.parentKey].name||'') + '</span>' : '';
+    return '<div class="box" onclick="openLocationDetail(\'' + k + '\')" style="cursor:pointer;' + (loc.archived ? 'opacity:0.6;' : '') + (loc.parentKey ? 'margin-left:16px;' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
         '<strong style="font-size:15px;">' + (typeIcon[loc.type] || '') + ' ' + (loc.name || '\u2014') + '</strong>' +
       '</div>' +
-      '<div style="margin-top:2px;">' + syncTag + ' &middot; ' + shapeTag + archivedTag + '</div>' +
+      '<div style="margin-top:2px;">' + syncTag + ' &middot; ' + shapeTag + archivedTag + parentTag + '</div>' +
       (loc.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + loc.notes + '</div>' : '') +
     '</div>';
   }).join('') + toggleHTML;
@@ -15045,6 +15166,16 @@ function toggleOverviewSatellite() {
   _ovSatelliteActive = !_ovSatelliteActive;
 }
 
+function getLocationDescendantKeys(key) {
+  var result = [];
+  var children = Object.keys(locations).filter(function(k) { return locations[k].parentKey === key; });
+  children.forEach(function(c) {
+    result.push(c);
+    result = result.concat(getLocationDescendantKeys(c));
+  });
+  return result;
+}
+
 function openLocationModal(key) {
   var loc = key ? locations[key] : null;
   document.getElementById('locationModalTitle').textContent = loc ? (loc.archived ? 'Edit Location (Archived)' : 'Edit Location') : 'Add Location';
@@ -15054,6 +15185,16 @@ function openLocationModal(key) {
   document.getElementById('location_notes').value = loc ? (loc.notes||'') : '';
   document.getElementById('location_wkt').value = loc ? (loc.wkt||'') : '';
   document.getElementById('locationShapeStatus').textContent = (loc && loc.wkt) ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
+
+  var excluded = key ? [key].concat(getLocationDescendantKeys(key)) : [];
+  var parentSelect = document.getElementById('location_parent');
+  var parentOptions = Object.keys(locations)
+    .filter(function(k) { return excluded.indexOf(k) === -1 && !locations[k].archived; })
+    .sort(function(a,b) { return (locations[a].name||'').localeCompare(locations[b].name||''); })
+    .map(function(k) { return '<option value="' + k + '">' + (locations[k].name || '\u2014') + '</option>'; }).join('');
+  parentSelect.innerHTML = '<option value="">\u2014 none (top-level) \u2014</option>' + parentOptions;
+  parentSelect.value = loc ? (loc.parentKey || '') : '';
+
   var deleteRow = document.getElementById('locationDeleteRow');
   deleteRow.style.display = loc ? 'flex' : 'none';
   var archiveBtn = document.getElementById('locationArchiveBtn');
@@ -15067,15 +15208,34 @@ function openLocationModal(key) {
   document.getElementById('locationModal').style.display = '';
 }
 
+var _locationDetailKey = null;
+
 function openLocationDetail(key) {
   var loc = locations[key];
   if (!loc) return;
+  _locationDetailKey = key;
   var typeIcon = { land: '🌾', structure: '🏡', water: '💧' };
   document.getElementById('locationDetailTitle').textContent = (typeIcon[loc.type] || '') + ' ' + (loc.name || '—');
   var syncTag = loc.synced === false ? '⏳ pending' : '✓ synced';
   var shapeTag = loc.wkt ? '📍 shape saved' : 'no shape drawn';
   document.getElementById('locationDetailMeta').textContent = syncTag + ' · ' + shapeTag;
+
+  var hierarchyHTML = '';
+  if (loc.parentKey && locations[loc.parentKey]) {
+    var parentName = locations[loc.parentKey].name || '—';
+    hierarchyHTML += '<div style="color:#8bd;cursor:pointer;" onclick="openLocationDetail(\'' + loc.parentKey + '\')">📁 In: ' + parentName + '</div>';
+  }
+  var children = Object.keys(locations).filter(function(k) { return locations[k].parentKey === key && !locations[k].archived; })
+    .sort(function(a,b) { return (locations[a].name||'').localeCompare(locations[b].name||''); });
+  if (children.length) {
+    hierarchyHTML += '<div style="color:#8bd;margin-top:2px;">📂 Contains: ' + children.map(function(c) {
+      return '<span onclick="openLocationDetail(\'' + c + '\')" style="cursor:pointer;text-decoration:underline dotted;">' + (locations[c].name || '—') + '</span>';
+    }).join(', ') + '</div>';
+  }
+  document.getElementById('locationDetailHierarchy').innerHTML = hierarchyHTML;
+
   document.getElementById('locationDetailNotes').textContent = loc.notes || '';
+  renderLocationDetailLogsList(key);
   document.getElementById('locationDetailNotes').style.display = loc.notes ? '' : 'none';
   document.getElementById('locationDetailEditBtn').onclick = function() { closeLocationDetail(); openLocationModal(key); };
 
@@ -15128,6 +15288,61 @@ function closeLocationDetail() {
   document.getElementById('locationDetailModal').style.display = 'none';
 }
 
+// ===== LOCATION LOGS (Observation/Activity/Input/Maintenance tied to a location) =====
+function renderLocationDetailLogsList(key) {
+  var list = document.getElementById('locationDetailLogsList');
+  if (!list) return;
+  var typeIcon = { observation: '👁️', activity: '📝', input: '🌱', maintenance: '🔧' };
+  var here = locationLogs.filter(function(l) { return l.locationKey === key; })
+    .sort(function(a,b) { return new Date(b.ts) - new Date(a.ts); });
+  if (!here.length) { list.innerHTML = '<div style="color:#888;font-size:13px;padding:4px 0;">No logs yet.</div>'; return; }
+  list.innerHTML = here.map(function(l) {
+    var syncTag = l.synced ? '<span style="color:#3a7;font-size:11px;">✓</span>' : '<span style="color:#c90;font-size:11px;">⏳</span>';
+    var when = new Date(l.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    return '<div style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;font-size:13px;">' +
+      '<div style="display:flex;justify-content:space-between;"><strong>' + (typeIcon[l.logType]||'') + ' ' + l.logType + '</strong>' + syncTag + '</div>' +
+      '<div style="color:#888;font-size:12px;margin-top:2px;">' + when + '</div>' +
+      (l.notes ? '<div style="color:#ccc;margin-top:4px;">' + l.notes + '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function openLocationLogModal() {
+  if (!_locationDetailKey) return;
+  var now = new Date(); now.setSeconds(0,0);
+  document.getElementById('locLog_time').value = bd_localISO(now).slice(0,16);
+  document.getElementById('locLog_type').value = 'observation';
+  document.getElementById('locLog_notes').value = '';
+  document.getElementById('locationLogModal').style.display = 'block';
+}
+
+function closeLocationLogModal() {
+  document.getElementById('locationLogModal').style.display = 'none';
+}
+
+function saveLocationLogEntry() {
+  if (!_locationDetailKey) return;
+  var logType = document.getElementById('locLog_type').value;
+  var timeVal = document.getElementById('locLog_time').value;
+  var notes = document.getElementById('locLog_notes').value || '';
+  if (!timeVal) { showToast('⚠️ Set a date/time'); return; }
+  var ts = new Date(timeVal).toISOString();
+  var entry = {
+    id: 'locLog_' + Date.now(),
+    locationKey: _locationDetailKey,
+    logType: logType,
+    notes: notes,
+    ts: ts,
+    synced: false
+  };
+  locationLogs.push(entry);
+  localStorage.setItem(LS.locationLogs, JSON.stringify(locationLogs));
+  queuePendingAction('locationLogSave', { id: entry.id });
+  showToast('✅ Saved locally — will sync to farmOS next push');
+  closeLocationLogModal();
+  renderLocationDetailLogsList(_locationDetailKey);
+}
+
 function closeLocationModal() {
   document.getElementById('locationModal').style.display = 'none';
 }
@@ -15143,6 +15358,8 @@ function saveLocationLocal() {
     type: document.getElementById('location_type').value,
     notes: document.getElementById('location_notes').value.trim(),
     wkt: document.getElementById('location_wkt').value || null,
+    parentKey: document.getElementById('location_parent').value || null,
+    archived: existing ? !!existing.archived : false,
     synced: false,
     farmosUUID: existing ? existing.farmosUUID : null
   };
@@ -15519,6 +15736,7 @@ function closeTopOverlay() {
     { id: 'bd-edit-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeEditModal(); } },
     { id: 'bd-formula-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFormulaModal(); } },
     { id: 'locationDetailModal', test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationDetail(); } },
+    { id: 'locationLogModal',    test: function(el) { return el.style.display === 'block'; }, close: function() { closeLocationLogModal(); } },
     { id: 'locationModal',       test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationModal(); } },
     { id: 'locationMapModal',    test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationMap(); } },
     { id: 'sdMoveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { sd_closeMoveModal(); } },
@@ -16211,10 +16429,38 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button onclick="closeLocationDetail()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
     </div>
     <div id="locationDetailMeta" style="font-size:13px;color:#888;margin-bottom:10px;"></div>
+    <div id="locationDetailHierarchy" style="font-size:13px;margin-bottom:10px;"></div>
     <div id="locationDetailNotes" style="font-size:14px;color:#ccc;margin-bottom:10px;"></div>
     <strong style="font-size:14px;color:#aaa;">📍 Here now</strong>
     <div id="locationDetailAssetsList" style="margin-top:6px;margin-bottom:12px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <strong style="font-size:14px;color:#aaa;">📋 Logs</strong>
+      <button onclick="openLocationLogModal()" class="secondary" style="margin:0;padding:6px 10px;font-size:13px;">➕ Add Log</button>
+    </div>
+    <div id="locationDetailLogsList" style="margin-bottom:12px;"></div>
     <button id="locationDetailEditBtn" class="secondary wide" style="margin:0;">✏️ Edit Location</button>
+  </div>
+</div>
+
+<!-- ===== LOCATION LOG MODAL ===== -->
+<div id="locationLogModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">📋 Add Log</strong>
+      <button onclick="closeLocationLogModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Type</label>
+    <select id="locLog_type" style="width:100%;margin-bottom:8px;">
+      <option value="observation">👁️ Observation</option>
+      <option value="activity">📝 Activity</option>
+      <option value="input">🌱 Input (e.g. amendment, spray)</option>
+      <option value="maintenance">🔧 Maintenance</option>
+    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">When</label>
+    <input type="datetime-local" id="locLog_time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
+    <textarea id="locLog_notes" rows="3" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;" placeholder="What did you observe or do here?"></textarea>
+    <button onclick="saveLocationLogEntry()" style="width:100%;margin:0;">💾 Save</button>
   </div>
 </div>
 
@@ -16233,6 +16479,10 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <option value="land">🌾 Land</option>
       <option value="structure">🏡 Structure</option>
       <option value="water">💧 Water</option>
+    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Parent Location (optional)</label>
+    <select id="location_parent" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="">— none (top-level) —</option>
     </select>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="location_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
