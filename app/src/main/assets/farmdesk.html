@@ -1424,6 +1424,107 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 </nav>
 </div>
 
+<!-- ===== EQUIPMENT MODULE ===== -->
+<div id="module-equipment" style="display:none;">
+<div id="eq-screen-dashboard" class="screen active">
+  <div class="box">
+    <h3 style="margin:10px 0 4px;">🔧 Equipment</h3>
+    <p style="color:#888;font-size:13px;margin:0;">Mechanical and fixed equipment — tractors, pumps, feeders, waterers.</p>
+  </div>
+  <div class="box">
+    <button onclick="eq_openItemModal()" class="wide" style="margin-bottom:8px;">➕ Add Equipment</button>
+    <button onclick="eq_fetchAssets()" class="secondary wide">⬇️ Fetch Equipment from farmOS</button>
+  </div>
+  <div id="eq-items-list"></div>
+</div>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav eq-bottom-nav">
+  <button id="eq-nav-dashboard" class="active" onclick="eq_show('dashboard')">🔧<br>Equipment</button>
+</nav>
+</div>
+
+<!-- ===== EQUIPMENT ITEM MODAL (add/edit) ===== -->
+<div id="eqItemModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="eq_closeItemModal()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong id="eqItemModalTitle" style="font-size:18px;">Add Equipment</strong>
+      <button onclick="eq_closeItemModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <input type="hidden" id="eq_key">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name *</label>
+    <input id="eq_name" type="text" placeholder="e.g. Kubota Tractor, North Hive #3" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Category</label>
+    <select id="eq_category" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="mechanical">⚙️ Mechanical (tractor, truck, generator, pump...)</option>
+      <option value="fixed">📦 Fixed (hive, feeder, waterer...)</option>
+    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Manufacturer</label>
+    <input id="eq_manufacturer" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Model</label>
+    <input id="eq_model" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Serial Number</label>
+    <input id="eq_serial" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
+    <textarea id="eq_notes" rows="2" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <button onclick="eq_saveItem()" style="width:100%;margin:0 0 8px;">💾 Save</button>
+    <div id="eqDeleteRow" style="display:none;gap:8px;">
+      <button id="eqArchiveBtn" onclick="eq_archiveItem()" class="secondary" style="flex:1;margin:0;">📦 Archive</button>
+      <button onclick="eq_deleteItem()" class="secondary" style="flex:1;margin:0;background:#5a1a1a;">🗑️ Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== EQUIPMENT DETAIL DRAWER ===== -->
+<div id="eqDetailModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="eq_closeDetail()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong id="eqDetailTitle" style="font-size:18px;"></strong>
+      <button onclick="eq_closeDetail()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="eqDetailMeta" style="font-size:13px;color:#888;margin-bottom:10px;"></div>
+    <div id="eqDetailNotes" style="font-size:14px;color:#ccc;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button onclick="eq_openMoveModal()" class="secondary" style="flex:1;margin:0;">📍 Move</button>
+      <button id="eqDetailEditBtn" class="secondary" style="flex:1;margin:0;">✏️ Edit</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <strong style="font-size:14px;color:#aaa;">🔧 Maintenance History</strong>
+      <button onclick="eq_openMaintenanceModal()" class="secondary" style="margin:0;padding:6px 10px;font-size:13px;">➕ Add</button>
+    </div>
+    <div id="eqDetailMaintenanceList"></div>
+  </div>
+</div>
+
+<!-- ===== EQUIPMENT MAINTENANCE LOG MODAL ===== -->
+<div id="eqMaintenanceModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">🔧 Add Maintenance Log</strong>
+      <button onclick="eq_closeMaintenanceModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">When</label>
+    <input type="datetime-local" id="eqMaint_time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
+    <textarea id="eqMaint_notes" rows="3" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;" placeholder="Oil change, repair, inspection..."></textarea>
+    <button onclick="eq_saveMaintenanceEntry()" style="width:100%;margin:0;">💾 Save</button>
+  </div>
+</div>
+
+<!-- ===== EQUIPMENT MOVE MODAL ===== -->
+<div id="eqMoveModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">📍 Move Equipment</strong>
+      <button onclick="eq_closeMoveModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="eqMoveFields"></div>
+    <div style="margin-top:12px;">
+      <button onclick="eq_saveMoveLog()" style="width:100%;margin:0;">💾 Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== DIAGNOSTIC ERROR BANNER — TEMPORARY — shows any startup crash on screen =====
 // Added to find why home/settings/module tabs are blank on device. Remove once fixed.
@@ -1662,7 +1763,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784482488;
+const APP_VERSION = 1784483819;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1801,10 +1902,20 @@ history.pushState({ navIndex: 0 }, '');
 function showAppScreenInternal(id) {
   document.querySelectorAll('#module-goatdesk .screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('#app-screens .screen').forEach(s => s.classList.remove('active'));
-  // Hide ALL module containers — not just goatdesk
+  // Hide ALL module containers — driven by the MODULES registry so any
+  // future module (Equipment, etc.) is automatically covered here too.
   document.getElementById('module-goatdesk').style.display = 'none';
-  var sdEl = document.getElementById('module-stockdesk'); if (sdEl) sdEl.style.display = 'none';
-  var bdEl = document.getElementById('module-birddesk'); if (bdEl) bdEl.style.display = 'none';
+  if (typeof MODULES !== 'undefined') {
+    MODULES.forEach(function(m) {
+      var el = document.getElementById(m.containerId);
+      if (el) el.style.display = 'none';
+    });
+  } else {
+    // Fallback in the unlikely case MODULES isn't defined yet
+    var sdEl = document.getElementById('module-stockdesk'); if (sdEl) sdEl.style.display = 'none';
+    var bdEl = document.getElementById('module-birddesk'); if (bdEl) bdEl.style.display = 'none';
+    var ldEl = document.getElementById('module-locations'); if (ldEl) ldEl.style.display = 'none';
+  }
   document.getElementById('app-screens').style.display = '';
   const screenEl = document.getElementById('screen-' + id);
   if (screenEl) screenEl.classList.add('active');
@@ -9433,6 +9544,7 @@ async function syncToFarmOS() {
     try {
       const locationActionResult = await processPendingLocationActions(token, function(msg) { logEl.textContent += msg; });
       const locationLogActionResult = await processPendingLocationLogActions(token, function(msg) { logEl.textContent += msg; });
+      const equipmentActionResult = await eq_syncToFarmOS(function(msg) { logEl.textContent += msg; });
       const batchActionResult = await processPendingBatchActions(token, function(msg) { logEl.textContent += msg; });
       const goatActionResult = await processPendingGoatActions(token, function(msg) { logEl.textContent += msg; });
       const ledgerActionResult = await processPendingLedgerActions(token, function(msg) { logEl.textContent += msg; });
@@ -11544,6 +11656,462 @@ let bd_birds   = JSON.parse(localStorage.getItem(BD_LS.assets)  || "[]");
 let bd_history = JSON.parse(localStorage.getItem(BD_LS.history) || "[]");
 let birdLocations = JSON.parse(localStorage.getItem(BD_LS.locations) || "{}"); // keyed by bird uuid: {locationUuid, locationName, timestamp}
 
+// ============================================================
+// D. EQUIPMENT MODULE
+// Mechanical (tractor, truck, trailer, generator, pump) and fixed
+// (hive, feeder, waterer) equipment. Tracked as real farmOS
+// asset--equipment records (native manufacturer/model/serial_number
+// fields), with per-item maintenance log history and Move support.
+// "category" (mechanical/fixed) is a local-only organizational field —
+// farmOS itself doesn't split Equipment this way, so it's not pushed
+// as a fake farmOS attribute; it just drives grouping in this UI.
+// ============================================================
+const EQ_LS = {
+  assets:    "farmdesk_equipment_assets",
+  history:   "farmdesk_equipment_history",   // maintenance log entries
+  pending:   "farmdesk_equipment_pending",
+  lastSync:  "farmdesk_equipment_lastsync",
+  locations: "farmdesk_equipment_locations"  // current location per item uuid, mirrors animalLocations
+};
+
+let eq_items      = JSON.parse(localStorage.getItem(EQ_LS.assets)    || "[]");
+let eq_history    = JSON.parse(localStorage.getItem(EQ_LS.history)   || "[]");
+let eq_pending     = JSON.parse(localStorage.getItem(EQ_LS.pending)  || "[]");
+let equipmentLocations = JSON.parse(localStorage.getItem(EQ_LS.locations) || "{}");
+
+// ===== EQUIPMENT: screen switching =====
+function eq_showInternal(id) {
+  document.querySelectorAll('#module-equipment .screen').forEach(s => s.classList.remove('active'));
+  var screenEl = document.getElementById('eq-screen-' + id);
+  if (screenEl) screenEl.classList.add('active');
+  document.querySelectorAll('.eq-bottom-nav button').forEach(b => b.classList.remove('active'));
+  var navBtn = document.getElementById('eq-nav-' + id);
+  if (navBtn) navBtn.classList.add('active');
+  if (id === 'dashboard') eq_renderList();
+}
+function eq_show(id) {
+  if (id === 'settings') { openSharedSettings(); return; }
+  eq_showInternal(id);
+  pushNav('equipment', id);
+}
+
+// ===== EQUIPMENT: list rendering =====
+var _showArchivedEquipment = false;
+function eq_toggleArchived() { _showArchivedEquipment = !_showArchivedEquipment; eq_renderList(); }
+
+function eq_renderList() {
+  var list = document.getElementById('eq-items-list');
+  if (!list) return;
+  var allKeys = Object.keys(eq_items.reduce(function(acc, it) { acc[it.key] = true; return acc; }, {}));
+  var archivedCount = eq_items.filter(function(it) { return it.archived; }).length;
+  var items = _showArchivedEquipment ? eq_items : eq_items.filter(function(it) { return !it.archived; });
+  var toggleHTML = archivedCount ? '<div style="text-align:center;padding:8px 0;color:#8bd;font-size:13px;cursor:pointer;" onclick="eq_toggleArchived()">' +
+    (_showArchivedEquipment ? '▲ Hide archived' : '▼ Show archived (' + archivedCount + ')') + '</div>' : '';
+  if (!items.length) {
+    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No equipment yet.</div>' + toggleHTML;
+    return;
+  }
+  var catIcon = { mechanical: '⚙️', fixed: '📦' };
+  var sorted = items.slice().sort(function(a,b) { return (a.name||'').localeCompare(b.name||''); });
+  list.innerHTML = sorted.map(function(it) {
+    var syncTag = it.synced === false ? '<span style="color:#c90;font-size:11px;">⏳ pending</span>' : '<span style="color:#3a7;font-size:11px;">✓ synced</span>';
+    var archivedTag = it.archived ? ' <span style="color:#888;font-size:11px;">📦 archived</span>' : '';
+    var sub = [it.manufacturer, it.model].filter(Boolean).join(' ');
+    return '<div class="box" onclick="eq_openDetail(\'' + it.key + '\')" style="cursor:pointer;' + (it.archived ? 'opacity:0.6;' : '') + '">' +
+      '<strong style="font-size:15px;">' + (catIcon[it.category]||'') + ' ' + (it.name || '—') + '</strong>' +
+      '<div style="margin-top:2px;">' + syncTag + archivedTag + '</div>' +
+      (sub ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + sub + '</div>' : '') +
+    '</div>';
+  }).join('') + toggleHTML;
+}
+
+// ===== EQUIPMENT: add/edit item =====
+function eq_openItemModal(key) {
+  var it = key ? eq_items.find(function(x) { return x.key === key; }) : null;
+  document.getElementById('eqItemModalTitle').textContent = it ? 'Edit Equipment' : 'Add Equipment';
+  document.getElementById('eq_key').value = key || '';
+  document.getElementById('eq_name').value = it ? (it.name||'') : '';
+  document.getElementById('eq_category').value = it ? (it.category||'mechanical') : 'mechanical';
+  document.getElementById('eq_manufacturer').value = it ? (it.manufacturer||'') : '';
+  document.getElementById('eq_model').value = it ? (it.model||'') : '';
+  document.getElementById('eq_serial').value = it ? (it.serial||'') : '';
+  document.getElementById('eq_notes').value = it ? (it.notes||'') : '';
+  var deleteRow = document.getElementById('eqDeleteRow');
+  deleteRow.style.display = it ? 'flex' : 'none';
+  var archiveBtn = document.getElementById('eqArchiveBtn');
+  if (it && it.archived) {
+    archiveBtn.textContent = '↩️ Unarchive';
+    archiveBtn.onclick = eq_unarchiveItem;
+  } else {
+    archiveBtn.textContent = '📦 Archive';
+    archiveBtn.onclick = eq_archiveItem;
+  }
+  document.getElementById('eqItemModal').style.display = '';
+}
+function eq_closeItemModal() { document.getElementById('eqItemModal').style.display = 'none'; }
+
+function eq_saveItem() {
+  var key = document.getElementById('eq_key').value;
+  var name = document.getElementById('eq_name').value.trim();
+  if (!name) { alert('Name is required.'); return; }
+  var existing = key ? eq_items.find(function(x) { return x.key === key; }) : null;
+  var newKey = key || ('local_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+  var data = {
+    key: newKey,
+    name: name,
+    category: document.getElementById('eq_category').value,
+    manufacturer: document.getElementById('eq_manufacturer').value.trim(),
+    model: document.getElementById('eq_model').value.trim(),
+    serial: document.getElementById('eq_serial').value.trim(),
+    notes: document.getElementById('eq_notes').value.trim(),
+    archived: existing ? !!existing.archived : false,
+    synced: false,
+    farmosUUID: existing ? existing.farmosUUID : null
+  };
+  if (existing) {
+    var idx = eq_items.indexOf(existing);
+    eq_items[idx] = data;
+  } else {
+    eq_items.push(data);
+  }
+  localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+  eq_pending.push({ id: 'save_' + Date.now(), type: 'save', key: newKey, synced: false });
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  showToast('✅ Saved locally — will sync to farmOS next push');
+  eq_closeItemModal();
+  eq_renderList();
+}
+
+function eq_archiveItem() {
+  var key = document.getElementById('eq_key').value;
+  var it = eq_items.find(function(x) { return x.key === key; });
+  if (!it) return;
+  it.archived = true; it.synced = false;
+  localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+  eq_pending.push({ id: 'save_' + Date.now(), type: 'save', key: key, synced: false });
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  showToast('📦 Archived locally — will sync to farmOS next push');
+  eq_closeItemModal();
+  eq_renderList();
+}
+function eq_unarchiveItem() {
+  var key = document.getElementById('eq_key').value;
+  var it = eq_items.find(function(x) { return x.key === key; });
+  if (!it) return;
+  it.archived = false; it.synced = false;
+  localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+  eq_pending.push({ id: 'save_' + Date.now(), type: 'save', key: key, synced: false });
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  showToast('↩️ Restored locally — will sync to farmOS next push');
+  eq_closeItemModal();
+  eq_renderList();
+}
+function eq_deleteItem() {
+  var key = document.getElementById('eq_key').value;
+  var it = eq_items.find(function(x) { return x.key === key; });
+  if (!it) return;
+  var name = it.name || 'this item';
+  if (!confirm('Delete "' + name + '"? Consider Archive instead if you might need it again.')) return;
+  if (!confirm('This permanently removes "' + name + '" from farmOS and cannot be undone. Are you absolutely sure?')) return;
+  if (it.farmosUUID) {
+    eq_pending.push({ id: 'delete_' + Date.now(), type: 'delete', farmosUUID: it.farmosUUID, synced: false });
+  }
+  eq_items = eq_items.filter(function(x) { return x.key !== key; });
+  localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  showToast('✅ Deleted locally — will sync to farmOS next push');
+  eq_closeItemModal();
+  eq_renderList();
+}
+
+// ===== EQUIPMENT: detail drawer =====
+var _eqDetailKey = null;
+function eq_openDetail(key) {
+  var it = eq_items.find(function(x) { return x.key === key; });
+  if (!it) return;
+  _eqDetailKey = key;
+  var catIcon = { mechanical: '⚙️', fixed: '📦' };
+  document.getElementById('eqDetailTitle').textContent = (catIcon[it.category]||'') + ' ' + (it.name || '—');
+  var syncTag = it.synced === false ? '⏳ pending' : '✓ synced';
+  var sub = [it.manufacturer, it.model, it.serial ? ('SN: ' + it.serial) : null].filter(Boolean).join(' · ');
+  document.getElementById('eqDetailMeta').textContent = syncTag + (sub ? ' · ' + sub : '');
+  document.getElementById('eqDetailNotes').textContent = it.notes || '';
+  document.getElementById('eqDetailNotes').style.display = it.notes ? '' : 'none';
+  document.getElementById('eqDetailEditBtn').onclick = function() { eq_closeDetail(); eq_openItemModal(key); };
+  eq_renderMaintenanceList(key);
+  document.getElementById('eqDetailModal').style.display = '';
+}
+function eq_closeDetail() { document.getElementById('eqDetailModal').style.display = 'none'; }
+
+function eq_renderMaintenanceList(key) {
+  var list = document.getElementById('eqDetailMaintenanceList');
+  if (!list) return;
+  var here = eq_history.filter(function(l) { return l.itemKey === key; })
+    .sort(function(a,b) { return new Date(b.ts) - new Date(a.ts); });
+  if (!here.length) { list.innerHTML = '<div style="color:#888;font-size:13px;padding:4px 0;">No maintenance logged yet.</div>'; return; }
+  list.innerHTML = here.map(function(l) {
+    var syncTag = l.synced ? '<span style="color:#3a7;font-size:11px;">✓</span>' : '<span style="color:#c90;font-size:11px;">⏳</span>';
+    var when = new Date(l.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    return '<div style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;font-size:13px;">' +
+      '<div style="display:flex;justify-content:space-between;"><span style="color:#888;">' + when + '</span>' + syncTag + '</div>' +
+      (l.notes ? '<div style="color:#ccc;margin-top:4px;">' + l.notes + '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function eq_openMaintenanceModal() {
+  if (!_eqDetailKey) return;
+  var now = new Date(); now.setSeconds(0,0);
+  document.getElementById('eqMaint_time').value = bd_localISO(now).slice(0,16);
+  document.getElementById('eqMaint_notes').value = '';
+  document.getElementById('eqMaintenanceModal').style.display = 'block';
+}
+function eq_closeMaintenanceModal() { document.getElementById('eqMaintenanceModal').style.display = 'none'; }
+
+function eq_saveMaintenanceEntry() {
+  if (!_eqDetailKey) return;
+  var timeVal = document.getElementById('eqMaint_time').value;
+  var notes = document.getElementById('eqMaint_notes').value || '';
+  if (!timeVal) { showToast('⚠️ Set a date/time'); return; }
+  var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, notes: notes, ts: new Date(timeVal).toISOString(), synced: false };
+  eq_history.push(entry);
+  localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+  eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: entry.id, synced: false });
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  showToast('✅ Saved locally — will sync to farmOS next push');
+  eq_closeMaintenanceModal();
+  eq_renderMaintenanceList(_eqDetailKey);
+}
+
+// ===== EQUIPMENT: Move (location tracking) =====
+function eq_openMoveModal() {
+  if (!_eqDetailKey) return;
+  var it = eq_items.find(function(x) { return x.key === _eqDetailKey; });
+  if (!it) return;
+  var modal = document.getElementById('eqMoveModal');
+  var fields = document.getElementById('eqMoveFields');
+  if (!modal || !fields) return;
+  var locArr = Object.entries(locations).filter(function(e){ return !e[1].archived; }).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var current = equipmentLocations[it.key];
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;margin:0 0 8px;">' + it.name + (current ? ' — currently at ' + current.locationName : ' — no location set') + '</p>' +
+    (it.farmosUUID ? '' : '<p style="color:#c66;font-size:13px;margin:0 0 8px;">Not yet synced to farmOS — sync this item first, then Move.</p>') +
+    '<label>Move to</label>' +
+    '<select id="eqMoveLocationSelect">' +
+      '<option value="">— select location —</option>' +
+      locArr.map(function(l){ return '<option value="' + l.uuid + '">' + (l.type === 'structure' ? '🏡 ' : l.type === 'water' ? '💧 ' : '🌾 ') + l.name + '</option>'; }).join('') +
+    '</select>' +
+    (locArr.length ? '' : '<p style="color:#888;font-size:13px;margin-top:4px;">No locations found — add one in the Locations tab first.</p>') +
+    '<label style="margin-top:10px;">Notes</label>' +
+    '<textarea id="eqMoveNotes" rows="2" placeholder="Optional notes"></textarea>';
+  modal.style.display = 'block';
+}
+function eq_closeMoveModal() { document.getElementById('eqMoveModal').style.display = 'none'; }
+
+function eq_saveMoveLog() {
+  var it = eq_items.find(function(x) { return x.key === _eqDetailKey; });
+  if (!it) return;
+  if (!it.farmosUUID) { showToast('⚠️ Sync this item to farmOS first'); return; }
+  var locUuid = document.getElementById('eqMoveLocationSelect').value;
+  var notes = document.getElementById('eqMoveNotes').value || '';
+  if (!locUuid) { showToast('⚠️ Select a location'); return; }
+  var locName = locations[locUuid] ? locations[locUuid].name : '';
+  var locType = locations[locUuid] ? locations[locUuid].type : '';
+  var ts = String(Math.floor(Date.now() / 1000));
+  equipmentLocations[it.key] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+  localStorage.setItem(EQ_LS.locations, JSON.stringify(equipmentLocations));
+  eq_pending.push({ id: 'move_' + Date.now(), type: 'move', itemUUID: it.farmosUUID, itemKey: it.key, itemName: it.name, locationUuid: locUuid, locationName: locName, locationType: locType, notes: notes, ts: ts, synced: false });
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  showToast('✅ Moved ' + it.name + ' to ' + locName + ' locally — will sync to farmOS next push');
+  eq_closeMoveModal();
+}
+
+// ===== EQUIPMENT: push pending actions to farmOS =====
+async function eq_syncToFarmOS(logFn) {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) return { ok: 0, fail: 0 };
+  var token = await getCachedToken(cfg);
+  var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var items = eq_pending.filter(function(a) { return !a.synced; });
+  var ok = 0, fail = 0;
+  for (var i = 0; i < items.length; i++) {
+    var a = items[i];
+    try {
+      if (a.type === 'save') {
+        var it = eq_items.find(function(x) { return x.key === a.key; });
+        if (!it) { a.synced = true; continue; }
+        var attrs = {
+          name: it.name,
+          manufacturer: it.manufacturer || '',
+          model: it.model || '',
+          serial_number: it.serial || '',
+          notes: { value: it.notes || '', format: 'default' },
+          archived: !!it.archived
+        };
+        var res;
+        if (it.farmosUUID) {
+          res = await fetchWithTimeout(apiUrl('/api/asset/equipment/' + it.farmosUUID), {
+            method: 'PATCH', headers: headers,
+            body: JSON.stringify({ data: { type: 'asset--equipment', id: it.farmosUUID, attributes: attrs } })
+          });
+        } else {
+          res = await fetchWithTimeout(apiUrl('/api/asset/equipment'), {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: { type: 'asset--equipment', attributes: attrs } })
+          });
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var resData = await res.json();
+        it.farmosUUID = resData.data.id;
+        it.synced = true;
+        localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+      } else if (a.type === 'delete') {
+        await fetchWithTimeout(apiUrl('/api/asset/equipment/' + a.farmosUUID), {
+          method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+      } else if (a.type === 'maintenance') {
+        var entry = eq_history.find(function(l) { return l.id === a.entryId; });
+        if (!entry) { a.synced = true; continue; }
+        var it2 = eq_items.find(function(x) { return x.key === entry.itemKey; });
+        if (!it2 || !it2.farmosUUID) throw new Error('Equipment not synced yet — will retry next sync');
+        var ts2 = String(Math.floor(new Date(entry.ts).getTime() / 1000));
+        var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance'), {
+          method: 'POST', headers: headers,
+          body: JSON.stringify({ data: {
+            type: 'log--maintenance',
+            attributes: { name: 'Maintenance: ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } },
+            relationships: { asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }
+          }})
+        });
+        if (!mRes.ok) throw new Error('HTTP ' + mRes.status);
+        var mData = await mRes.json();
+        entry.farmosUUID = mData.data.id;
+        entry.synced = true;
+        localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+      } else if (a.type === 'move') {
+        var locBundle = a.locationType === 'structure' ? 'asset--structure' : a.locationType === 'water' ? 'asset--water' : 'asset--land';
+        var moveRes = await fetchWithTimeout(apiUrl('/api/log/activity'), {
+          method: 'POST', headers: headers,
+          body: JSON.stringify({ data: {
+            type: 'log--activity',
+            attributes: { name: 'Move: ' + a.itemName + ' → ' + a.locationName, timestamp: a.ts, status: 'done', is_movement: true, notes: { value: a.notes || '', format: 'default' } },
+            relationships: { asset: { data: [{ type: 'asset--equipment', id: a.itemUUID }] }, location: { data: [{ type: locBundle, id: a.locationUuid }] } }
+          }})
+        });
+        if (!moveRes.ok) throw new Error('HTTP ' + moveRes.status);
+      }
+      a.synced = true; ok++;
+      if (logFn) logFn('✅ equipment ' + a.type + ' pushed\n');
+    } catch(e) {
+      fail++;
+      if (logFn) logFn('⚠️ equipment ' + a.type + ' failed: ' + e.message + '\n');
+    }
+  }
+  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  if (_eqDetailKey) eq_renderMaintenanceList(_eqDetailKey);
+  eq_renderList();
+  return { ok: ok, fail: fail };
+}
+
+// ===== EQUIPMENT: fetch from farmOS =====
+async function eq_fetchAssets() {
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { alert('Connect to farmOS in Settings first.'); return; }
+  try {
+    var token = await getCachedToken(cfg);
+    var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    var res = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=100'), { headers: headers });
+    if (res.ok) {
+      var d = await res.json();
+      var newItems = (d.data || []).map(function(e) {
+        var existing = eq_items.find(function(x) { return x.farmosUUID === e.id; });
+        return {
+          key: existing ? existing.key : e.id,
+          name: e.attributes.name || '(unnamed)',
+          category: existing ? (existing.category || 'mechanical') : 'mechanical',
+          manufacturer: e.attributes.manufacturer || '',
+          model: e.attributes.model || '',
+          serial: e.attributes.serial_number || '',
+          notes: ((e.attributes.notes && (e.attributes.notes.value || e.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
+          archived: !!e.attributes.archived,
+          synced: true,
+          farmosUUID: e.id
+        };
+      });
+      // Preserve any local-only unsynced items
+      eq_items.filter(function(x) { return x.synced === false; }).forEach(function(x) { newItems.push(x); });
+      eq_items = newItems;
+      localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+    }
+
+    // Pull maintenance logs for our equipment
+    try {
+      var eqUuidSet = {};
+      eq_items.forEach(function(it) { if (it.farmosUUID) eqUuidSet[it.farmosUUID] = it.key; });
+      var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance?page[limit]=100&sort=-timestamp&include=asset'), { headers: headers });
+      if (mRes.ok) {
+        var mData = await mRes.json();
+        var fetchedHistory = [];
+        (mData.data || []).forEach(function(log) {
+          var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+          var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          assetArr.forEach(function(a) {
+            var itemKey = eqUuidSet[a.id];
+            if (!itemKey) return;
+            var ts = log.attributes.timestamp;
+            fetchedHistory.push({
+              id: 'farmos_' + log.id, itemKey: itemKey,
+              notes: (log.attributes.notes && (log.attributes.notes.value || log.attributes.notes)) || '',
+              ts: (isNaN(Number(ts)) ? ts : new Date(Number(ts) * 1000).toISOString()),
+              synced: true, farmosUUID: log.id
+            });
+          });
+        });
+        var localPending = eq_history.filter(function(l) { return !l.synced; });
+        eq_history = fetchedHistory.concat(localPending);
+        localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+      }
+    } catch(e) { /* best-effort */ }
+
+    // Pull current locations (movement logs)
+    try {
+      var eqUuidSet2 = {};
+      eq_items.forEach(function(it) { if (it.farmosUUID) eqUuidSet2[it.farmosUUID] = it.key; });
+      var moveRes = await fetchWithTimeout(apiUrl('/api/log/activity?filter[is_movement]=1&sort=-timestamp&page[limit]=100&include=asset,location'), { headers: headers });
+      if (moveRes.ok) {
+        var moveData = await moveRes.json();
+        var newEqLocations = Object.assign({}, equipmentLocations);
+        (moveData.data || []).forEach(function(log) {
+          var ts = log.attributes.timestamp;
+          var locRel = log.relationships && log.relationships.location && log.relationships.location.data;
+          var locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
+          if (!locArr.length) return;
+          var locUuid = locArr[0].id;
+          var locName = locations[locUuid] ? locations[locUuid].name : null;
+          if (!locName) return;
+          var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+          var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          assetArr.forEach(function(a) {
+            var itemKey = eqUuidSet2[a.id];
+            if (!itemKey) return;
+            var existing = newEqLocations[itemKey];
+            if (!existing || new Date(ts) > new Date(existing.timestamp)) {
+              newEqLocations[itemKey] = { locationUuid: locUuid, locationName: locName, timestamp: ts };
+            }
+          });
+        });
+        equipmentLocations = newEqLocations;
+        localStorage.setItem(EQ_LS.locations, JSON.stringify(equipmentLocations));
+      }
+    } catch(e) { /* best-effort */ }
+
+    eq_renderList();
+    showToast('✅ Equipment fetched from farmOS');
+  } catch(e) {
+    alert('Fetch failed: ' + e.message);
+  }
+}
+
 // ===== ONE-TIME MIGRATION: orphan batch entries in logs[] → bd_history[] =====
 // Earlier builds wrote bird batch sell/died/promote events to logs[] (the
 // goat array) instead of bd_history[]. Those entries have no l.goat field
@@ -12325,6 +12893,7 @@ async function bd_syncToFarmOS() {
       try {
         var locationActionResult = await processPendingLocationActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var locationLogActionResult = await processPendingLocationLogActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
+        var equipmentActionResult = await eq_syncToFarmOS(function(msg) { if (logEl) logEl.textContent += msg; });
         var batchActionResult = await processPendingBatchActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var goatActionResult = await processPendingGoatActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
         var ledgerActionResult = await processPendingLedgerActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
@@ -14039,6 +14608,13 @@ const MODULES = [
       ld_showInternal('dashboard');
     },
     onPullFromFarmOS: async function() { await locationsFetch(); }
+  },
+  { id: 'equipment', label: '🔧 Equipment', title: '🔧 FarmDesk',
+    containerId: 'module-equipment',
+    onActivate: function() {
+      eq_showInternal('dashboard');
+    },
+    onPullFromFarmOS: async function() { await eq_fetchAssets(); }
   }
 ];
 
@@ -15257,8 +15833,15 @@ function openLocationDetail(key) {
     return { uuid: uuid, label: a ? a.name : 'Item' };
   }).sort(function(a,b){ return a.label.localeCompare(b.label); });
 
+  var eqHere = Object.keys(equipmentLocations).filter(function(itemKey) {
+    return equipmentLocations[itemKey] && equipmentLocations[itemKey].locationUuid === key;
+  }).map(function(itemKey) {
+    var it = eq_items.find(function(x) { return x.key === itemKey; });
+    return { key: itemKey, label: it ? it.name : 'Equipment' };
+  }).sort(function(a,b){ return a.label.localeCompare(b.label); });
+
   var list = document.getElementById('locationDetailAssetsList');
-  if (!goatsHere.length && !birdsHere.length && !stockHere.length) {
+  if (!goatsHere.length && !birdsHere.length && !stockHere.length && !eqHere.length) {
     list.innerHTML = '<div style="color:#888;font-size:13px;padding:6px 0;">Nothing here right now.</div>';
   } else {
     var goatRows = goatsHere.map(function(name) {
@@ -15279,7 +15862,13 @@ function openLocationDetail(key) {
         '📦 ' + a.label +
       '</div>';
     }).join('');
-    list.innerHTML = goatRows + birdRows + stockRows;
+    var eqRows = eqHere.map(function(it) {
+      return '<div onclick="closeLocationDetail();goModule(\'equipment\');setTimeout(function(){eq_openDetail(' + JSON.stringify(it.key) + ');},150);" ' +
+        'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+        '🔧 ' + it.label +
+      '</div>';
+    }).join('');
+    list.innerHTML = goatRows + birdRows + stockRows + eqRows;
   }
   document.getElementById('locationDetailModal').style.display = '';
 }
@@ -15743,7 +16332,11 @@ function closeTopOverlay() {
     { id: 'bdMoveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeMoveModal(); } },
     { id: 'contactModal',        test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeContactModal(); } },
     { id: 'ledgerEntryModal',    test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLedgerEntryModal(); } },
-    { id: 'batchAddHatchModal',  test: function(el) { return el.style.display === 'block'; }, close: function(el) { el.style.display = 'none'; } }
+    { id: 'batchAddHatchModal',  test: function(el) { return el.style.display === 'block'; }, close: function(el) { el.style.display = 'none'; } },
+    { id: 'eqMaintenanceModal', test: function(el) { return el.style.display === 'block'; }, close: function() { eq_closeMaintenanceModal(); } },
+    { id: 'eqMoveModal',        test: function(el) { return el.style.display === 'block'; }, close: function() { eq_closeMoveModal(); } },
+    { id: 'eqDetailModal',      test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { eq_closeDetail(); } },
+    { id: 'eqItemModal',        test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { eq_closeItemModal(); } }
   ];
   for (var i = 0; i < checks.length; i++) {
     var el = document.getElementById(checks[i].id);
