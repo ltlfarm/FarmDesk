@@ -1661,7 +1661,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784408143;
+const APP_VERSION = 1784472907;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2566,11 +2566,18 @@ function handleEditPhoto(input) {
   reader.readAsDataURL(file);
 }
 
-function handleEditFileAttach(input) {
+async function handleEditFileAttach(input) {
   const file = input.files[0];
   if (!file) return;
-  editCurrentFileAttach = { name: file.name, type: file.type, _blob: file };
   editCurrentPhoto = null; // a file replaces any pending photo
+  const dataUrl = await new Promise(function(resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function() { resolve(reader.result); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const fileId = await Files.save(dataUrl);
+  editCurrentFileAttach = { name: file.name, type: file.type, fileId: fileId };
   refreshEditPhotoUI();
 }
 
@@ -2911,7 +2918,7 @@ function saveStep() {
       state: document.getElementById("f_hoof")?.value || "Good",
       notes: document.getElementById("f_hoofnotes")?.value || "",
       photoId: null,
-      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
+      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type, fileId: currentFileAttach.fileId } : null
     };
     if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
@@ -2925,7 +2932,7 @@ function saveStep() {
       note:  document.getElementById("f_obs")?.value || "",
       sev:   document.getElementById("f_sev")?.value || "Low",
       photoId: null,
-      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
+      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type, fileId: currentFileAttach.fileId } : null
     };
     if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
@@ -2956,7 +2963,7 @@ function saveStep() {
       type:  document.getElementById("f_birthtype")?.value || "Natural",
       notes: document.getElementById("f_birthnotes")?.value || "",
       photoId: null,
-      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
+      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type, fileId: currentFileAttach.fileId } : null
     };
     if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
@@ -3005,7 +3012,7 @@ function saveStep() {
       notes:    fullNotes,
       supplies: procSupplies,
       photoId:  null,
-      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type } : null
+      fileAttach: currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type, fileId: currentFileAttach.fileId } : null
     };
     if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
     currentPhoto = null;
@@ -3230,6 +3237,12 @@ function makeLogEl(l, showActions = false) {
         : (l.data && l.data.photoUrl
             ? `<img src="" data-photourl="${l.data.photoUrl}" style="width:100%;border-radius:6px;margin-top:6px;object-fit:contain;cursor:zoom-in;background:#333;" onclick="openPhotoViewer(this.src)">`
             : "")}
+      ${l.data && l.data.fileAttach
+        ? `<div onclick="event.stopPropagation();viewFileAttachment('${l.data.fileAttach.fileId || ''}','${(l.data.fileAttach.name||'file').replace(/'/g,"&#39;")}')" style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;margin-top:6px;cursor:pointer;">
+            <span style="font-size:20px;">📎</span>
+            <span style="font-size:14px;color:#8bd;text-decoration:underline;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.data.fileAttach.name || 'Attached file'}</span>
+          </div>`
+        : ""}
     </div>
   `;
   lazyLoadPhotos(d); // fill in <img data-photoid> from the Photos store
@@ -4404,6 +4417,53 @@ var Photos = (function(){
       if (!id) return;
       if (hasNative) { try { window.AndroidBridge.deletePhoto(id); } catch(e){} }
       else { try { localStorage.removeItem("farmdesk_photo_" + id); } catch(e){} }
+    }
+  };
+})();
+
+// ───── SHARED: Files store — persists arbitrary document attachments (PDFs,
+// vet records, etc.) across reloads, same pattern as Photos but no
+// thumbnailing (would corrupt non-image files). Falls back to localStorage
+// if no native store is available. ─────
+var Files = (function(){
+  var hasNative = false;
+  try { hasNative = !!(window.AndroidBridge && window.AndroidBridge.hasFileStore && window.AndroidBridge.hasFileStore()); } catch(e) {}
+  var seq = 0;
+  function newId(){ return "f" + Date.now() + "_" + (seq++); }
+  return {
+    native: hasNative,
+    save: async function(dataUrl){
+      if (!dataUrl) return null;
+      var id = newId();
+      if (hasNative) {
+        return new Promise(function(resolve){
+          var cb = "__fileCb_" + id;
+          window[cb] = function(rid){ try{delete window[cb];}catch(e){} resolve(rid || null); };
+          try { window.AndroidBridge.saveFile(id, dataUrl, cb); }
+          catch(e){ resolve(null); }
+        });
+      }
+      try {
+        localStorage.setItem("farmdesk_file_" + id, dataUrl);
+        return id;
+      } catch(e){ return null; } // quota exceeded — caller keeps working, just without the attachment persisted
+    },
+    load: async function(id){
+      if (!id) return null;
+      if (hasNative) {
+        return new Promise(function(resolve){
+          var cb = "__fileLoad_" + id + "_" + (seq++);
+          window[cb] = function(data){ try{delete window[cb];}catch(e){} resolve(data || null); };
+          try { window.AndroidBridge.loadFile(id, cb); }
+          catch(e){ resolve(null); }
+        });
+      }
+      return localStorage.getItem("farmdesk_file_" + id);
+    },
+    remove: function(id){
+      if (!id) return;
+      if (hasNative) { try { window.AndroidBridge.deleteFile(id); } catch(e){} }
+      else { try { localStorage.removeItem("farmdesk_file_" + id); } catch(e){} }
     }
   };
 })();
@@ -5765,7 +5825,7 @@ function openMoveScreen(animalNames) {
   var modal = document.getElementById('moveModal');
   var fields = document.getElementById('moveFields');
   if (!modal || !fields) return;
-  var locArr = Object.entries(locations).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var locArr = Object.entries(locations).filter(function(e){ return !e[1].archived; }).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
   var animalChips = goats.map(function(g) {
     var checked = animalNames && animalNames.includes(g) ? ' checked' : '';
     return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;"><input type="checkbox" value="' + g.replace(/"/g,'&quot;') + '" class="move-animal-cb"' + checked + ' style="width:18px;height:18px;">' + g + '</label>';
@@ -6955,12 +7015,42 @@ function closePhotoViewer(e) {
 }
 
 // ───── SHARED: file attachment handler ─────
-function handleFileAttach(input) {
+async function viewFileAttachment(fileId, name) {
+  if (!fileId) {
+    showToast('This attachment was synced before file-viewing was added — re-attach if you need to see it again');
+    return;
+  }
+  try {
+    const dataUrl = await Files.load(fileId);
+    if (!dataUrl) { showToast('⚠️ File not found locally'); return; }
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+  } catch(e) {
+    showToast('⚠️ Could not open file: ' + e.message);
+  }
+}
+
+async function handleFileAttach(input) {
   const file = input.files[0];
   if (!file) return;
-  // Store blob for upload — _blob is excluded from localStorage serialization (too large)
-  currentFileAttach = { name: file.name, type: file.type, _blob: file };
   const preview = document.getElementById("photoPreview");
+  if (preview) {
+    preview.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#2a2a2a;border-radius:6px;margin-top:4px;">
+      <span style="font-size:22px;">📎</span>
+      <span style="font-size:14px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${file.name}</span>
+      <span style="font-size:12px;color:#888;">saving…</span>
+    </div>`;
+  }
+  const dataUrl = await new Promise(function(resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function() { resolve(reader.result); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const fileId = await Files.save(dataUrl);
+  currentFileAttach = { name: file.name, type: file.type, fileId: fileId };
   if (preview) {
     preview.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#2a2a2a;border-radius:6px;margin-top:4px;">
       <span style="font-size:22px;">📎</span>
@@ -8720,7 +8810,8 @@ async function processPendingLocationActions(token, logFn) {
           name: loc.name,
           notes: { value: loc.notes || '', format: 'default' },
           is_location: true,
-          is_fixed: !!loc.wkt
+          is_fixed: !!loc.wkt,
+          archived: !!loc.archived
         };
         if (loc.wkt) attrs.intrinsic_geometry = { value: loc.wkt };
         var res;
@@ -9042,8 +9133,12 @@ async function syncToFarmOS() {
           }
 
           // ===== FILE ATTACHMENT UPLOAD =====
-          if (l.data?.fileAttach && logUUID && l.data.fileAttach._blob) {
+          if (l.data?.fileAttach && logUUID && l.data.fileAttach.fileId) {
             try {
+              const fileDataUrl = await Files.load(l.data.fileAttach.fileId);
+              if (!fileDataUrl) throw new Error("file not found in local store");
+              const fileBlobRes = await fetch(fileDataUrl);
+              const fileBlob = await fileBlobRes.blob();
               const fileUrl = apiUrl(`/api/log/${farmosType}/${logUUID}/file`);
               const fileUpload = await fetchWithTimeout(fileUrl, {
                 method: "POST",
@@ -9053,7 +9148,7 @@ async function syncToFarmOS() {
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
-                body: l.data.fileAttach._blob
+                body: fileBlob
               });
               if (!fileUpload.ok) logEl.textContent += `  ⚠️ File upload failed: ${fileUpload.status}\n`;
             } catch(fe) {
@@ -9151,8 +9246,12 @@ async function syncToFarmOS() {
             }
           }
           // Push a newly-attached file too (added/replaced via edit) — same as new logs
-          if (l.data?.fileAttach && l.data.fileAttach._blob) {
+          if (l.data?.fileAttach && l.data.fileAttach.fileId) {
             try {
+              const fileDataUrl = await Files.load(l.data.fileAttach.fileId);
+              if (!fileDataUrl) throw new Error("file not found in local store");
+              const fileBlobRes = await fetch(fileDataUrl);
+              const fileBlob = await fileBlobRes.blob();
               const fileUpload = await fetchWithTimeout(apiUrl(`/api/log/${farmosType}/${l.id}/file`), {
                 method: "POST",
                 headers: {
@@ -9161,7 +9260,7 @@ async function syncToFarmOS() {
                   "Accept":              "application/vnd.api+json",
                   "Authorization":       "Bearer " + token
                 },
-                body: l.data.fileAttach._blob
+                body: fileBlob
               });
               if (!fileUpload.ok) logEl.textContent += `  ⚠️ File upload failed: ${fileUpload.status}\n`;
             } catch(fe) {
@@ -10341,7 +10440,7 @@ function sd_openMoveModal() {
   var modal = document.getElementById('sdMoveModal');
   var fields = document.getElementById('sdMoveFields');
   if (!modal || !fields) return;
-  var locArr = Object.entries(locations).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var locArr = Object.entries(locations).filter(function(e){ return !e[1].archived; }).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
   var current = stockLocations[adjustAsset.uuid];
   fields.innerHTML =
     '<p style="color:#888;font-size:13px;margin:0 0 8px;">' + adjustAsset.name + (current ? ' — currently at ' + current.locationName : ' — no location set') + '</p>' +
@@ -12653,7 +12752,7 @@ function bd_openMoveModal(id) {
   var modal = document.getElementById('bdMoveModal');
   var fields = document.getElementById('bdMoveFields');
   if (!modal || !fields) return;
-  var locArr = Object.entries(locations).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var locArr = Object.entries(locations).filter(function(e){ return !e[1].archived; }).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
   var current = birdLocations[bird.uuid];
   fields.innerHTML =
     '<p style="color:#888;font-size:13px;margin:0 0 8px;">' + (bird.name || bird.tag || 'Bird') + (current ? ' — currently at ' + current.locationName : ' — no location set') + '</p>' +
@@ -13992,7 +14091,7 @@ function renderDashboardScreen() {
 
   // ===== LOCATIONS PREVIEW MAP =====
   if (enabled.includes('locations')) {
-    const hasLocShapes = Object.keys(locations || {}).some(k => locations[k] && locations[k].wkt);
+    const hasLocShapes = Object.keys(locations || {}).some(k => locations[k] && locations[k].wkt && !locations[k].archived);
     if (hasLocShapes) {
       html += '<div class="box" style="padding:0;overflow:hidden;cursor:pointer;position:relative;" onclick="goModule(\'locations\')">' +
         '<div id="dash-locations-map" style="height:130px;"></div>' +
@@ -14166,7 +14265,7 @@ function renderDashboardMiniMap() {
       var allBounds = [];
       Object.keys(locations).forEach(function(k) {
         var loc = locations[k];
-        if (!loc || !loc.wkt) return;
+        if (!loc || !loc.wkt || loc.archived) return;
         var parsed = _wktParse(loc.wkt);
         if (!parsed) return;
         var color = typeColor[loc.type] || '#888';
@@ -14841,12 +14940,23 @@ async function locationsFetch() {
   }
 }
 
+var _showArchivedLocations = false;
+
+function toggleArchivedLocations() {
+  _showArchivedLocations = !_showArchivedLocations;
+  renderLocationsScreen();
+}
+
 function renderLocationsScreen() {
   var list = document.getElementById('locations-list');
   if (!list) return;
-  var keys = Object.keys(locations);
+  var allKeys = Object.keys(locations);
+  var archivedCount = allKeys.filter(function(k) { return locations[k].archived; }).length;
+  var keys = _showArchivedLocations ? allKeys : allKeys.filter(function(k) { return !locations[k].archived; });
+  var toggleHTML = archivedCount ? '<div style="text-align:center;padding:8px 0;color:#8bd;font-size:13px;cursor:pointer;" onclick="toggleArchivedLocations()">' +
+    (_showArchivedLocations ? '▲ Hide archived' : '▼ Show archived (' + archivedCount + ')') + '</div>' : '';
   if (!keys.length) {
-    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No locations yet.</div>';
+    list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No locations yet.</div>' + toggleHTML;
     return;
   }
   var typeIcon = { land: '\ud83c\udf3e', structure: '\ud83c\udfe1', water: '\ud83d\udca7' };
@@ -14855,14 +14965,15 @@ function renderLocationsScreen() {
     var loc = locations[k];
     var syncTag = loc.synced === false ? '<span style="color:#c90;font-size:11px;">\u23f3 pending</span>' : '<span style="color:#3a7;font-size:11px;">\u2713 synced</span>';
     var shapeTag = loc.wkt ? '<span style="color:#8bd;font-size:11px;">\ud83d\udccd shape saved</span>' : '<span style="color:#666;font-size:11px;">no shape drawn</span>';
-    return '<div class="box" onclick="openLocationModal(\'' + k + '\')" style="cursor:pointer;">' +
+    var archivedTag = loc.archived ? ' <span style="color:#888;font-size:11px;">\ud83d\udce6 archived</span>' : '';
+    return '<div class="box" onclick="openLocationDetail(\'' + k + '\')" style="cursor:pointer;' + (loc.archived ? 'opacity:0.6;' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
         '<strong style="font-size:15px;">' + (typeIcon[loc.type] || '') + ' ' + (loc.name || '\u2014') + '</strong>' +
       '</div>' +
-      '<div style="margin-top:2px;">' + syncTag + ' &middot; ' + shapeTag + '</div>' +
+      '<div style="margin-top:2px;">' + syncTag + ' &middot; ' + shapeTag + archivedTag + '</div>' +
       (loc.notes ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + loc.notes + '</div>' : '') +
     '</div>';
-  }).join('');
+  }).join('') + toggleHTML;
 }
 
 var _locationsOverviewMap = null;
@@ -14874,7 +14985,7 @@ var _ovSatelliteActive = false;
 function renderLocationsOverviewMap() {
   var box = document.getElementById('ld-overview-map-box');
   if (!box) return;
-  var keys = Object.keys(locations).filter(function(k) { return locations[k] && locations[k].wkt; });
+  var keys = Object.keys(locations).filter(function(k) { return locations[k] && locations[k].wkt && !locations[k].archived; });
   if (!keys.length) { box.style.display = 'none'; return; }
   box.style.display = '';
   _loadLeaflet(function() {
@@ -14910,7 +15021,7 @@ function renderLocationsOverviewMap() {
           allBounds = allBounds.concat(parsed.latlngs);
         }
         shapeLayer.bindTooltip(loc.name || '(unnamed)', { permanent: false });
-        shapeLayer.on('click', function() { openLocationModal(k); });
+        shapeLayer.on('click', function() { openLocationDetail(k); });
         shapeLayer.addTo(_locationsOverviewMap);
       });
       if (allBounds.length) _locationsOverviewMap.fitBounds(L.latLngBounds(allBounds), { padding: [20,20] });
@@ -14936,23 +15047,37 @@ function toggleOverviewSatellite() {
 
 function openLocationModal(key) {
   var loc = key ? locations[key] : null;
-  document.getElementById('locationModalTitle').textContent = loc ? 'Edit Location' : 'Add Location';
+  document.getElementById('locationModalTitle').textContent = loc ? (loc.archived ? 'Edit Location (Archived)' : 'Edit Location') : 'Add Location';
   document.getElementById('location_key').value = key || '';
   document.getElementById('location_name').value = loc ? (loc.name||'') : '';
   document.getElementById('location_type').value = loc ? (loc.type||'land') : 'land';
   document.getElementById('location_notes').value = loc ? (loc.notes||'') : '';
   document.getElementById('location_wkt').value = loc ? (loc.wkt||'') : '';
   document.getElementById('locationShapeStatus').textContent = (loc && loc.wkt) ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
-  document.getElementById('locationDeleteBtn').style.display = loc ? '' : 'none';
-  renderLocationAssetsList(key);
+  var deleteRow = document.getElementById('locationDeleteRow');
+  deleteRow.style.display = loc ? 'flex' : 'none';
+  var archiveBtn = document.getElementById('locationArchiveBtn');
+  if (loc && loc.archived) {
+    archiveBtn.textContent = '↩️ Unarchive';
+    archiveBtn.onclick = unarchiveLocationLocal;
+  } else {
+    archiveBtn.textContent = '📦 Archive';
+    archiveBtn.onclick = archiveLocationLocal;
+  }
   document.getElementById('locationModal').style.display = '';
 }
 
-function renderLocationAssetsList(key) {
-  var box = document.getElementById('locationAssetsBox');
-  var list = document.getElementById('locationAssetsList');
-  if (!box || !list) return;
-  if (!key) { box.style.display = 'none'; return; }
+function openLocationDetail(key) {
+  var loc = locations[key];
+  if (!loc) return;
+  var typeIcon = { land: '🌾', structure: '🏡', water: '💧' };
+  document.getElementById('locationDetailTitle').textContent = (typeIcon[loc.type] || '') + ' ' + (loc.name || '—');
+  var syncTag = loc.synced === false ? '⏳ pending' : '✓ synced';
+  var shapeTag = loc.wkt ? '📍 shape saved' : 'no shape drawn';
+  document.getElementById('locationDetailMeta').textContent = syncTag + ' · ' + shapeTag;
+  document.getElementById('locationDetailNotes').textContent = loc.notes || '';
+  document.getElementById('locationDetailNotes').style.display = loc.notes ? '' : 'none';
+  document.getElementById('locationDetailEditBtn').onclick = function() { closeLocationDetail(); openLocationModal(key); };
 
   var goatsHere = Object.keys(animalLocations).filter(function(name) {
     return animalLocations[name] && animalLocations[name].locationUuid === key;
@@ -14972,32 +15097,37 @@ function renderLocationAssetsList(key) {
     return { uuid: uuid, label: a ? a.name : 'Item' };
   }).sort(function(a,b){ return a.label.localeCompare(b.label); });
 
-  if (!goatsHere.length && !birdsHere.length && !stockHere.length) { box.style.display = 'none'; return; }
-  box.style.display = '';
-
-  var goatRows = goatsHere.map(function(name) {
-    return '<div onclick="closeLocationModal();goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + JSON.stringify(name) + ');},150);" ' +
-      'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
-      '🐐 ' + name +
-    '</div>';
-  }).join('');
-
-  var birdRows = birdsHere.map(function(b) {
-    return '<div onclick="closeLocationModal();goModule(\'birds\');bd_show(\'birds\');setTimeout(function(){bd_openBirdProfile(' + JSON.stringify(b.uuid) + ');},150);" ' +
-      'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
-      '🐦 ' + b.label +
-    '</div>';
-  }).join('');
-
-  var stockRows = stockHere.map(function(a) {
-    return '<div onclick="closeLocationModal();goModule(\'stock\');setTimeout(function(){openAdjust(' + JSON.stringify(a.uuid) + ');},150);" ' +
-      'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
-      '📦 ' + a.label +
-    '</div>';
-  }).join('');
-
-  list.innerHTML = goatRows + birdRows + stockRows;
+  var list = document.getElementById('locationDetailAssetsList');
+  if (!goatsHere.length && !birdsHere.length && !stockHere.length) {
+    list.innerHTML = '<div style="color:#888;font-size:13px;padding:6px 0;">Nothing here right now.</div>';
+  } else {
+    var goatRows = goatsHere.map(function(name) {
+      return '<div onclick="closeLocationDetail();goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + JSON.stringify(name) + ');},150);" ' +
+        'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+        '🐐 ' + name +
+      '</div>';
+    }).join('');
+    var birdRows = birdsHere.map(function(b) {
+      return '<div onclick="closeLocationDetail();goModule(\'birds\');bd_show(\'birds\');setTimeout(function(){bd_openBirdProfile(' + JSON.stringify(b.uuid) + ');},150);" ' +
+        'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+        '🐦 ' + b.label +
+      '</div>';
+    }).join('');
+    var stockRows = stockHere.map(function(a) {
+      return '<div onclick="closeLocationDetail();goModule(\'stock\');setTimeout(function(){openAdjust(' + JSON.stringify(a.uuid) + ');},150);" ' +
+        'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
+        '📦 ' + a.label +
+      '</div>';
+    }).join('');
+    list.innerHTML = goatRows + birdRows + stockRows;
+  }
+  document.getElementById('locationDetailModal').style.display = '';
 }
+
+function closeLocationDetail() {
+  document.getElementById('locationDetailModal').style.display = 'none';
+}
+
 function closeLocationModal() {
   document.getElementById('locationModal').style.display = 'none';
 }
@@ -15025,11 +15155,43 @@ function saveLocationLocal() {
   renderLocationsScreen();
 }
 
+function archiveLocationLocal() {
+  var key = document.getElementById('location_key').value;
+  if (!key) return;
+  var loc = locations[key];
+  if (!loc) return;
+  loc.archived = true;
+  loc.synced = false;
+  localStorage.setItem(LS.locations, JSON.stringify(locations));
+  queuePendingAction('locationSave', { key: key });
+  showToast('📦 Archived locally — will sync to farmOS next push');
+  closeLocationModal();
+  renderLocationsScreen();
+  renderLocationsOverviewMap();
+}
+
+function unarchiveLocationLocal() {
+  var key = document.getElementById('location_key').value;
+  if (!key) return;
+  var loc = locations[key];
+  if (!loc) return;
+  loc.archived = false;
+  loc.synced = false;
+  localStorage.setItem(LS.locations, JSON.stringify(locations));
+  queuePendingAction('locationSave', { key: key });
+  showToast('↩️ Restored locally — will sync to farmOS next push');
+  closeLocationModal();
+  renderLocationsScreen();
+  renderLocationsOverviewMap();
+}
+
 function deleteLocationLocal() {
   var key = document.getElementById('location_key').value;
   if (!key) return;
-  if (!confirm('Delete this location?')) return;
   var loc = locations[key];
+  var name = loc ? (loc.name || 'this location') : 'this location';
+  if (!confirm('Delete "' + name + '"? Consider Archive instead if you might need it again.')) return;
+  if (!confirm('This permanently removes "' + name + '" from farmOS and cannot be undone. Are you absolutely sure?')) return;
   if (loc && loc.farmosUUID) {
     queuePendingAction('locationDelete', { farmosUUID: loc.farmosUUID, type: loc.type });
   }
@@ -15038,6 +15200,7 @@ function deleteLocationLocal() {
   showToast('✅ Deleted locally — will sync to farmOS next push');
   closeLocationModal();
   renderLocationsScreen();
+  renderLocationsOverviewMap();
 }
 
 // ===== MAP DRAWING (lazy-loaded Leaflet + Leaflet.Draw, live tiles only) =====
@@ -15354,7 +15517,15 @@ function closeTopOverlay() {
     { id: 'bd-flock-modal',    test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFlockModal(); } },
     { id: 'bd-species-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeSpeciesModal(); } },
     { id: 'bd-edit-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeEditModal(); } },
-    { id: 'bd-formula-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFormulaModal(); } }
+    { id: 'bd-formula-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFormulaModal(); } },
+    { id: 'locationDetailModal', test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationDetail(); } },
+    { id: 'locationModal',       test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationModal(); } },
+    { id: 'locationMapModal',    test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationMap(); } },
+    { id: 'sdMoveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { sd_closeMoveModal(); } },
+    { id: 'bdMoveModal',         test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeMoveModal(); } },
+    { id: 'contactModal',        test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeContactModal(); } },
+    { id: 'ledgerEntryModal',    test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLedgerEntryModal(); } },
+    { id: 'batchAddHatchModal',  test: function(el) { return el.style.display === 'block'; }, close: function(el) { el.style.display = 'none'; } }
   ];
   for (var i = 0; i < checks.length; i++) {
     var el = document.getElementById(checks[i].id);
@@ -16032,6 +16203,21 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 </div>
 
 <!-- ===== LOCATION MODAL (Land/Structure/Water add/edit) ===== -->
+<!-- ===== LOCATION DETAIL DRAWER — primary tap target for a location ===== -->
+<div id="locationDetailModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeLocationDetail()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong id="locationDetailTitle" style="font-size:18px;"></strong>
+      <button onclick="closeLocationDetail()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="locationDetailMeta" style="font-size:13px;color:#888;margin-bottom:10px;"></div>
+    <div id="locationDetailNotes" style="font-size:14px;color:#ccc;margin-bottom:10px;"></div>
+    <strong style="font-size:14px;color:#aaa;">📍 Here now</strong>
+    <div id="locationDetailAssetsList" style="margin-top:6px;margin-bottom:12px;"></div>
+    <button id="locationDetailEditBtn" class="secondary wide" style="margin:0;">✏️ Edit Location</button>
+  </div>
+</div>
+
 <div id="locationModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeLocationModal()">
   <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -16050,16 +16236,15 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     </select>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="location_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
-    <div id="locationAssetsBox" style="display:none;margin-bottom:12px;">
-      <strong style="font-size:14px;color:#aaa;">📍 Here now</strong>
-      <div id="locationAssetsList" style="margin-top:6px;"></div>
-    </div>
     <div class="box" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px;">
       <span id="locationShapeStatus" style="font-size:13px;color:#aaa;">No shape drawn yet</span>
       <button onclick="openLocationMap()" class="secondary" style="margin:0;padding:8px 12px;">📍 Draw on Map</button>
     </div>
     <button onclick="saveLocationLocal()" style="width:100%;margin:0 0 8px;">💾 Save</button>
-    <button id="locationDeleteBtn" onclick="deleteLocationLocal()" class="secondary" style="width:100%;margin:0;display:none;">🗑️ Delete</button>
+    <div id="locationDeleteRow" style="display:none;gap:8px;">
+      <button id="locationArchiveBtn" onclick="archiveLocationLocal()" class="secondary" style="flex:1;margin:0;">📦 Archive</button>
+      <button onclick="deleteLocationLocal()" class="secondary" style="flex:1;margin:0;background:#5a1a1a;">🗑️ Delete</button>
+    </div>
   </div>
 </div>
 
