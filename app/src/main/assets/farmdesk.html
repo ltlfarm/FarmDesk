@@ -1413,7 +1413,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   </div>
   <div class="box">
     <button onclick="openLocationModal()" class="wide" style="margin-bottom:8px;">➕ Add Location</button>
+    <button onclick="ld_pushToFarmOS()" class="wide sync-push-btn" style="margin-bottom:8px;">⬆️ Push to farmOS</button>
     <button onclick="locationsFetch()" class="secondary wide">⬇️ Fetch Locations from farmOS</button>
+    <div id="ld-push-status" style="font-size:13px;color:#888;margin-top:8px;display:none;"></div>
   </div>
   <div id="locations-list"></div>
 </div>
@@ -1433,7 +1435,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   </div>
   <div class="box">
     <button onclick="eq_openItemModal()" class="wide" style="margin-bottom:8px;">➕ Add Equipment</button>
+    <button onclick="eq_pushToFarmOS()" class="wide sync-push-btn" style="margin-bottom:8px;">⬆️ Push to farmOS</button>
     <button onclick="eq_fetchAssets()" class="secondary wide">⬇️ Fetch Equipment from farmOS</button>
+    <div id="eq-push-status" style="font-size:13px;color:#888;margin-top:8px;display:none;"></div>
   </div>
   <div id="eq-items-list"></div>
 </div>
@@ -1454,19 +1458,45 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <input type="hidden" id="eq_key">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name *</label>
     <input id="eq_name" type="text" placeholder="e.g. Kubota Tractor, North Hive #3" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Category</label>
-    <select id="eq_category" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-      <option value="mechanical">⚙️ Mechanical (tractor, truck, generator, pump...)</option>
-      <option value="fixed">📦 Fixed (hive, feeder, waterer...)</option>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Group</label>
+    <select id="eq_group" onchange="document.getElementById('eq_newGroupRow').style.display = this.value === '__new__' ? '' : 'none';" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="">— none —</option>
+      <option value="__new__">➕ New group…</option>
     </select>
+    <div id="eq_newGroupRow" style="display:none;margin-bottom:8px;">
+      <input id="eq_newGroupName" type="text" placeholder="e.g. Bee Equipment, Power, Irrigation" style="width:100%;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    </div>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Manufacturer</label>
     <input id="eq_manufacturer" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Model</label>
     <input id="eq_model" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Serial Number</label>
     <input id="eq_serial" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">ID Tag</label>
+    <input id="eq_idtag" type="text" placeholder="Asset tag / barcode number" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner</label>
+    <select id="eq_owner" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="">— unassigned —</option>
+    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Flags</label>
+    <div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="eq_flag_priority" style="width:auto;"> 🔴 Priority</label>
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="eq_flag_needs_review" style="width:auto;"> 🟡 Needs Review</label>
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="eq_flag_monitor" style="width:auto;"> 🔵 Monitor</label>
+    </div>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
-    <textarea id="eq_notes" rows="2" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <textarea id="eq_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Photo</label>
+    <div id="eqPhotoPreview" style="margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button type="button" onclick="eq_takePhoto()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('eqPhotoInput').click()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" id="eqClearPhotoBtn" onclick="eq_clearPhoto()" class="secondary" style="display:none;margin:0;padding:12px;font-size:14px;background:#5a1a1a;">✕</button>
+    </div>
+    <input type="file" id="eqPhotoInput" accept="image/*" style="display:none;" onchange="eq_handlePhoto(this)">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Attached File (manual, receipt, etc.)</label>
+    <div id="eqFilePreview" style="margin-bottom:8px;"></div>
+    <input type="file" id="eqFileInput" accept=".pdf,.doc,.docx,.txt,.csv" onchange="eq_handleFileAttach(this)" style="width:100%;margin-bottom:12px;box-sizing:border-box;color:#eee;">
     <button onclick="eq_saveItem()" style="width:100%;margin:0 0 8px;">💾 Save</button>
     <div id="eqDeleteRow" style="display:none;gap:8px;">
       <button id="eqArchiveBtn" onclick="eq_archiveItem()" class="secondary" style="flex:1;margin:0;">📦 Archive</button>
@@ -1500,8 +1530,23 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 <div id="eqMaintenanceModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;">
   <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <strong style="font-size:18px;">🔧 Add Maintenance Log</strong>
+      <strong style="font-size:18px;">🔧 Add Log</strong>
       <button onclick="eq_closeMaintenanceModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Type</label>
+    <select id="eqMaint_type" onchange="document.getElementById('eqMaint_readingRow').style.display = this.value === 'reading' ? '' : 'none';" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="maintenance">🔧 Maintenance (oil change, repair, inspection)</option>
+      <option value="reading">📊 Reading (hours / miles)</option>
+    </select>
+    <div id="eqMaint_readingRow" style="display:none;">
+      <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Reading</label>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input type="number" step="0.1" id="eqMaint_readingValue" placeholder="e.g. 1245.5" style="flex:1;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+        <select id="eqMaint_readingUnit" style="flex:0 0 110px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+          <option value="hours">hours</option>
+          <option value="miles">miles</option>
+        </select>
+      </div>
     </div>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">When</label>
     <input type="datetime-local" id="eqMaint_time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
@@ -1763,7 +1808,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784483819;
+const APP_VERSION = 1784488486;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9047,6 +9092,31 @@ async function processPendingLocationLogActions(token, logFn) {
   return { ok: ok, fail: fail };
 }
 
+// Visible Push button on the Locations dashboard — calls both location
+// processors directly so pushing doesn't depend on visiting Goats or Birds
+// first (previously they only ran piggybacked on those modules' own push).
+async function ld_pushToFarmOS() {
+  var statusEl = document.getElementById('ld-push-status');
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return; }
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.style.color = '#888'; statusEl.textContent = 'Pushing...'; }
+  try {
+    var token = await getCachedToken(cfg);
+    var log = '';
+    var r1 = await processPendingLocationActions(token, function(msg) { log += msg; });
+    var r2 = await processPendingLocationLogActions(token, function(msg) { log += msg; });
+    var ok = r1.ok + r2.ok, fail = r1.fail + r2.fail;
+    if (statusEl) {
+      statusEl.style.color = fail ? '#c66' : '#3a7';
+      statusEl.textContent = (ok + fail === 0) ? 'Nothing to push.' : ('Pushed ' + ok + ' · ' + fail + ' failed');
+    }
+    showToast(fail ? ('⚠️ ' + fail + ' item(s) failed to push') : '✅ Locations pushed to farmOS');
+  } catch(e) {
+    if (statusEl) { statusEl.style.color = '#c66'; statusEl.textContent = 'Push failed: ' + e.message; }
+    showToast('⚠️ Push failed: ' + e.message);
+  }
+}
+
 // ===== MED MATERIAL HELPERS =====
 // GET search for asset--material by name. Returns UUID or null.
 async function getOrCreateMedMaterial(medName, token) {
@@ -11668,16 +11738,31 @@ let birdLocations = JSON.parse(localStorage.getItem(BD_LS.locations) || "{}"); /
 // ============================================================
 const EQ_LS = {
   assets:    "farmdesk_equipment_assets",
-  history:   "farmdesk_equipment_history",   // maintenance log entries
+  history:   "farmdesk_equipment_history",   // maintenance + reading log entries
   pending:   "farmdesk_equipment_pending",
   lastSync:  "farmdesk_equipment_lastsync",
-  locations: "farmdesk_equipment_locations"  // current location per item uuid, mirrors animalLocations
+  locations: "farmdesk_equipment_locations", // current location per item uuid, mirrors animalLocations
+  groups:    "farmdesk_equipment_groups",    // {name, uuid} cache — real farmOS asset--group records
+  photoIds:  "farmdesk_equipment_photoIds"   // {key: photoId}
+};
+
+// Owner display names for the same hardcoded farm-user UUIDs used elsewhere
+// in the app (ALL_OWNERS) — not fetched dynamically, matching existing convention.
+const OWNER_NAMES = {
+  '8bb78703-7675-412a-a1c9-bbb19ded1e7b': 'Jess',
+  '71afeef7-7da7-4917-88d6-4c3e0e46f226': 'Tammy',
+  'd4092614-9169-44d4-bdee-56f5affa6c47': 'Loma',
+  '18e559ae-e698-44ea-900c-b4c15eba1ff6': 'Emily'
 };
 
 let eq_items      = JSON.parse(localStorage.getItem(EQ_LS.assets)    || "[]");
 let eq_history    = JSON.parse(localStorage.getItem(EQ_LS.history)   || "[]");
 let eq_pending     = JSON.parse(localStorage.getItem(EQ_LS.pending)  || "[]");
 let equipmentLocations = JSON.parse(localStorage.getItem(EQ_LS.locations) || "{}");
+let eq_groups = JSON.parse(localStorage.getItem(EQ_LS.groups) || "[]"); // [{name, uuid}]
+let eq_photoIds = JSON.parse(localStorage.getItem(EQ_LS.photoIds) || "{}");
+let eq_currentPhoto = null;
+let eq_currentFileAttach = null;
 
 // ===== EQUIPMENT: screen switching =====
 function eq_showInternal(id) {
@@ -11711,31 +11796,139 @@ function eq_renderList() {
     list.innerHTML = '<div class="box" style="color:#888;text-align:center;padding:20px;">No equipment yet.</div>' + toggleHTML;
     return;
   }
-  var catIcon = { mechanical: '⚙️', fixed: '📦' };
+  var flagIcon = { priority: '🔴', needs_review: '🟡', monitor: '🔵' };
   var sorted = items.slice().sort(function(a,b) { return (a.name||'').localeCompare(b.name||''); });
   list.innerHTML = sorted.map(function(it) {
     var syncTag = it.synced === false ? '<span style="color:#c90;font-size:11px;">⏳ pending</span>' : '<span style="color:#3a7;font-size:11px;">✓ synced</span>';
     var archivedTag = it.archived ? ' <span style="color:#888;font-size:11px;">📦 archived</span>' : '';
+    var flagTags = (it.flags||[]).map(function(f) { return flagIcon[f]||''; }).join(' ');
     var sub = [it.manufacturer, it.model].filter(Boolean).join(' ');
+    var groupTag = it.groupName ? '<span style="color:#8bd;font-size:12px;"> · ' + it.groupName + '</span>' : '';
     return '<div class="box" onclick="eq_openDetail(\'' + it.key + '\')" style="cursor:pointer;' + (it.archived ? 'opacity:0.6;' : '') + '">' +
-      '<strong style="font-size:15px;">' + (catIcon[it.category]||'') + ' ' + (it.name || '—') + '</strong>' +
-      '<div style="margin-top:2px;">' + syncTag + archivedTag + '</div>' +
+      '<strong style="font-size:15px;">🔧 ' + (it.name || '—') + '</strong> ' + flagTags +
+      '<div style="margin-top:2px;">' + syncTag + archivedTag + groupTag + '</div>' +
       (sub ? '<div style="font-size:13px;color:#aaa;margin-top:4px;">' + sub + '</div>' : '') +
     '</div>';
   }).join('') + toggleHTML;
 }
 
 // ===== EQUIPMENT: add/edit item =====
+function eq_populateGroupSelect(selectedName) {
+  var sel = document.getElementById('eq_group');
+  sel.innerHTML = '<option value="">— none —</option>' +
+    eq_groups.map(function(g) { return '<option value="' + g.name.replace(/"/g,'&quot;') + '">' + g.name + '</option>'; }).join('') +
+    '<option value="__new__">➕ New group…</option>';
+  sel.value = (selectedName && eq_groups.some(function(g){return g.name===selectedName;})) ? selectedName : '';
+  document.getElementById('eq_newGroupRow').style.display = 'none';
+  document.getElementById('eq_newGroupName').value = '';
+}
+
+function eq_populateOwnerSelect(selectedUUID) {
+  var sel = document.getElementById('eq_owner');
+  sel.innerHTML = '<option value="">— unassigned —</option>' +
+    Object.keys(OWNER_NAMES).map(function(uuid) { return '<option value="' + uuid + '">' + OWNER_NAMES[uuid] + '</option>'; }).join('');
+  sel.value = selectedUUID || '';
+}
+
+function eq_takePhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) {
+    window.AndroidBridge.takePhoto('eq_onAndroidPhoto');
+  } else {
+    document.getElementById('eqPhotoInput').click();
+  }
+}
+function eq_onAndroidPhoto(dataUrl) {
+  if (!dataUrl) return;
+  var full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  var img = new Image();
+  img.onload = function() {
+    orientedCanvas(img, full, 800, function(canvas) {
+      eq_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      var preview = document.getElementById('eqPhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + eq_currentPhoto + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('eqClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  };
+  img.src = full;
+}
+function eq_handlePhoto(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      orientedCanvas(img, e.target.result, 800, function(canvas) {
+        eq_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+        var preview = document.getElementById('eqPhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + eq_currentPhoto + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('eqClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function eq_clearPhoto() {
+  eq_currentPhoto = null;
+  var preview = document.getElementById('eqPhotoPreview');
+  if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('eqClearPhotoBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  var input = document.getElementById('eqPhotoInput');
+  if (input) input.value = '';
+}
+
+async function eq_handleFileAttach(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var dataUrl = await new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() { resolve(reader.result); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  var fileId = await Files.save(dataUrl);
+  eq_currentFileAttach = { name: file.name, type: file.type, fileId: fileId };
+  var preview = document.getElementById('eqFilePreview');
+  if (preview) preview.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;">\ud83d\udcce ' + file.name + '</div>';
+}
+
 function eq_openItemModal(key) {
   var it = key ? eq_items.find(function(x) { return x.key === key; }) : null;
   document.getElementById('eqItemModalTitle').textContent = it ? 'Edit Equipment' : 'Add Equipment';
   document.getElementById('eq_key').value = key || '';
   document.getElementById('eq_name').value = it ? (it.name||'') : '';
-  document.getElementById('eq_category').value = it ? (it.category||'mechanical') : 'mechanical';
   document.getElementById('eq_manufacturer').value = it ? (it.manufacturer||'') : '';
   document.getElementById('eq_model').value = it ? (it.model||'') : '';
   document.getElementById('eq_serial').value = it ? (it.serial||'') : '';
+  document.getElementById('eq_idtag').value = it ? (it.idtag||'') : '';
   document.getElementById('eq_notes').value = it ? (it.notes||'') : '';
+  document.getElementById('eq_flag_priority').checked = !!(it && it.flags && it.flags.indexOf('priority') !== -1);
+  document.getElementById('eq_flag_needs_review').checked = !!(it && it.flags && it.flags.indexOf('needs_review') !== -1);
+  document.getElementById('eq_flag_monitor').checked = !!(it && it.flags && it.flags.indexOf('monitor') !== -1);
+  eq_populateGroupSelect(it ? it.groupName : null);
+  eq_populateOwnerSelect(it ? it.ownerUUID : null);
+  eq_currentPhoto = null;
+  var photoPrev = document.getElementById('eqPhotoPreview');
+  var clearBtn = document.getElementById('eqClearPhotoBtn');
+  if (it && it.photoId) {
+    Photos.load(it.photoId).then(function(data) {
+      if (data && photoPrev) photoPrev.innerHTML = '<img src="' + data + '" style="width:100%;border-radius:6px;">';
+    });
+    if (clearBtn) clearBtn.style.display = '';
+  } else {
+    if (photoPrev) photoPrev.innerHTML = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+  }
+  eq_currentFileAttach = null;
+  var filePrev = document.getElementById('eqFilePreview');
+  if (filePrev) {
+    filePrev.innerHTML = (it && it.fileAttach) ?
+      '<div onclick="viewFileAttachment(&quot;' + (it.fileAttach.fileId||'') + '&quot;,&quot;' + (it.fileAttach.name||'file') + '&quot;)" style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;cursor:pointer;">\ud83d\udcce <span style="text-decoration:underline;color:#8bd;">' + (it.fileAttach.name||'Attached file') + '</span></div>' : '';
+  }
   var deleteRow = document.getElementById('eqDeleteRow');
   deleteRow.style.display = it ? 'flex' : 'none';
   var archiveBtn = document.getElementById('eqArchiveBtn');
@@ -11750,20 +11943,47 @@ function eq_openItemModal(key) {
 }
 function eq_closeItemModal() { document.getElementById('eqItemModal').style.display = 'none'; }
 
-function eq_saveItem() {
+async function eq_saveItem() {
   var key = document.getElementById('eq_key').value;
   var name = document.getElementById('eq_name').value.trim();
   if (!name) { alert('Name is required.'); return; }
   var existing = key ? eq_items.find(function(x) { return x.key === key; }) : null;
   var newKey = key || ('local_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+
+  var groupSel = document.getElementById('eq_group').value;
+  var groupName = groupSel === '__new__' ? document.getElementById('eq_newGroupName').value.trim() : groupSel;
+  if (groupName && !eq_groups.some(function(g) { return g.name === groupName; })) {
+    eq_groups.push({ name: groupName, uuid: null });
+    localStorage.setItem(EQ_LS.groups, JSON.stringify(eq_groups));
+  }
+
+  var flags = [];
+  if (document.getElementById('eq_flag_priority').checked) flags.push('priority');
+  if (document.getElementById('eq_flag_needs_review').checked) flags.push('needs_review');
+  if (document.getElementById('eq_flag_monitor').checked) flags.push('monitor');
+
+  var photoId = existing ? existing.photoId : null;
+  if (eq_currentPhoto) {
+    photoId = await Photos.save(eq_currentPhoto);
+  }
+
+  var fileAttach = existing ? existing.fileAttach : null;
+  if (eq_currentFileAttach) fileAttach = eq_currentFileAttach;
+
   var data = {
     key: newKey,
     name: name,
-    category: document.getElementById('eq_category').value,
+    groupName: groupName || null,
+    groupUUID: (existing && existing.groupName === groupName) ? existing.groupUUID : null,
     manufacturer: document.getElementById('eq_manufacturer').value.trim(),
     model: document.getElementById('eq_model').value.trim(),
     serial: document.getElementById('eq_serial').value.trim(),
+    idtag: document.getElementById('eq_idtag').value.trim(),
+    ownerUUID: document.getElementById('eq_owner').value || null,
+    flags: flags,
     notes: document.getElementById('eq_notes').value.trim(),
+    photoId: photoId,
+    fileAttach: fileAttach,
     archived: existing ? !!existing.archived : false,
     synced: false,
     farmosUUID: existing ? existing.farmosUUID : null
@@ -11830,10 +12050,17 @@ function eq_openDetail(key) {
   var it = eq_items.find(function(x) { return x.key === key; });
   if (!it) return;
   _eqDetailKey = key;
-  var catIcon = { mechanical: '⚙️', fixed: '📦' };
-  document.getElementById('eqDetailTitle').textContent = (catIcon[it.category]||'') + ' ' + (it.name || '—');
+  var flagIcon = { priority: '🔴', needs_review: '🟡', monitor: '🔵' };
+  var flagTags = (it.flags||[]).map(function(f) { return flagIcon[f]||''; }).join(' ');
+  document.getElementById('eqDetailTitle').textContent = '🔧 ' + (it.name || '—') + (flagTags ? ' ' + flagTags : '');
   var syncTag = it.synced === false ? '⏳ pending' : '✓ synced';
-  var sub = [it.manufacturer, it.model, it.serial ? ('SN: ' + it.serial) : null].filter(Boolean).join(' · ');
+  var sub = [
+    it.manufacturer, it.model,
+    it.serial ? ('SN: ' + it.serial) : null,
+    it.idtag ? ('Tag: ' + it.idtag) : null,
+    it.groupName ? ('Group: ' + it.groupName) : null,
+    it.ownerUUID ? ('Owner: ' + (OWNER_NAMES[it.ownerUUID]||'')) : null
+  ].filter(Boolean).join(' · ');
   document.getElementById('eqDetailMeta').textContent = syncTag + (sub ? ' · ' + sub : '');
   document.getElementById('eqDetailNotes').textContent = it.notes || '';
   document.getElementById('eqDetailNotes').style.display = it.notes ? '' : 'none';
@@ -11848,12 +12075,14 @@ function eq_renderMaintenanceList(key) {
   if (!list) return;
   var here = eq_history.filter(function(l) { return l.itemKey === key; })
     .sort(function(a,b) { return new Date(b.ts) - new Date(a.ts); });
-  if (!here.length) { list.innerHTML = '<div style="color:#888;font-size:13px;padding:4px 0;">No maintenance logged yet.</div>'; return; }
+  if (!here.length) { list.innerHTML = '<div style="color:#888;font-size:13px;padding:4px 0;">No logs yet.</div>'; return; }
   list.innerHTML = here.map(function(l) {
     var syncTag = l.synced ? '<span style="color:#3a7;font-size:11px;">✓</span>' : '<span style="color:#c90;font-size:11px;">⏳</span>';
     var when = new Date(l.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    var typeTag = l.logType === 'reading' ? '📊 ' + l.readingValue + ' ' + l.readingUnit : '🔧 Maintenance';
     return '<div style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;font-size:13px;">' +
-      '<div style="display:flex;justify-content:space-between;"><span style="color:#888;">' + when + '</span>' + syncTag + '</div>' +
+      '<div style="display:flex;justify-content:space-between;"><strong>' + typeTag + '</strong>' + syncTag + '</div>' +
+      '<div style="color:#888;font-size:12px;margin-top:2px;">' + when + '</div>' +
       (l.notes ? '<div style="color:#ccc;margin-top:4px;">' + l.notes + '</div>' : '') +
     '</div>';
   }).join('');
@@ -11864,6 +12093,10 @@ function eq_openMaintenanceModal() {
   var now = new Date(); now.setSeconds(0,0);
   document.getElementById('eqMaint_time').value = bd_localISO(now).slice(0,16);
   document.getElementById('eqMaint_notes').value = '';
+  document.getElementById('eqMaint_type').value = 'maintenance';
+  document.getElementById('eqMaint_readingRow').style.display = 'none';
+  document.getElementById('eqMaint_readingValue').value = '';
+  document.getElementById('eqMaint_readingUnit').value = 'hours';
   document.getElementById('eqMaintenanceModal').style.display = 'block';
 }
 function eq_closeMaintenanceModal() { document.getElementById('eqMaintenanceModal').style.display = 'none'; }
@@ -11872,8 +12105,15 @@ function eq_saveMaintenanceEntry() {
   if (!_eqDetailKey) return;
   var timeVal = document.getElementById('eqMaint_time').value;
   var notes = document.getElementById('eqMaint_notes').value || '';
+  var logType = document.getElementById('eqMaint_type').value;
   if (!timeVal) { showToast('⚠️ Set a date/time'); return; }
-  var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, notes: notes, ts: new Date(timeVal).toISOString(), synced: false };
+  var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ts: new Date(timeVal).toISOString(), synced: false };
+  if (logType === 'reading') {
+    var val = document.getElementById('eqMaint_readingValue').value;
+    if (!val) { showToast('⚠️ Enter a reading value'); return; }
+    entry.readingValue = val;
+    entry.readingUnit = document.getElementById('eqMaint_readingUnit').value;
+  }
   eq_history.push(entry);
   localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
   eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: entry.id, synced: false });
@@ -11946,18 +12186,24 @@ async function eq_syncToFarmOS(logFn) {
           model: it.model || '',
           serial_number: it.serial || '',
           notes: { value: it.notes || '', format: 'default' },
-          archived: !!it.archived
+          archived: !!it.archived,
+          flag: it.flags || []
         };
+        if (it.idtag) attrs.id_tag = [{ id: it.idtag, type: 'tag' }];
+        var relationships = {};
+        if (it.ownerUUID) relationships.owner = { data: [{ type: 'user--user', id: it.ownerUUID }] };
+        var payloadData = { type: 'asset--equipment', attributes: attrs, relationships: relationships };
         var res;
         if (it.farmosUUID) {
+          payloadData.id = it.farmosUUID;
           res = await fetchWithTimeout(apiUrl('/api/asset/equipment/' + it.farmosUUID), {
             method: 'PATCH', headers: headers,
-            body: JSON.stringify({ data: { type: 'asset--equipment', id: it.farmosUUID, attributes: attrs } })
+            body: JSON.stringify({ data: payloadData })
           });
         } else {
           res = await fetchWithTimeout(apiUrl('/api/asset/equipment'), {
             method: 'POST', headers: headers,
-            body: JSON.stringify({ data: { type: 'asset--equipment', attributes: attrs } })
+            body: JSON.stringify({ data: payloadData })
           });
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -11965,6 +12211,75 @@ async function eq_syncToFarmOS(logFn) {
         it.farmosUUID = resData.data.id;
         it.synced = true;
         localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+
+        // Photo — same asset-level two-step upload pattern used by Stock
+        if (it.photoId) {
+          try {
+            var photoData = await Photos.load(it.photoId);
+            if (photoData) {
+              var photoBlob = await (await fetch(photoData)).blob();
+              await fetchWithTimeout(apiUrl('/api/asset/equipment/' + it.farmosUUID + '/image'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="equipment-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: photoBlob
+              });
+            }
+          } catch(pe) { if (logFn) logFn('  \u26a0\ufe0f photo upload failed: ' + pe.message + '\n'); }
+        }
+
+        // File attachment
+        if (it.fileAttach && it.fileAttach.fileId) {
+          try {
+            var fileData = await Files.load(it.fileAttach.fileId);
+            if (fileData) {
+              var fileBlob = await (await fetch(fileData)).blob();
+              await fetchWithTimeout(apiUrl('/api/asset/equipment/' + it.farmosUUID + '/file'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="' + it.fileAttach.name + '"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: fileBlob
+              });
+            }
+          } catch(fe) { if (logFn) logFn('  \u26a0\ufe0f file upload failed: ' + fe.message + '\n'); }
+        }
+
+        // Group assignment — same is_group_assignment log pattern used by Goats/Birds
+        if (it.groupName && !it.groupUUID) {
+          try {
+            var grp = eq_groups.find(function(g) { return g.name === it.groupName; });
+            var groupUUID = grp && grp.uuid;
+            if (!groupUUID) {
+              var gq = await fetchWithTimeout(apiUrl('/api/asset/group?filter[name]=' + encodeURIComponent(it.groupName) + '&page[limit]=1'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+              if (gq.ok) {
+                var gd = await gq.json();
+                if (gd.data && gd.data[0]) groupUUID = gd.data[0].id;
+              }
+              if (!groupUUID) {
+                var gRes = await fetchWithTimeout(apiUrl('/api/asset/group'), {
+                  method: 'POST', headers: headers,
+                  body: JSON.stringify({ data: { type: 'asset--group', attributes: { name: it.groupName } } })
+                });
+                if (gRes.ok) { var gResData = await gRes.json(); groupUUID = gResData.data.id; }
+              }
+              if (groupUUID) {
+                if (grp) grp.uuid = groupUUID; else eq_groups.push({ name: it.groupName, uuid: groupUUID });
+                localStorage.setItem(EQ_LS.groups, JSON.stringify(eq_groups));
+              }
+            }
+            if (groupUUID) {
+              await fetchWithTimeout(apiUrl('/api/log/activity'), {
+                method: 'POST', headers: headers,
+                body: JSON.stringify({ data: {
+                  type: 'log--activity',
+                  attributes: { name: 'Assign to ' + it.groupName, status: 'done', timestamp: String(Math.floor(Date.now()/1000)), is_group_assignment: true },
+                  relationships: { asset: { data: [{ type: 'asset--equipment', id: it.farmosUUID }] }, group: { data: [{ type: 'asset--group', id: groupUUID }] } }
+                }})
+              });
+              it.groupUUID = groupUUID;
+              localStorage.setItem(EQ_LS.assets, JSON.stringify(eq_items));
+            }
+          } catch(ge) { if (logFn) logFn('  \u26a0\ufe0f group assignment failed: ' + ge.message + '\n'); }
+        }
+
       } else if (a.type === 'delete') {
         await fetchWithTimeout(apiUrl('/api/asset/equipment/' + a.farmosUUID), {
           method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
@@ -11975,16 +12290,39 @@ async function eq_syncToFarmOS(logFn) {
         var it2 = eq_items.find(function(x) { return x.key === entry.itemKey; });
         if (!it2 || !it2.farmosUUID) throw new Error('Equipment not synced yet — will retry next sync');
         var ts2 = String(Math.floor(new Date(entry.ts).getTime() / 1000));
-        var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance'), {
-          method: 'POST', headers: headers,
-          body: JSON.stringify({ data: {
-            type: 'log--maintenance',
-            attributes: { name: 'Maintenance: ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } },
-            relationships: { asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }
-          }})
-        });
-        if (!mRes.ok) throw new Error('HTTP ' + mRes.status);
-        var mData = await mRes.json();
+        var mData;
+        if (entry.logType === 'reading') {
+          var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(entry.readingValue), denominator: '1' } } } })
+          });
+          var qRelationship = {};
+          if (qRes.ok) {
+            var qData = await qRes.json();
+            qRelationship = { quantity: { data: [{ type: 'quantity--standard', id: qData.data.id }] } };
+          }
+          var rRes = await fetchWithTimeout(apiUrl('/api/log/observation'), {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: {
+              type: 'log--observation',
+              attributes: { name: entry.readingValue + ' ' + entry.readingUnit + ': ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } },
+              relationships: Object.assign({ asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }, qRelationship)
+            }})
+          });
+          if (!rRes.ok) throw new Error('HTTP ' + rRes.status);
+          mData = await rRes.json();
+        } else {
+          var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance'), {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: {
+              type: 'log--maintenance',
+              attributes: { name: 'Maintenance: ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } },
+              relationships: { asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }
+            }})
+          });
+          if (!mRes.ok) throw new Error('HTTP ' + mRes.status);
+          mData = await mRes.json();
+        }
         entry.farmosUUID = mData.data.id;
         entry.synced = true;
         localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
@@ -12013,6 +12351,20 @@ async function eq_syncToFarmOS(logFn) {
   return { ok: ok, fail: fail };
 }
 
+// Visible Push button on the Equipment dashboard — calls eq_syncToFarmOS
+// directly so pushing doesn't depend on visiting Goats or Birds first.
+async function eq_pushToFarmOS() {
+  var statusEl = document.getElementById('eq-push-status');
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.style.color = '#888'; statusEl.textContent = 'Pushing...'; }
+  var log = '';
+  var result = await eq_syncToFarmOS(function(msg) { log += msg; });
+  if (statusEl) {
+    statusEl.style.color = result.fail ? '#c66' : '#3a7';
+    statusEl.textContent = (result.ok + result.fail === 0) ? 'Nothing to push.' : ('Pushed ' + result.ok + ' · ' + result.fail + ' failed');
+  }
+  showToast(result.fail ? ('⚠️ ' + result.fail + ' item(s) failed to push') : '✅ Equipment pushed to farmOS');
+}
+
 // ===== EQUIPMENT: fetch from farmOS =====
 async function eq_fetchAssets() {
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
@@ -12020,24 +12372,57 @@ async function eq_fetchAssets() {
   try {
     var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
-    var res = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=100'), { headers: headers });
+    var res = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=100&include=owner,group'), { headers: headers });
     if (res.ok) {
       var d = await res.json();
-      var newItems = (d.data || []).map(function(e) {
+      var newItems = [];
+      for (var i = 0; i < (d.data || []).length; i++) {
+        var e = d.data[i];
         var existing = eq_items.find(function(x) { return x.farmosUUID === e.id; });
-        return {
+        var ownerRel = e.relationships && e.relationships.owner && e.relationships.owner.data;
+        var ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
+        var groupRel = e.relationships && e.relationships.group && e.relationships.group.data;
+        var groupArr = Array.isArray(groupRel) ? groupRel : (groupRel ? [groupRel] : []);
+        var groupUUID = groupArr.length ? groupArr[0].id : null;
+        var groupName = null;
+        if (groupUUID) {
+          var cachedGroup = eq_groups.find(function(g) { return g.uuid === groupUUID; });
+          if (cachedGroup) {
+            groupName = cachedGroup.name;
+          } else {
+            try {
+              var gRes = await fetchWithTimeout(apiUrl('/api/asset/group/' + groupUUID), { headers: headers });
+              if (gRes.ok) {
+                var gData = await gRes.json();
+                groupName = gData.data.attributes.name;
+                eq_groups.push({ name: groupName, uuid: groupUUID });
+              }
+            } catch(ge) { /* group name lookup is best-effort */ }
+          }
+        }
+        newItems.push({
           key: existing ? existing.key : e.id,
           name: e.attributes.name || '(unnamed)',
-          category: existing ? (existing.category || 'mechanical') : 'mechanical',
+          groupName: groupName,
+          groupUUID: groupUUID,
           manufacturer: e.attributes.manufacturer || '',
           model: e.attributes.model || '',
           serial: e.attributes.serial_number || '',
+          idtag: (e.attributes.id_tag && e.attributes.id_tag[0]) ? e.attributes.id_tag[0].id : '',
+          ownerUUID: ownerArr.length ? ownerArr[0].id : null,
+          flags: Array.isArray(e.attributes.flag) ? e.attributes.flag : [],
           notes: ((e.attributes.notes && (e.attributes.notes.value || e.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
+          // Photo/file are push-only for now — farmOS doesn't hand these back
+          // in a simple form here, so a previously-attached photo/file won't
+          // reappear after a fresh fetch. Preserved below for local-only items.
+          photoId: existing ? existing.photoId : null,
+          fileAttach: existing ? existing.fileAttach : null,
           archived: !!e.attributes.archived,
           synced: true,
           farmosUUID: e.id
-        };
-      });
+        });
+      }
+      localStorage.setItem(EQ_LS.groups, JSON.stringify(eq_groups));
       // Preserve any local-only unsynced items
       eq_items.filter(function(x) { return x.synced === false; }).forEach(function(x) { newItems.push(x); });
       eq_items = newItems;
