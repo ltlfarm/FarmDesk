@@ -1097,6 +1097,10 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <button id="ledgerFetchBtn" onclick="ledgerFetch()" class="secondary wide" style="margin:0;">⬇️ Fetch from farmOS</button>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button onclick="ledger_pushToFarmOS()" class="wide sync-push-btn" style="margin:0;">⬆️ Push to farmOS</button>
+    </div>
+    <div id="ledger-push-status" style="font-size:13px;color:#888;margin-bottom:8px;display:none;"></div>
     <div class="filter-chips">
       <button class="chip active" onclick="ledgerSetFilter('all',this)">All</button>
       <button class="chip" onclick="ledgerSetFilter('sale',this)">🏷️ Sales</button>
@@ -1530,12 +1534,14 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 <div id="eqMaintenanceModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;">
   <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <strong style="font-size:18px;">🔧 Add Log</strong>
+      <strong id="eqMaintenanceModalTitle" style="font-size:18px;">🔧 Add Log</strong>
       <button onclick="eq_closeMaintenanceModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
     </div>
+    <input type="hidden" id="eqMaint_entryId">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Type</label>
     <select id="eqMaint_type" onchange="document.getElementById('eqMaint_readingRow').style.display = this.value === 'reading' ? '' : 'none';" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       <option value="maintenance">🔧 Maintenance (oil change, repair, inspection)</option>
+
       <option value="reading">📊 Reading (hours / miles)</option>
     </select>
     <div id="eqMaint_readingRow" style="display:none;">
@@ -1552,7 +1558,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <input type="datetime-local" id="eqMaint_time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="eqMaint_notes" rows="3" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;" placeholder="Oil change, repair, inspection..."></textarea>
-    <button onclick="eq_saveMaintenanceEntry()" style="width:100%;margin:0;">💾 Save</button>
+    <button onclick="eq_saveMaintenanceEntry()" style="width:100%;margin:0 0 8px;">💾 Save</button>
+    <button id="eqMaintDeleteBtn" onclick="eq_deleteMaintenanceEntry()" class="secondary" style="width:100%;margin:0;background:#5a1a1a;display:none;">🗑️ Delete</button>
   </div>
 </div>
 
@@ -1808,7 +1815,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784488486;
+const APP_VERSION = 1784491030;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8952,6 +8959,27 @@ async function processPendingLedgerActions(token, logFn) {
   return { ok: ok, fail: fail };
 }
 
+// Visible Push button on the Ledger screen — calls processPendingLedgerActions
+// directly so pushing doesn't depend on visiting Goats or Birds first.
+async function ledger_pushToFarmOS() {
+  var statusEl = document.getElementById('ledger-push-status');
+  var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
+  if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return; }
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.style.color = '#888'; statusEl.textContent = 'Pushing...'; }
+  try {
+    var token = await getCachedToken(cfg);
+    var result = await processPendingLedgerActions(token, function() {});
+    if (statusEl) {
+      statusEl.style.color = result.fail ? '#c66' : '#3a7';
+      statusEl.textContent = (result.ok + result.fail === 0) ? 'Nothing to push.' : ('Pushed ' + result.ok + ' · ' + result.fail + ' failed');
+    }
+    showToast(result.fail ? ('⚠️ ' + result.fail + ' item(s) failed to push') : '✅ Ledger pushed to farmOS');
+  } catch(e) {
+    if (statusEl) { statusEl.style.color = '#c66'; statusEl.textContent = 'Push failed: ' + e.message; }
+    showToast('⚠️ Push failed: ' + e.message);
+  }
+}
+
 // Processes queued Location save/delete actions — the network half of the
 // local-first Locations flow. Called BEFORE processPendingGoatActions so a
 // brand-new location can be resolved to a real UUID in the same sync batch
@@ -12080,7 +12108,7 @@ function eq_renderMaintenanceList(key) {
     var syncTag = l.synced ? '<span style="color:#3a7;font-size:11px;">✓</span>' : '<span style="color:#c90;font-size:11px;">⏳</span>';
     var when = new Date(l.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
     var typeTag = l.logType === 'reading' ? '📊 ' + l.readingValue + ' ' + l.readingUnit : '🔧 Maintenance';
-    return '<div style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;font-size:13px;">' +
+    return '<div onclick="eq_openMaintenanceModal(' + JSON.stringify(l.id) + ')" style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;font-size:13px;cursor:pointer;">' +
       '<div style="display:flex;justify-content:space-between;"><strong>' + typeTag + '</strong>' + syncTag + '</div>' +
       '<div style="color:#888;font-size:12px;margin-top:2px;">' + when + '</div>' +
       (l.notes ? '<div style="color:#ccc;margin-top:4px;">' + l.notes + '</div>' : '') +
@@ -12088,37 +12116,90 @@ function eq_renderMaintenanceList(key) {
   }).join('');
 }
 
-function eq_openMaintenanceModal() {
+function eq_openMaintenanceModal(entryId) {
   if (!_eqDetailKey) return;
-  var now = new Date(); now.setSeconds(0,0);
-  document.getElementById('eqMaint_time').value = bd_localISO(now).slice(0,16);
-  document.getElementById('eqMaint_notes').value = '';
-  document.getElementById('eqMaint_type').value = 'maintenance';
-  document.getElementById('eqMaint_readingRow').style.display = 'none';
-  document.getElementById('eqMaint_readingValue').value = '';
-  document.getElementById('eqMaint_readingUnit').value = 'hours';
+  var entry = entryId ? eq_history.find(function(l) { return l.id === entryId; }) : null;
+  document.getElementById('eqMaintenanceModalTitle').textContent = entry ? '🔧 Edit Log' : '🔧 Add Log';
+  document.getElementById('eqMaint_entryId').value = entryId || '';
+  if (entry) {
+    document.getElementById('eqMaint_type').value = entry.logType || 'maintenance';
+    document.getElementById('eqMaint_notes').value = entry.notes || '';
+    document.getElementById('eqMaint_time').value = bd_localISO(new Date(entry.ts)).slice(0,16);
+    document.getElementById('eqMaint_readingRow').style.display = entry.logType === 'reading' ? '' : 'none';
+    document.getElementById('eqMaint_readingValue').value = entry.readingValue || '';
+    document.getElementById('eqMaint_readingUnit').value = entry.readingUnit || 'hours';
+    document.getElementById('eqMaintDeleteBtn').style.display = '';
+  } else {
+    var now = new Date(); now.setSeconds(0,0);
+    document.getElementById('eqMaint_time').value = bd_localISO(now).slice(0,16);
+    document.getElementById('eqMaint_notes').value = '';
+    document.getElementById('eqMaint_type').value = 'maintenance';
+    document.getElementById('eqMaint_readingRow').style.display = 'none';
+    document.getElementById('eqMaint_readingValue').value = '';
+    document.getElementById('eqMaint_readingUnit').value = 'hours';
+    document.getElementById('eqMaintDeleteBtn').style.display = 'none';
+  }
   document.getElementById('eqMaintenanceModal').style.display = 'block';
 }
 function eq_closeMaintenanceModal() { document.getElementById('eqMaintenanceModal').style.display = 'none'; }
 
 function eq_saveMaintenanceEntry() {
   if (!_eqDetailKey) return;
+  var entryId = document.getElementById('eqMaint_entryId').value;
   var timeVal = document.getElementById('eqMaint_time').value;
   var notes = document.getElementById('eqMaint_notes').value || '';
   var logType = document.getElementById('eqMaint_type').value;
   if (!timeVal) { showToast('⚠️ Set a date/time'); return; }
-  var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ts: new Date(timeVal).toISOString(), synced: false };
-  if (logType === 'reading') {
-    var val = document.getElementById('eqMaint_readingValue').value;
-    if (!val) { showToast('⚠️ Enter a reading value'); return; }
-    entry.readingValue = val;
-    entry.readingUnit = document.getElementById('eqMaint_readingUnit').value;
+
+  if (entryId) {
+    var existing = eq_history.find(function(l) { return l.id === entryId; });
+    if (!existing) return;
+    existing.logType = logType;
+    existing.notes = notes;
+    existing.ts = new Date(timeVal).toISOString();
+    existing.synced = false;
+    if (logType === 'reading') {
+      var val2 = document.getElementById('eqMaint_readingValue').value;
+      if (!val2) { showToast('⚠️ Enter a reading value'); return; }
+      existing.readingValue = val2;
+      existing.readingUnit = document.getElementById('eqMaint_readingUnit').value;
+    }
+    localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+    eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: existing.id, synced: false });
+    localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+    showToast('✅ Updated locally — will sync to farmOS next push');
+  } else {
+    var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ts: new Date(timeVal).toISOString(), synced: false };
+    if (logType === 'reading') {
+      var val = document.getElementById('eqMaint_readingValue').value;
+      if (!val) { showToast('⚠️ Enter a reading value'); return; }
+      entry.readingValue = val;
+      entry.readingUnit = document.getElementById('eqMaint_readingUnit').value;
+    }
+    eq_history.push(entry);
+    localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+    eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: entry.id, synced: false });
+    localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+    showToast('✅ Saved locally — will sync to farmOS next push');
   }
-  eq_history.push(entry);
+  eq_closeMaintenanceModal();
+  eq_renderMaintenanceList(_eqDetailKey);
+}
+
+function eq_deleteMaintenanceEntry() {
+  var entryId = document.getElementById('eqMaint_entryId').value;
+  if (!entryId) return;
+  var entry = eq_history.find(function(l) { return l.id === entryId; });
+  if (!entry) return;
+  if (!confirm('Delete this log entry?')) return;
+  if (entry.farmosUUID) {
+    var bundle = entry.logType === 'reading' ? 'observation' : 'maintenance';
+    eq_pending.push({ id: 'maintdel_' + Date.now(), type: 'maintenance_delete', farmosUUID: entry.farmosUUID, bundle: bundle, synced: false });
+    localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+  }
+  eq_history = eq_history.filter(function(l) { return l.id !== entryId; });
   localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
-  eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: entry.id, synced: false });
-  localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
-  showToast('✅ Saved locally — will sync to farmOS next push');
+  showToast('✅ Deleted locally — will sync to farmOS next push');
   eq_closeMaintenanceModal();
   eq_renderMaintenanceList(_eqDetailKey);
 }
@@ -12284,6 +12365,10 @@ async function eq_syncToFarmOS(logFn) {
         await fetchWithTimeout(apiUrl('/api/asset/equipment/' + a.farmosUUID), {
           method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
         });
+      } else if (a.type === 'maintenance_delete') {
+        await fetchWithTimeout(apiUrl('/api/log/' + a.bundle + '/' + a.farmosUUID), {
+          method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
       } else if (a.type === 'maintenance') {
         var entry = eq_history.find(function(l) { return l.id === a.entryId; });
         if (!entry) { a.synced = true; continue; }
@@ -12292,36 +12377,66 @@ async function eq_syncToFarmOS(logFn) {
         var ts2 = String(Math.floor(new Date(entry.ts).getTime() / 1000));
         var mData;
         if (entry.logType === 'reading') {
-          var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
-            method: 'POST', headers: headers,
-            body: JSON.stringify({ data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(entry.readingValue), denominator: '1' } } } })
-          });
           var qRelationship = {};
-          if (qRes.ok) {
-            var qData = await qRes.json();
-            qRelationship = { quantity: { data: [{ type: 'quantity--standard', id: qData.data.id }] } };
+          if (entry.quantityUUID) {
+            // Editing an existing reading — update its quantity value in place
+            await fetchWithTimeout(apiUrl('/api/quantity/standard/' + entry.quantityUUID), {
+              method: 'PATCH', headers: headers,
+              body: JSON.stringify({ data: { type: 'quantity--standard', id: entry.quantityUUID, attributes: { value: { numerator: String(entry.readingValue), denominator: '1' } } } })
+            });
+            qRelationship = { quantity: { data: [{ type: 'quantity--standard', id: entry.quantityUUID }] } };
+          } else {
+            var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
+              method: 'POST', headers: headers,
+              body: JSON.stringify({ data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(entry.readingValue), denominator: '1' } } } })
+            });
+            if (qRes.ok) {
+              var qData = await qRes.json();
+              entry.quantityUUID = qData.data.id;
+              qRelationship = { quantity: { data: [{ type: 'quantity--standard', id: qData.data.id }] } };
+            }
           }
-          var rRes = await fetchWithTimeout(apiUrl('/api/log/observation'), {
-            method: 'POST', headers: headers,
-            body: JSON.stringify({ data: {
-              type: 'log--observation',
-              attributes: { name: entry.readingValue + ' ' + entry.readingUnit + ': ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } },
-              relationships: Object.assign({ asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }, qRelationship)
-            }})
-          });
-          if (!rRes.ok) throw new Error('HTTP ' + rRes.status);
-          mData = await rRes.json();
+          var rAttrs = { name: entry.readingValue + ' ' + entry.readingUnit + ': ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } };
+          if (entry.farmosUUID) {
+            var rRes = await fetchWithTimeout(apiUrl('/api/log/observation/' + entry.farmosUUID), {
+              method: 'PATCH', headers: headers,
+              body: JSON.stringify({ data: { type: 'log--observation', id: entry.farmosUUID, attributes: rAttrs, relationships: qRelationship } })
+            });
+            if (!rRes.ok) throw new Error('HTTP ' + rRes.status);
+            mData = await rRes.json();
+          } else {
+            var rRes2 = await fetchWithTimeout(apiUrl('/api/log/observation'), {
+              method: 'POST', headers: headers,
+              body: JSON.stringify({ data: {
+                type: 'log--observation',
+                attributes: rAttrs,
+                relationships: Object.assign({ asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }, qRelationship)
+              }})
+            });
+            if (!rRes2.ok) throw new Error('HTTP ' + rRes2.status);
+            mData = await rRes2.json();
+          }
         } else {
-          var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance'), {
-            method: 'POST', headers: headers,
-            body: JSON.stringify({ data: {
-              type: 'log--maintenance',
-              attributes: { name: 'Maintenance: ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } },
-              relationships: { asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }
-            }})
-          });
-          if (!mRes.ok) throw new Error('HTTP ' + mRes.status);
-          mData = await mRes.json();
+          var mAttrs = { name: 'Maintenance: ' + it2.name, timestamp: ts2, status: 'done', notes: { value: entry.notes || '', format: 'default' } };
+          if (entry.farmosUUID) {
+            var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance/' + entry.farmosUUID), {
+              method: 'PATCH', headers: headers,
+              body: JSON.stringify({ data: { type: 'log--maintenance', id: entry.farmosUUID, attributes: mAttrs } })
+            });
+            if (!mRes.ok) throw new Error('HTTP ' + mRes.status);
+            mData = await mRes.json();
+          } else {
+            var mRes2 = await fetchWithTimeout(apiUrl('/api/log/maintenance'), {
+              method: 'POST', headers: headers,
+              body: JSON.stringify({ data: {
+                type: 'log--maintenance',
+                attributes: mAttrs,
+                relationships: { asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }
+              }})
+            });
+            if (!mRes2.ok) throw new Error('HTTP ' + mRes2.status);
+            mData = await mRes2.json();
+          }
         }
         entry.farmosUUID = mData.data.id;
         entry.synced = true;
@@ -12818,7 +12933,6 @@ async function bd_fetchAssets() {
     // someone's flock — but anything explicitly typed as another module's
     // species (e.g. Goat) is correctly excluded here.
     var fetched = (data.data || []).filter(function(a) {
-      if (a.attributes.archived) return false;
       var typeRel = a.relationships && a.relationships.animal_type && a.relationships.animal_type.data;
       var typeName = typeRel ? (typeMap[typeRel.id] || '').toLowerCase() : '';
       if (typeName && BD_ANIMAL_TYPES.indexOf(typeName) < 0) return false; // other module's animal
@@ -12848,7 +12962,7 @@ async function bd_fetchAssets() {
         fetchedBreed = breedMatch ? breedMatch[1].trim() : '';
         fetchedNotes = rawNotes.replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
       }
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), synced: true };
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: a.attributes.archived ? 'archived' : 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), synced: true };
     });
     var resEq = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
