@@ -696,6 +696,14 @@ body.role-viewer #setgrp-farmname { display: none !important; }
         <div id="moduleToggles"></div>
       </div>
 
+      <div class="set-sub">
+        <strong>🪦 Show Archived</strong>
+        <p style="color:#888;font-size:13px;">See sold, deceased, or retired animals right in the app — no need for the farmOS web UI.</p>
+        <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="showArchivedGoats" onchange="setShowArchived('goats', this.checked); renderAnimalsScreen();" style="width:auto;"> Goats</label>
+        <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="showArchivedBirds" onchange="setShowArchived('birds', this.checked); if (typeof bd_renderBirds === 'function') bd_renderBirds();" style="width:auto;"> Birds</label>
+        <p style="color:#666;font-size:12px;margin-top:6px;">Locations and Equipment already have their own "Show archived" link right on their list. Stock doesn't have an archived state — items just sit at zero quantity.</p>
+      </div>
+
       <div class="set-sub" id="setgrp-logo">
         <strong>Farm Logo</strong>
         <p style="color:#888;font-size:13px;">Logo shows in the header. Syncs to farmOS so farm hands see it after fetching.</p>
@@ -1761,6 +1769,7 @@ const LS = {
   goatTypeUUID:   "farmdesk_goatTypeUUID",
   flagSchema:     "farmdesk_flagSchema",
   locations:      "farmdesk_locations",
+  archivedGoats:  "farmdesk_archived_goat_names",
   locationLogs:   "farmdesk_locationLogs",
   animalLocations:"farmdesk_animalLocations",
   goatGroups:     "farmdesk_goatGroups",
@@ -1815,7 +1824,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784491030;
+const APP_VERSION = 1784566704;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -1851,6 +1860,17 @@ let logs  = JSON.parse(localStorage.getItem(LS.logs)  || "[]");
 let weights = JSON.parse(localStorage.getItem(LS.weights) || "{}");
 let animalProfiles = JSON.parse(localStorage.getItem(LS.profiles) || "{}"); // keyed by animal name
 let locations = JSON.parse(localStorage.getItem(LS.locations) || "{}"); // keyed by farmOS UUID: {name, type, notes}
+
+// Per-module "show archived" visibility — lets the person view deceased/sold/
+// retired animals and items without needing the farmOS web UI. Persisted so
+// the choice sticks across app restarts.
+let showArchivedPrefs = JSON.parse(localStorage.getItem("farmdesk_show_archived_prefs") || "{}");
+function getShowArchived(moduleId) { return !!showArchivedPrefs[moduleId]; }
+function setShowArchived(moduleId, val) {
+  showArchivedPrefs[moduleId] = val;
+  localStorage.setItem("farmdesk_show_archived_prefs", JSON.stringify(showArchivedPrefs));
+}
+let archivedGoatNames = JSON.parse(localStorage.getItem(LS.archivedGoats) || "[]");
 let locationLogs = JSON.parse(localStorage.getItem(LS.locationLogs) || "[]"); // [{id, locationKey, logType, notes, ts, synced, farmosUUID}]
 let animalLocations = JSON.parse(localStorage.getItem(LS.animalLocations) || "{}"); // keyed by animal name: {locationUuid, locationName, timestamp}
 let goatGroups = JSON.parse(localStorage.getItem(LS.goatGroups) || "[]"); // [{name, uuid}] — farmOS asset--group, same pattern as bird flocks
@@ -4187,6 +4207,10 @@ function renderSettings() {
   if (cfg.url  && document.getElementById("farmosUrl"))  document.getElementById("farmosUrl").value  = cfg.url;
   if (cfg.user && document.getElementById("farmosUser")) document.getElementById("farmosUser").value = cfg.user;
   if (cfg.pass && document.getElementById("farmosPass")) document.getElementById("farmosPass").value = cfg.pass;
+  var showArchGoatsEl = document.getElementById("showArchivedGoats");
+  if (showArchGoatsEl) showArchGoatsEl.checked = getShowArchived('goats');
+  var showArchBirdsEl = document.getElementById("showArchivedBirds");
+  if (showArchBirdsEl) showArchBirdsEl.checked = getShowArchived('birds');
   renderRecentUrlList();
   const urls = getRecentUrls();
   const urlEl = document.getElementById("farmosUrl");
@@ -4734,7 +4758,7 @@ function flagBadgesHTML(flags, clickable, animalName) {
     var label = f.replace(/_/g,' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
     var style = 'display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#5a3a00;color:#f90;margin:2px;';
     if (clickable && animalName) {
-      return '<span style="' + style + 'cursor:pointer;" onclick="setAnimalFlag(' + JSON.stringify(animalName) + ',' + JSON.stringify(f) + ',false)">🚩 ' + label + ' ✕</span>';
+      return '<span style="' + style + 'cursor:pointer;" onclick="setAnimalFlag(' + jsAttrStr(animalName) + ',' + jsAttrStr(f) + ',false)">🚩 ' + label + ' ✕</span>';
     }
     return '<span style="' + style + '">🚩 ' + label + '</span>';
   }).join('');
@@ -4797,7 +4821,7 @@ function openAnimalProfile(name) {
     if (inactiveFlags.length) {
       flagsHTML += '<div>' + inactiveFlags.map(function(f){
         var label = f.replace(/_/g,' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
-        return '<span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#333;color:#888;margin:2px;cursor:pointer;" onclick="setAnimalFlag(' + JSON.stringify(name) + ',' + JSON.stringify(f) + ',true)">' + '+ ' + label + '</span>';
+        return '<span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:12px;background:#333;color:#888;margin:2px;cursor:pointer;" onclick="setAnimalFlag(' + jsAttrStr(name) + ',' + jsAttrStr(f) + ',true)">' + '+ ' + label + '</span>';
       }).join('') + '</div>';
     }
   }
@@ -6350,6 +6374,20 @@ function renderAnimalsScreen() {
     card.onclick = function(){ openAnimalProfile(g); };
     al.appendChild(card);
   });
+  if (getShowArchived('goats') && archivedGoatNames.length) {
+    var archHeader = document.createElement('div');
+    archHeader.className = 'species-header';
+    archHeader.textContent = '🪦 Archived (' + archivedGoatNames.length + ')';
+    al.appendChild(archHeader);
+    archivedGoatNames.slice().sort().forEach(function(name) {
+      var row = document.createElement('div');
+      row.className = 'box';
+      row.style.cssText = 'cursor:pointer;opacity:0.6;';
+      row.textContent = name;
+      row.onclick = function(){ openAnimalProfile(name); };
+      al.appendChild(row);
+    });
+  }
   lazyLoadPhotos(al);
 }
 function addAnimalFromScreen() {
@@ -7070,6 +7108,18 @@ function saveScheduledTasks() {
 }
 
 // ───── SHARED: toast notification ─────
+// Safe for embedding a JS-string argument inside a double-quoted onclick="..."
+// HTML attribute. JSON.stringify() alone is NOT safe here — it always wraps
+// in double quotes, which collide with the attribute's own double quotes and
+// truncate the onclick value mid-call (e.g. onclick="fn(" — an unclosed
+// parenthesis that throws "SyntaxError: Unexpected end of input" the moment
+// it's clicked). This wraps in single quotes instead and escapes anything
+// that could break either the JS string or the HTML attribute.
+function jsAttrStr(s) {
+  var str = String(s == null ? '' : s);
+  return "'" + str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;') + "'";
+}
+
 function showToast(msg) {
   let toast = document.getElementById("appToast");
   if (!toast) {
@@ -8111,11 +8161,16 @@ async function fetchAnimalUUIDs(silent = false) {
       }
     });
 
-    // Archived animals (sold, died, retyped) simply drop off the active list —
-    // their farmOS status is the single source of truth, no local exclusion list needed
+    // Archived animals (sold, died, retyped) drop off the active list, but
+    // their names are kept in archivedGoatNames so the Show Archived toggle
+    // in Settings can still surface them without needing the farmOS web UI.
     archivedNames.forEach(name => {
       goats = goats.filter(g => g.toLowerCase() !== name.toLowerCase());
+      if (!archivedGoatNames.some(n => n.toLowerCase() === name.toLowerCase())) {
+        archivedGoatNames.push(name);
+      }
     });
+    localStorage.setItem(LS.archivedGoats, JSON.stringify(archivedGoatNames));
 
     // Deduplicate goat list (keep first occurrence, case-insensitive)
     const seen = new Set();
@@ -12098,6 +12153,12 @@ function eq_openDetail(key) {
 }
 function eq_closeDetail() { document.getElementById('eqDetailModal').style.display = 'none'; }
 
+var _eqExpandedEntries = {};
+function eq_toggleMaintEntry(entryId) {
+  _eqExpandedEntries[entryId] = !_eqExpandedEntries[entryId];
+  eq_renderMaintenanceList(_eqDetailKey);
+}
+
 function eq_renderMaintenanceList(key) {
   var list = document.getElementById('eqDetailMaintenanceList');
   if (!list) return;
@@ -12108,10 +12169,22 @@ function eq_renderMaintenanceList(key) {
     var syncTag = l.synced ? '<span style="color:#3a7;font-size:11px;">✓</span>' : '<span style="color:#c90;font-size:11px;">⏳</span>';
     var when = new Date(l.ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
     var typeTag = l.logType === 'reading' ? '📊 ' + l.readingValue + ' ' + l.readingUnit : '🔧 Maintenance';
-    return '<div onclick="eq_openMaintenanceModal(' + JSON.stringify(l.id) + ')" style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;font-size:13px;cursor:pointer;">' +
-      '<div style="display:flex;justify-content:space-between;"><strong>' + typeTag + '</strong>' + syncTag + '</div>' +
-      '<div style="color:#888;font-size:12px;margin-top:2px;">' + when + '</div>' +
-      (l.notes ? '<div style="color:#ccc;margin-top:4px;">' + l.notes + '</div>' : '') +
+    var expanded = !!_eqExpandedEntries[l.id];
+    var arrow = expanded ? '▲' : '▼';
+    return '<div style="background:#333;border-radius:6px;margin-top:4px;font-size:13px;overflow:hidden;">' +
+      '<div onclick="eq_toggleMaintEntry(' + jsAttrStr(l.id) + ')" style="padding:8px 10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">' +
+        '<div>' +
+          '<div><strong>' + typeTag + '</strong> ' + syncTag + '</div>' +
+          '<div style="color:#888;font-size:12px;margin-top:2px;">' + when + '</div>' +
+        '</div>' +
+        '<span style="color:#888;font-size:12px;padding-left:8px;">' + arrow + '</span>' +
+      '</div>' +
+      (expanded ?
+        '<div style="padding:0 10px 10px 10px;border-top:1px solid #444;">' +
+          (l.notes ? '<div style="color:#ccc;margin-top:8px;">' + l.notes + '</div>' : '') +
+          '<button onclick="event.stopPropagation();eq_openMaintenanceModal(' + jsAttrStr(l.id) + ')" class="secondary" style="width:100%;margin-top:8px;padding:8px;font-size:13px;">✏️ Edit</button>' +
+        '</div>'
+      : '') +
     '</div>';
   }).join('');
 }
@@ -13808,7 +13881,7 @@ function bd_renderBirds() {
   var search = (document.getElementById('bd-search') ? document.getElementById('bd-search').value : '').toLowerCase();
   var birdBatches = batches.filter(function(b) { return b.module === 'bird'; });
   var batchHTML = birdBatches.length ? "<div class='species-header'>📦 Batches</div>" + birdBatches.map(batchCardHTML).join('') : '';
-  var birds = bd_birds.filter(function(b) { return b.type !== 'feeder' && b.status !== 'archived' && bd_excluded.indexOf(b.species) < 0; });
+  var birds = bd_birds.filter(function(b) { return b.type !== 'feeder' && (getShowArchived('birds') || b.status !== 'archived') && bd_excluded.indexOf(b.species) < 0; });
   if (bd_speciesFilterActive) birds = birds.filter(function(b) { return b.species === bd_speciesFilterActive; });
   if (search) birds = birds.filter(function(b) { return (b.tag||'').toLowerCase().indexOf(search) >= 0 || (b.name||'').toLowerCase().indexOf(search) >= 0; });
   if (!birds.length) { list.innerHTML = batchHTML + "<div class='box' style='color:#888;text-align:center;'>No individually-tracked birds. Add one with + or fetch from farmOS.</div>"; return; }
@@ -13821,11 +13894,11 @@ function bd_renderBirds() {
     return "<div class='species-header'>" + bd_speciesIcon(s) + ' ' + s + "</div>" +
       groups[s].map(function(b) {
         var id = b.uuid || b._localId;
-        var meta = [b.breed, b.sex === 'F' ? 'Female' : b.sex === 'M' ? 'Male' : '', b.flock ? b.flock : ''].filter(function(x) { return x; }).join(' - ');
+        var meta = [b.breed, b.sex === 'F' ? 'Female' : b.sex === 'M' ? 'Male' : '', b.flock ? b.flock : '', b.status === 'archived' ? '🪦 archived' : ''].filter(function(x) { return x; }).join(' - ');
         var thumb = b.photoId
           ? '<img data-photoid="' + b.photoId + '" class="bird-thumb" style="background:#333;" onclick="event.stopPropagation();bd_openPhotoViewer(this.src)">'
           : '<div class="bird-icon">' + bd_speciesIcon(b.species) + '</div>';
-        return '<div class="bird-card" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;">' +
+        return '<div class="bird-card" onclick="bd_openBirdProfile(\'' + id + '\')" style="cursor:pointer;' + (b.status === 'archived' ? 'opacity:0.6;' : '') + '">' +
           thumb +
           '<div class="bird-info"><div class="bird-tag">' + (b.tag||'') + '</div><div class="bird-name">' + (b.name||'') + '</div><div class="bird-meta">' + meta + '</div></div>' +
           '<div style="color:#555;font-size:18px;padding-left:8px;">›</div>' +
@@ -15265,7 +15338,7 @@ function renderDashboardScreen() {
       html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No flagged animals.</p>';
     } else {
       html += flagged.slice(0,5).map(name => {
-        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + JSON.stringify(name) + ');},150);">' +
+        return '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;cursor:pointer;" onclick="goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + jsAttrStr(name) + ');},150);">' +
           name + ' ' + flagBadgesHTML(animalProfiles[name].flags, false, null) + '</div>';
       }).join('');
       if (flagged.length > 5) html += '<p style="color:#888;font-size:12px;margin:6px 0 0;">+' + (flagged.length - 5) + ' more</p>';
@@ -16344,25 +16417,25 @@ function openLocationDetail(key) {
     list.innerHTML = '<div style="color:#888;font-size:13px;padding:6px 0;">Nothing here right now.</div>';
   } else {
     var goatRows = goatsHere.map(function(name) {
-      return '<div onclick="closeLocationDetail();goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + JSON.stringify(name) + ');},150);" ' +
+      return '<div onclick="closeLocationDetail();goModule(\'goats\');show(\'animals\');setTimeout(function(){openAnimalProfile(' + jsAttrStr(name) + ');},150);" ' +
         'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
         '🐐 ' + name +
       '</div>';
     }).join('');
     var birdRows = birdsHere.map(function(b) {
-      return '<div onclick="closeLocationDetail();goModule(\'birds\');bd_show(\'birds\');setTimeout(function(){bd_openBirdProfile(' + JSON.stringify(b.uuid) + ');},150);" ' +
+      return '<div onclick="closeLocationDetail();goModule(\'birds\');bd_show(\'birds\');setTimeout(function(){bd_openBirdProfile(' + jsAttrStr(b.uuid) + ');},150);" ' +
         'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
         '🐦 ' + b.label +
       '</div>';
     }).join('');
     var stockRows = stockHere.map(function(a) {
-      return '<div onclick="closeLocationDetail();goModule(\'stock\');setTimeout(function(){openAdjust(' + JSON.stringify(a.uuid) + ');},150);" ' +
+      return '<div onclick="closeLocationDetail();goModule(\'stock\');setTimeout(function(){openAdjust(' + jsAttrStr(a.uuid) + ');},150);" ' +
         'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
         '📦 ' + a.label +
       '</div>';
     }).join('');
     var eqRows = eqHere.map(function(it) {
-      return '<div onclick="closeLocationDetail();goModule(\'equipment\');setTimeout(function(){eq_openDetail(' + JSON.stringify(it.key) + ');},150);" ' +
+      return '<div onclick="closeLocationDetail();goModule(\'equipment\');setTimeout(function(){eq_openDetail(' + jsAttrStr(it.key) + ');},150);" ' +
         'style="padding:8px 10px;background:#333;border-radius:6px;margin-top:4px;cursor:pointer;font-size:14px;">' +
         '🔧 ' + it.label +
       '</div>';
