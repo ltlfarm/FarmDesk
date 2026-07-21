@@ -613,7 +613,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   </div>
 
   <div id="sch_stock_panel" class="box" style="display:none;">
-    <p style="color:#888;font-size:13px;margin:0 0 8px;">Stock reminders are local-only — there's no farmOS event for "intend to restock later." They'll show on the Stock Dashboard and here until you adjust the item or dismiss them.</p>
+    <p style="color:#888;font-size:13px;margin:0 0 8px;">Inventory reminders are local-only — there's no farmOS event for "intend to restock later." They'll show on the Inventory Dashboard and here until you adjust the item or dismiss them.</p>
     <label>Item</label>
     <select id="sch_s_item"></select>
 
@@ -701,7 +701,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
         <p style="color:#888;font-size:13px;">See sold, deceased, or retired animals right in the app — no need for the farmOS web UI.</p>
         <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="showArchivedGoats" onchange="setShowArchived('goats', this.checked); renderAnimalsScreen();" style="width:auto;"> Goats</label>
         <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="showArchivedBirds" onchange="setShowArchived('birds', this.checked); if (typeof bd_renderBirds === 'function') bd_renderBirds();" style="width:auto;"> Birds</label>
-        <p style="color:#666;font-size:12px;margin-top:6px;">Locations and Equipment already have their own "Show archived" link right on their list. Stock doesn't have an archived state — items just sit at zero quantity.</p>
+        <p style="color:#666;font-size:12px;margin-top:6px;">Locations and Equipment already have their own "Show archived" link right on their list. Inventory doesn't have an archived state — items just sit at zero quantity.</p>
       </div>
 
       <div class="set-sub" id="setgrp-logo">
@@ -871,8 +871,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptGoatLogs" checked style="width:18px;height:18px;"> Goat Logs</label>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptBirds" checked style="width:18px;height:18px;"> Birds</label>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptBirdLogs" checked style="width:18px;height:18px;"> Bird Logs</label>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptStockInventory" checked style="width:18px;height:18px;"> Stock Inventory</label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:15px;"><input type="checkbox" id="rptStockHistory" checked style="width:18px;height:18px;"> Stock History</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:15px;"><input type="checkbox" id="rptStockInventory" checked style="width:18px;height:18px;"> Inventory</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:15px;"><input type="checkbox" id="rptStockHistory" checked style="width:18px;height:18px;"> Inventory History</label>
     </div>
     <label style="color:#ccc;font-size:14px;">Filter by Animal</label>
     <select id="rptAnimal" style="width:100%;padding:10px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin:4px 0 10px;"></select>
@@ -928,7 +928,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tasks</strong> — Upcoming and overdue tasks across all modules. Tap to complete.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Warning Tags</strong> — Animals flagged for attention.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Recent Logs</strong> — Latest activity across all modules.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Low Inventory</strong> — Stock items that are empty or below threshold.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Low Inventory</strong> — Inventory items that are empty or below threshold.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>Sync Status</strong> — Last sync time per module.</p>
     </div>
   </div>
@@ -958,7 +958,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Create future tasks for animals. Tasks show on the Dashboard and each module's pending list until completed.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 6px;">Select a module, pick a log type, choose animals or flocks, set a date, and tap <strong>Schedule Tasks</strong>. One task is created per animal.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 6px;"><strong>Completing a task:</strong> Tap it on the Dashboard or home screen. The log form opens pre-filled. Fill in the details and tap Save — the task is marked done in farmOS.</p>
-      <p style="font-size:14px;color:#ccc;margin:0;">Stock reminders are local-only (no farmOS event). Tap ✓ on the Dashboard to dismiss them.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;">Inventory reminders are local-only (no farmOS event). Tap ✓ on the Dashboard to dismiss them.</p>
     </div>
   </div>
 
@@ -971,7 +971,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track individual animal health events. Each log is saved locally and pushed to farmOS when you sync.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⚖️ Weight</strong> — Animal's weight in lbs.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🌡️ Vitals</strong> — Temperature, heart rate, respiratory rate.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>💉 Med</strong> — Medication, dose, route, lot number. Auto-deducts from Stock inventory if tracked.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>💉 Med</strong> — Medication, dose, route, lot number. Auto-deducts from Inventory if tracked.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>✂️ Procedure</strong> — Any procedure performed (band, disbud, ear tag, etc.).</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Hoof (cloven icon)</strong> — Hoof trimming and condition notes.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>👁️ Observe</strong> — General observation or health note.</p>
@@ -1000,10 +1000,10 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     </div>
   </div>
 
-  <!-- Stock Desk -->
+  <!-- Inventory -->
   <div class="set-group">
     <div class="set-head" onclick="toggleSetGroup(this)">
-      <span>📦 Stock Desk</span><span class="set-arrow">▼</span>
+      <span>📦 Inventory</span><span class="set-arrow">▼</span>
     </div>
     <div class="set-body">
       <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track feed, medical supplies, and other inventory items.</p>
@@ -1016,6 +1016,40 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     </div>
   </div>
 
+  <!-- Locations -->
+  <div class="set-group">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>📍 Locations</span><span class="set-arrow">▼</span>
+    </div>
+    <div class="set-body">
+      <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track your land, structures, and water sources. These are the places every other module moves things to — when you Move a goat, bird, inventory item, or piece of equipment, you pick from this list.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>➕ Add Location</strong> — Create a location as 🌾 Land, 🏡 Structure, or 💧 Water. Add notes, a photo, an attached file, flags, owner, and an ID tag.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap a location name</strong> — Opens the detail view: its info, its place in the hierarchy, everything that's <strong>Here now</strong> (goats, birds, inventory, equipment — tap any to jump to it), and any logs recorded against the location.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Location logs</strong> — From the detail view, record an Observation, Activity, Input, or Maintenance log tied directly to that location.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Nesting</strong> — Give a location a parent (e.g. a pen inside a barn) using the real farmOS parent link. The app stops you creating loops.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Map</strong> — Locations with drawn boundaries show on the overview map. Satellite view turns on automatically when an ArcGIS key is set in Settings.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Archive vs Delete</strong> — Archive keeps a retired location out of the way; Delete removes it and asks twice first. Use the inline "Show archived" link to see archived ones.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;"><strong>⬆️ Push / ⬇️ Fetch</strong> — Push new and changed locations to farmOS, or fetch the current list from farmOS.</p>
+    </div>
+  </div>
+
+  <!-- Equipment -->
+  <div class="set-group">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>🔧 Equipment</span><span class="set-arrow">▼</span>
+    </div>
+    <div class="set-body">
+      <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track mechanical and fixed equipment — tractors, pumps, feeders, waterers, and more.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>➕ Add Equipment</strong> — Record name, equipment type, manufacturer, model, serial number, ID tag, owner, group, flags, notes, a photo, and an attached file (manual, receipt, etc.).</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Group</strong> — Bundle related items (e.g. Irrigation, Power, Bee Equipment). Pick an existing group or create a new one on the spot.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap an item</strong> — Opens the detail view with its info and full Maintenance History.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🔧 Maintenance History</strong> — Add two kinds of entry: <strong>Maintenance</strong> (oil change, repair, inspection) and <strong>Reading</strong> (hours or miles). Tap an entry to edit or delete it.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📍 Move</strong> — Assign the equipment to a location from your Locations list.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Archive vs Delete</strong> — Archive retires an item; Delete removes it. Use the inline "Show archived" link to see archived ones.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;"><strong>⬆️ Push / ⬇️ Fetch</strong> — Push new and changed equipment to farmOS, or fetch the current list from farmOS.</p>
+    </div>
+  </div>
+
   <!-- Settings -->
   <div class="set-group">
     <div class="set-head" onclick="toggleSetGroup(this)">
@@ -1023,7 +1057,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     </div>
     <div class="set-body">
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>FarmOS Connection</strong> — Enter your farmOS URL, username, and password. Tap Test Connection to verify.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Modules</strong> — Turn Goats, Birds, or Stock on or off. Use arrows to reorder them in the header bar.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Modules</strong> — Turn Goats, Birds, Inventory, Locations, or Equipment on or off to fit your farm. At least one must stay on. Use arrows to reorder them in the header bar.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Logo</strong> — Pick a photo to show in the header. Syncs to farmOS so all devices see it.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Name</strong> — Used in exported filenames.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Standalone Mode</strong> — Use FarmDesk without a farmOS server. Hides all sync options. Export XML to save your data.</p>
@@ -1055,7 +1089,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <p style="font-size:14px;color:#ccc;margin:0 0 6px;">FarmDesk is a single HTML file. All code is inline — no build tools, no dependencies. Open it in any text editor.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>FARM CONFIG section</strong> (top of the script) — Edit log types, field options, species, med routes, and follow-up schedules here without touching the rest of the code.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>MODULE REGISTRY</strong> — Near the bottom of the script. Add a new module by adding a <code>&lt;div id="module-yourmod"&gt;</code> block in the HTML and one entry in the MODULES array. The switcher bar, Settings toggles, and Sync All pick it up automatically.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>localStorage keys</strong> — All use the <code>farmdesk_</code> prefix. Stock module uses <code>farmdesk_stock_*</code>. Bird module uses <code>farmdesk_bird_*</code>.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>localStorage keys</strong> — All use the <code>farmdesk_</code> prefix. Inventory module uses <code>farmdesk_stock_*</code> internally. Bird module uses <code>farmdesk_bird_*</code>.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>farmOS API</strong> — OAuth2 password grant, scope=farm_manager required. Logs use JSON:API. Tasks are logs with status=pending; completing them PATCHes status to done.</p>
       <p style="font-size:14px;color:#ccc;margin:0;">Script sections are marked A through F in the Table of Contents at the top of the script block.</p>
     </div>
@@ -1280,7 +1314,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 
 <!-- Bottom Nav -->
 <nav class="bottom-nav sd-bottom-nav">
-  <button id="sd-nav-dashboard" class="active" onclick="sd_show('dashboard')">🏠<br>Stock</button>
+  <button id="sd-nav-dashboard" class="active" onclick="sd_show('dashboard')">🏠<br>Inventory</button>
   <button id="sd-nav-history"                  onclick="sd_show('history')">📋<br>History</button>
   <button id="sd-nav-scheduler"                 onclick="show('scheduler')">📅<br>Scheduler</button>
   <button id="sd-nav-sync"                     onclick="sd_show('sync')">🔄<br>Sync<span id="syncBadge" class="pending-badge" style="display:none;"></span></button>
@@ -1478,6 +1512,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <div id="eq_newGroupRow" style="display:none;margin-bottom:8px;">
       <input id="eq_newGroupName" type="text" placeholder="e.g. Bee Equipment, Power, Irrigation" style="width:100%;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     </div>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Equipment Type</label>
+    <input id="eq_equiptype" type="text" placeholder="e.g. Tractor, Trailer, Hand tool" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Manufacturer</label>
     <input id="eq_manufacturer" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Model</label>
@@ -1824,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1784566704;
+const APP_VERSION = 1784610189;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4003,7 +4039,7 @@ function importXML(input) {
       logs = JSON.parse(localStorage.getItem(LS.logs) || "[]");
       bd_history = JSON.parse(localStorage.getItem("farmdesk_bird_history") || "[]");
       bd_birds = JSON.parse(localStorage.getItem("farmdesk_bird_assets") || "[]");
-      renderHome();
+      renderRecent();
     } catch(err) {
       result.textContent = "❌ Error: " + err.message;
     }
@@ -4127,7 +4163,7 @@ function generateReport(mode) {
 
   // Stock inventory section
   if (incStockInv && sdAssets.length) {
-    sections += "<h2>Stock Inventory</h2><table><thead>" +
+    sections += "<h2>Inventory</h2><table><thead>" +
       th(["Item","Category","Quantity","Unit","Notes"]) +
       "</thead><tbody>";
     sdAssets.forEach(function(a) {
@@ -4143,7 +4179,7 @@ function generateReport(mode) {
       if (dateTo   && e.time && e.time.slice(0,10) > dateTo)   return false;
       return true;
     });
-    sections += "<h2>Stock History</h2><table><thead>" +
+    sections += "<h2>Inventory History</h2><table><thead>" +
       th(["Date","Item","Action","Amount","Unit","Seller","Lot","Notes"]) +
       "</thead><tbody>";
     filteredStock.forEach(function(e) {
@@ -8212,9 +8248,9 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) el.textContent = "Fetching locations...";
     try {
       const [landRes, structRes, waterRes] = await Promise.all([
-        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent'), { headers: authHeaders })
+        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent,owner'), { headers: authHeaders })
       ]);
       const newLocations = {};
       function absorbLocationRes(res, typeName) {
@@ -8224,6 +8260,9 @@ async function fetchAnimalUUIDs(silent = false) {
             const geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
             const parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
             const parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
+            const ownerRel = l.relationships && l.relationships.owner && l.relationships.owner.data;
+            const ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
+            const existingLoc = locations[l.id];
             newLocations[l.id] = {
               name: l.attributes.name || '(unnamed)',
               type: typeName,
@@ -8231,6 +8270,12 @@ async function fetchAnimalUUIDs(silent = false) {
               wkt: geomVal || null,
               archived: !!l.attributes.archived,
               parentKey: parentArr.length ? parentArr[0].id : null,
+              idtag: (l.attributes.id_tag && l.attributes.id_tag[0]) ? l.attributes.id_tag[0].id : '',
+              ownerUUID: ownerArr.length ? ownerArr[0].id : null,
+              flags: Array.isArray(l.attributes.flag) ? l.attributes.flag : [],
+              // Photo/file are push-only for now — preserve whatever we already knew locally
+              photoId: existingLoc ? existingLoc.photoId : null,
+              fileAttach: existingLoc ? existingLoc.fileAttach : null,
               synced: true,
               farmosUUID: l.id
             };
@@ -9055,10 +9100,13 @@ async function processPendingLocationActions(token, logFn) {
           notes: { value: loc.notes || '', format: 'default' },
           is_location: true,
           is_fixed: !!loc.wkt,
-          archived: !!loc.archived
+          archived: !!loc.archived,
+          flag: loc.flags || []
         };
+        if (loc.idtag) attrs.id_tag = [{ id: loc.idtag, type: 'tag' }];
         if (loc.wkt) attrs.intrinsic_geometry = { value: loc.wkt };
         var relationships = {};
+        if (loc.ownerUUID) relationships.owner = { data: [{ type: 'user--user', id: loc.ownerUUID }] };
         if (loc.parentKey) {
           var parentLoc = locations[loc.parentKey];
           if (parentLoc && parentLoc.farmosUUID) {
@@ -9090,6 +9138,37 @@ async function processPendingLocationActions(token, logFn) {
         var realUUID = resData.data.id;
         loc.farmosUUID = realUUID;
         loc.synced = true;
+
+        // Photo — same asset-level two-step upload pattern used by Stock/Equipment
+        if (loc.photoId) {
+          try {
+            var locPhotoData = await Photos.load(loc.photoId);
+            if (locPhotoData) {
+              var locPhotoBlob = await (await fetch(locPhotoData)).blob();
+              await fetchWithTimeout(apiUrl('/api/asset/' + bundle + '/' + realUUID + '/image'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="location-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: locPhotoBlob
+              });
+            }
+          } catch(pe) { if (logFn) logFn('  \u26a0\ufe0f location photo upload failed: ' + pe.message + '\n'); }
+        }
+
+        // File attachment
+        if (loc.fileAttach && loc.fileAttach.fileId) {
+          try {
+            var locFileData = await Files.load(loc.fileAttach.fileId);
+            if (locFileData) {
+              var locFileBlob = await (await fetch(locFileData)).blob();
+              await fetchWithTimeout(apiUrl('/api/asset/' + bundle + '/' + realUUID + '/file'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="' + loc.fileAttach.name + '"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: locFileBlob
+              });
+            }
+          } catch(fe) { if (logFn) logFn('  \u26a0\ufe0f location file upload failed: ' + fe.message + '\n'); }
+        }
+
         // Move the entry from its temp local key to the real farmOS UUID key
         // so anything referencing it (Move's dropdown) picks up the real id.
         if (a.payload.key !== realUUID) {
@@ -9240,7 +9319,7 @@ function openMedMaterialDialog(medName, token) {
         '<select id="medMatCat" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' + catHTML + '</select>';
     } else if (hasFarmOS) {
       document.getElementById('medMatCatRow').innerHTML =
-        '<p style="color:#c90;font-size:13px;margin:4px 0;">⚠️ Fetch Stock inventory first to load categories.</p>' +
+        '<p style="color:#c90;font-size:13px;margin:4px 0;">⚠️ Fetch Inventory first to load categories.</p>' +
         '<label>Category (text)</label>' +
         '<input id="medMatCat" placeholder="e.g. Medical" style="width:100%;box-sizing:border-box;">';
     } else {
@@ -9663,7 +9742,7 @@ async function syncToFarmOS() {
     try {
       await sd_syncToFarmOS();
     } catch(e) {
-      logEl.textContent += '⚠️ Stock sync error: ' + e.message + '\n';
+      logEl.textContent += '⚠️ Inventory sync error: ' + e.message + '\n';
     }
   }
 
@@ -10348,6 +10427,9 @@ async function refreshAssets(silent) {
       const notesVal = a.attributes.notes?.value || '';
       // Preserve locally-stored photo IDs — never overwrite with fetch (farmOS material assets don't carry photo data back)
       const existingPhotoIds = photoIds[a.id] || [];
+      const existingAsset = assets.find(x => x.uuid === a.id);
+      const ownerRel = a.relationships?.owner?.data;
+      const ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
       return {
         uuid:      a.id,
         name,
@@ -10358,6 +10440,12 @@ async function refreshAssets(silent) {
         units:     inv.units || unitLabel_(name, measure),
         unitId:    guessUnitId(name, measure),
         notes:     notesVal,
+        idtag:     (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '',
+        ownerUUID: ownerArr.length ? ownerArr[0].id : null,
+        flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
+        // File attachment is push-only for now — farmOS doesn't hand it back
+        // in a simple form here, so preserve whatever we already knew locally.
+        fileAttach: existingAsset ? existingAsset.fileAttach : null,
         photoIds:  existingPhotoIds
       };
     });
@@ -11021,6 +11109,21 @@ async function sd_openPhotoViewer(uuid) {
 // closePhotoViewer — uses GoatDesk shared version
 
 // ===== EDIT ITEM =====
+async function handleEditItemFileAttach(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const dataUrl = await new Promise(function(resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function() { resolve(reader.result); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const fileId = await Files.save(dataUrl);
+  window._editItemFileAttach = { name: file.name, type: file.type, fileId: fileId };
+  const preview = document.getElementById('editItemFilePreview');
+  if (preview) preview.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;">📎 ' + file.name + '</div>';
+}
+
 async function openEditItem(uuid) {
   const a = assets.find(x => x.uuid === uuid);
   if (!a) return;
@@ -11058,14 +11161,31 @@ async function openEditItem(uuid) {
 
   window._editItemPhotos = [...existingPhotos];
   window._editItemUUID = uuid;
+  window._editItemFileAttach = null;
 
   fields.innerHTML = `
     <label style="color:#aaa;font-size:14px;">Name</label>
     <input type="text" id="editItemName" value="${a.name.replace(/"/g,'&quot;')}" style="width:100%;padding:10px;margin-top:4px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Notes</label>
     <textarea id="editItemNotes" rows="3" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">${a.notes || ''}</textarea>
-    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Low Stock Warning</label>
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Low Inventory Warning</label>
     <input type="number" id="editItemThreshold" min="0" step="any" value="${thresholds[a.uuid] || 0}" placeholder="0 = off" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">ID Tag</label>
+    <input type="text" id="editItemIdTag" value="${(a.idtag||'').replace(/"/g,'&quot;')}" placeholder="Asset tag / barcode" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Owner</label>
+    <select id="editItemOwner" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="">— unassigned —</option>
+      ${Object.keys(OWNER_NAMES).map(uuid => `<option value="${uuid}"${a.ownerUUID === uuid ? ' selected' : ''}>${OWNER_NAMES[uuid]}</option>`).join('')}
+    </select>
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Flags</label>
+    <div style="display:flex;gap:12px;margin-top:4px;flex-wrap:wrap;">
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="editItemFlagPriority" ${(a.flags||[]).indexOf('priority')!==-1?'checked':''} style="width:auto;"> 🔴 Priority</label>
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="editItemFlagNeedsReview" ${(a.flags||[]).indexOf('needs_review')!==-1?'checked':''} style="width:auto;"> 🟡 Needs Review</label>
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="editItemFlagMonitor" ${(a.flags||[]).indexOf('monitor')!==-1?'checked':''} style="width:auto;"> 🔵 Monitor</label>
+    </div>
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Attached File (manual, receipt, etc.)</label>
+    <div id="editItemFilePreview" style="margin-top:4px;">${a.fileAttach ? `<div onclick="viewFileAttachment('${a.fileAttach.fileId||''}','${(a.fileAttach.name||'file').replace(/'/g,"&#39;")}')" style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;cursor:pointer;">📎 <span style="text-decoration:underline;color:#8bd;">${a.fileAttach.name||'Attached file'}</span></div>` : ''}</div>
+    <input type="file" id="editItemFileInput" accept=".pdf,.doc,.docx,.txt,.csv" onchange="handleEditItemFileAttach(this)" style="width:100%;margin-top:6px;color:#eee;">
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">📷 Photos (max 3)</label>
     <div id="editItemPhotoStrip" style="margin-top:4px;"></div>
     <div id="editItemAddBtns" style="display:flex;gap:6px;margin-top:6px;">
@@ -11085,9 +11205,19 @@ async function openEditItem(uuid) {
     const newName      = document.getElementById('editItemName').value.trim();
     const newNotes     = document.getElementById('editItemNotes').value.trim();
     const newThreshold = parseFloat(document.getElementById('editItemThreshold').value) || 0;
+    const newIdTag     = document.getElementById('editItemIdTag').value.trim();
+    const newOwner     = document.getElementById('editItemOwner').value || null;
+    const newFlags     = [];
+    if (document.getElementById('editItemFlagPriority').checked) newFlags.push('priority');
+    if (document.getElementById('editItemFlagNeedsReview').checked) newFlags.push('needs_review');
+    if (document.getElementById('editItemFlagMonitor').checked) newFlags.push('monitor');
     if (!newName) { showToast('Name required'); return; }
     a.name   = newName;
     a.notes  = newNotes;
+    a.idtag  = newIdTag;
+    a.ownerUUID = newOwner;
+    a.flags  = newFlags;
+    if (window._editItemFileAttach) a.fileAttach = window._editItemFileAttach;
 
     // Re-save the current photo set through the Photos store and release the
     // old IDs — simpler and safer than trying to diff which ones changed.
@@ -11108,7 +11238,7 @@ async function openEditItem(uuid) {
     // Queue PATCH if real UUID
     if (!a.uuid.startsWith('local_')) {
       pending = pending.filter(p => !(p.type === 'patch_asset' && p.uuid === a.uuid));
-      pending.push({ id: 'patch_' + a.uuid, type: 'patch_asset', uuid: a.uuid, name: newName, notes: newNotes, synced: false });
+      pending.push({ id: 'patch_' + a.uuid, type: 'patch_asset', uuid: a.uuid, name: newName, notes: newNotes, idtag: newIdTag, ownerUUID: newOwner, flags: newFlags, fileAttach: a.fileAttach || null, synced: false });
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
       updateSyncBadge();
     }
@@ -11460,14 +11590,20 @@ async function sd_syncToFarmOS() {
           throw new Error('Photo upload: ' + pe.message);
         }
       } else if (item.type === 'patch_asset') {
+        const patchAttrs = {
+          name:  item.name,
+          notes: { value: item.notes || '', format: 'default' }
+        };
+        if (item.flags) patchAttrs.flag = item.flags;
+        if (item.idtag) patchAttrs.id_tag = [{ id: item.idtag, type: 'tag' }];
+        const patchRelationships = {};
+        if (item.ownerUUID) patchRelationships.owner = { data: [{ type: 'user--user', id: item.ownerUUID }] };
         const patchBody = {
           data: {
             type: 'asset--material',
             id:   item.uuid,
-            attributes: {
-              name:  item.name,
-              notes: { value: item.notes || '', format: 'default' }
-            }
+            attributes: patchAttrs,
+            relationships: patchRelationships
           }
         };
         const pRes = await fetchWithTimeout(apiUrl(`/api/asset/material/${item.uuid}`), {
@@ -11476,6 +11612,19 @@ async function sd_syncToFarmOS() {
         if (!pRes.ok) {
           const e = await pRes.json().catch(() => ({}));
           throw new Error(e.errors?.[0]?.detail || pRes.status);
+        }
+        if (item.fileAttach && item.fileAttach.fileId) {
+          try {
+            const fileData = await Files.load(item.fileAttach.fileId);
+            if (fileData) {
+              const fileBlob = await (await fetch(fileData)).blob();
+              await fetchWithTimeout(apiUrl(`/api/asset/material/${item.uuid}/file`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `file; filename="${item.fileAttach.name}"`, 'Accept': 'application/vnd.api+json', 'Authorization': h.Authorization },
+                body: fileBlob
+              });
+            }
+          } catch(fe) { logEl.textContent += '  ⚠️ file upload failed: ' + fe.message + '\n'; }
         }
         item.synced = true;
         ok++;
@@ -11555,7 +11704,7 @@ async function sd_syncToFarmOS() {
           data: {
             type: 'log--' + logBundle,
             attributes: {
-              name:      (isPricedRestock ? 'Purchase: ' : 'Stock ' + item.action + ': ') + item.name,
+              name:      (isPricedRestock ? 'Purchase: ' : 'Inventory ' + item.action + ': ') + item.name,
               timestamp: item.timestamp,
               status:    'done',
               notes: { value: [
@@ -11615,7 +11764,7 @@ function sd_renderSettings() {
   container.innerHTML = `
     <div class="set-group" id="setgrp-stock">
       <div class="set-head" onclick="toggleSetGroup(this)">
-        <span style="color:#3a7;">📦 Stock Desk</span><span class="set-arrow">▼</span>
+        <span style="color:#3a7;">📦 Inventory</span><span class="set-arrow">▼</span>
       </div>
       <div class="set-body">
         <div class="set-sub">
@@ -11988,6 +12137,7 @@ function eq_openItemModal(key) {
   document.getElementById('eq_model').value = it ? (it.model||'') : '';
   document.getElementById('eq_serial').value = it ? (it.serial||'') : '';
   document.getElementById('eq_idtag').value = it ? (it.idtag||'') : '';
+  document.getElementById('eq_equiptype').value = it ? (it.equipTypeName||'') : '';
   document.getElementById('eq_notes').value = it ? (it.notes||'') : '';
   document.getElementById('eq_flag_priority').checked = !!(it && it.flags && it.flags.indexOf('priority') !== -1);
   document.getElementById('eq_flag_needs_review').checked = !!(it && it.flags && it.flags.indexOf('needs_review') !== -1);
@@ -12058,6 +12208,8 @@ async function eq_saveItem() {
     name: name,
     groupName: groupName || null,
     groupUUID: (existing && existing.groupName === groupName) ? existing.groupUUID : null,
+    equipTypeName: document.getElementById('eq_equiptype').value.trim() || null,
+    equipTypeUUID: (existing && existing.equipTypeName === document.getElementById('eq_equiptype').value.trim()) ? existing.equipTypeUUID : null,
     manufacturer: document.getElementById('eq_manufacturer').value.trim(),
     model: document.getElementById('eq_model').value.trim(),
     serial: document.getElementById('eq_serial').value.trim(),
@@ -12141,6 +12293,7 @@ function eq_openDetail(key) {
     it.manufacturer, it.model,
     it.serial ? ('SN: ' + it.serial) : null,
     it.idtag ? ('Tag: ' + it.idtag) : null,
+    it.equipTypeName ? ('Type: ' + it.equipTypeName) : null,
     it.groupName ? ('Group: ' + it.groupName) : null,
     it.ownerUUID ? ('Owner: ' + (OWNER_NAMES[it.ownerUUID]||'')) : null
   ].filter(Boolean).join(' · ');
@@ -12346,6 +12499,33 @@ async function eq_syncToFarmOS(logFn) {
         if (it.idtag) attrs.id_tag = [{ id: it.idtag, type: 'tag' }];
         var relationships = {};
         if (it.ownerUUID) relationships.owner = { data: [{ type: 'user--user', id: it.ownerUUID }] };
+
+        // Equipment type — farmOS's own dedicated taxonomy (distinct from the
+        // free-form Group field). Find-or-create by name, same pattern as Group.
+        if (it.equipTypeName && !it.equipTypeUUID) {
+          try {
+            var etq = await fetchWithTimeout(apiUrl('/api/taxonomy_term/equipment_type?filter[name]=' + encodeURIComponent(it.equipTypeName) + '&page[limit]=1'), { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' } });
+            var equipTypeUUID = null;
+            if (etq.ok) {
+              var etd = await etq.json();
+              if (etd.data && etd.data[0]) equipTypeUUID = etd.data[0].id;
+            }
+            if (!equipTypeUUID) {
+              var etRes = await fetchWithTimeout(apiUrl('/api/taxonomy_term/equipment_type'), {
+                method: 'POST', headers: headers,
+                body: JSON.stringify({ data: { type: 'taxonomy_term--equipment_type', attributes: { name: it.equipTypeName } } })
+              });
+              if (etRes.ok) { var etResData = await etRes.json(); equipTypeUUID = etResData.data.id; }
+            }
+            if (equipTypeUUID) {
+              it.equipTypeUUID = equipTypeUUID;
+              relationships.equipment_type = { data: [{ type: 'taxonomy_term--equipment_type', id: equipTypeUUID }] };
+            }
+          } catch(ete) { if (logFn) logFn('  \u26a0\ufe0f equipment type lookup failed: ' + ete.message + '\n'); }
+        } else if (it.equipTypeUUID) {
+          relationships.equipment_type = { data: [{ type: 'taxonomy_term--equipment_type', id: it.equipTypeUUID }] };
+        }
+
         var payloadData = { type: 'asset--equipment', attributes: attrs, relationships: relationships };
         var res;
         if (it.farmosUUID) {
@@ -12560,7 +12740,7 @@ async function eq_fetchAssets() {
   try {
     var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
-    var res = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=100&include=owner,group'), { headers: headers });
+    var res = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=100&include=owner,group,equipment_type'), { headers: headers });
     if (res.ok) {
       var d = await res.json();
       var newItems = [];
@@ -12588,11 +12768,23 @@ async function eq_fetchAssets() {
             } catch(ge) { /* group name lookup is best-effort */ }
           }
         }
+        var equipTypeRel = e.relationships && e.relationships.equipment_type && e.relationships.equipment_type.data;
+        var equipTypeArr = Array.isArray(equipTypeRel) ? equipTypeRel : (equipTypeRel ? [equipTypeRel] : []);
+        var equipTypeUUID = equipTypeArr.length ? equipTypeArr[0].id : null;
+        var equipTypeName = null;
+        if (equipTypeUUID) {
+          try {
+            var etRes2 = await fetchWithTimeout(apiUrl('/api/taxonomy_term/equipment_type/' + equipTypeUUID), { headers: headers });
+            if (etRes2.ok) { var etData2 = await etRes2.json(); equipTypeName = etData2.data.attributes.name; }
+          } catch(ete2) { /* equipment type name lookup is best-effort */ }
+        }
         newItems.push({
           key: existing ? existing.key : e.id,
           name: e.attributes.name || '(unnamed)',
           groupName: groupName,
           groupUUID: groupUUID,
+          equipTypeName: equipTypeName,
+          equipTypeUUID: equipTypeUUID,
           manufacturer: e.attributes.manufacturer || '',
           model: e.attributes.model || '',
           serial: e.attributes.serial_number || '',
@@ -15146,7 +15338,7 @@ const MODULES = [
     },
     onPullFromFarmOS: async function() { await fetchAnimalUUIDs(true); }
   },
-  { id: 'stock', label: '📦 Stock', title: '📦 FarmDesk',
+  { id: 'stock', label: '📦 Inventory', title: '📦 FarmDesk',
     containerId: 'module-stockdesk',
     onActivate: function() {
       document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
@@ -15415,7 +15607,7 @@ function renderDashboardScreen() {
     const sTasks = JSON.parse(localStorage.getItem(SD_LS.tasks) || '[]')
       .filter(t => !t.done)
       .sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
-    html += '<div class="box"><strong>📅 Stock Reminders' + (sTasks.length ? ' (' + sTasks.length + ')' : '') + '</strong>';
+    html += '<div class="box"><strong>📅 Inventory Reminders' + (sTasks.length ? ' (' + sTasks.length + ')' : '') + '</strong>';
     if (!sTasks.length) {
       html += '<p style="color:#888;font-size:13px;margin:6px 0 0;">No reminders set.</p>';
     } else {
@@ -15449,7 +15641,7 @@ function renderDashboardScreen() {
   }
   if (enabled.includes('stock')) {
     const ls = localStorage.getItem(SD_LS.lastSync);
-    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">📦 Stock — ' + fmtSync(ls) + '</div>';
+    html += '<div style="padding:6px 0;border-top:1px solid #333;font-size:14px;">📦 Inventory — ' + fmtSync(ls) + '</div>';
   }
   if (enabled.includes('birds')) {
     const ls = localStorage.getItem(BD_LS.lastSync);
@@ -16135,9 +16327,9 @@ async function locationsFetch() {
     var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
     var [landRes, structRes, waterRes] = await Promise.all([
-      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent'), { headers: headers }),
-      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent'), { headers: headers }),
-      fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent'), { headers: headers })
+      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent,owner'), { headers: headers })
     ]);
     var newLocations = {};
     async function absorb(res, typeName) {
@@ -16147,6 +16339,9 @@ async function locationsFetch() {
         var geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
         var parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
         var parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
+        var ownerRel = l.relationships && l.relationships.owner && l.relationships.owner.data;
+        var ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
+        var existingLoc = locations[l.id];
         newLocations[l.id] = {
           name: l.attributes.name || '(unnamed)',
           type: typeName,
@@ -16154,6 +16349,11 @@ async function locationsFetch() {
           wkt: geomVal || null,
           archived: !!l.attributes.archived,
           parentKey: parentArr.length ? parentArr[0].id : null,
+          idtag: (l.attributes.id_tag && l.attributes.id_tag[0]) ? l.attributes.id_tag[0].id : '',
+          ownerUUID: ownerArr.length ? ownerArr[0].id : null,
+          flags: Array.isArray(l.attributes.flag) ? l.attributes.flag : [],
+          photoId: existingLoc ? existingLoc.photoId : null,
+          fileAttach: existingLoc ? existingLoc.fileAttach : null,
           synced: true,
           farmosUUID: l.id
         };
@@ -16324,6 +16524,74 @@ function getLocationDescendantKeys(key) {
   return result;
 }
 
+var location_currentPhoto = null;
+var location_currentFileAttach = null;
+
+function location_takePhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) {
+    window.AndroidBridge.takePhoto('location_onAndroidPhoto');
+  } else {
+    document.getElementById('locationPhotoInput').click();
+  }
+}
+function location_onAndroidPhoto(dataUrl) {
+  if (!dataUrl) return;
+  var full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  var img = new Image();
+  img.onload = function() {
+    orientedCanvas(img, full, 800, function(canvas) {
+      location_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      var preview = document.getElementById('locationPhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + location_currentPhoto + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('locationClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  };
+  img.src = full;
+}
+function location_handlePhoto(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      orientedCanvas(img, e.target.result, 800, function(canvas) {
+        location_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+        var preview = document.getElementById('locationPhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + location_currentPhoto + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('locationClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function location_clearPhoto() {
+  location_currentPhoto = null;
+  var preview = document.getElementById('locationPhotoPreview');
+  if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('locationClearPhotoBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  var input = document.getElementById('locationPhotoInput');
+  if (input) input.value = '';
+}
+async function location_handleFileAttach(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var dataUrl = await new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() { resolve(reader.result); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  var fileId = await Files.save(dataUrl);
+  location_currentFileAttach = { name: file.name, type: file.type, fileId: fileId };
+  var preview = document.getElementById('locationFilePreview');
+  if (preview) preview.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;">\ud83d\udcce ' + file.name + '</div>';
+}
+
 function openLocationModal(key) {
   var loc = key ? locations[key] : null;
   document.getElementById('locationModalTitle').textContent = loc ? (loc.archived ? 'Edit Location (Archived)' : 'Edit Location') : 'Add Location';
@@ -16333,6 +16601,34 @@ function openLocationModal(key) {
   document.getElementById('location_notes').value = loc ? (loc.notes||'') : '';
   document.getElementById('location_wkt').value = loc ? (loc.wkt||'') : '';
   document.getElementById('locationShapeStatus').textContent = (loc && loc.wkt) ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
+  document.getElementById('location_idtag').value = loc ? (loc.idtag||'') : '';
+  document.getElementById('location_flag_priority').checked = !!(loc && loc.flags && loc.flags.indexOf('priority') !== -1);
+  document.getElementById('location_flag_needs_review').checked = !!(loc && loc.flags && loc.flags.indexOf('needs_review') !== -1);
+  document.getElementById('location_flag_monitor').checked = !!(loc && loc.flags && loc.flags.indexOf('monitor') !== -1);
+  var ownerSelect = document.getElementById('location_owner');
+  ownerSelect.innerHTML = '<option value="">\u2014 unassigned \u2014</option>' +
+    Object.keys(OWNER_NAMES).map(function(uuid) { return '<option value="' + uuid + '">' + OWNER_NAMES[uuid] + '</option>'; }).join('');
+  ownerSelect.value = loc ? (loc.ownerUUID || '') : '';
+
+  location_currentPhoto = null;
+  var locPhotoPrev = document.getElementById('locationPhotoPreview');
+  var locClearBtn = document.getElementById('locationClearPhotoBtn');
+  if (loc && loc.photoId) {
+    Photos.load(loc.photoId).then(function(data) {
+      if (data && locPhotoPrev) locPhotoPrev.innerHTML = '<img src="' + data + '" style="width:100%;border-radius:6px;">';
+    });
+    if (locClearBtn) locClearBtn.style.display = '';
+  } else {
+    if (locPhotoPrev) locPhotoPrev.innerHTML = '';
+    if (locClearBtn) locClearBtn.style.display = 'none';
+  }
+
+  location_currentFileAttach = null;
+  var locFilePrev = document.getElementById('locationFilePreview');
+  if (locFilePrev) {
+    locFilePrev.innerHTML = (loc && loc.fileAttach) ?
+      '<div onclick="viewFileAttachment(&quot;' + (loc.fileAttach.fileId||'') + '&quot;,&quot;' + (loc.fileAttach.name||'file') + '&quot;)" style="display:flex;align-items:center;gap:8px;padding:8px;background:#333;border-radius:6px;cursor:pointer;">\ud83d\udcce <span style="text-decoration:underline;color:#8bd;">' + (loc.fileAttach.name||'Attached file') + '</span></div>' : '';
+  }
 
   var excluded = key ? [key].concat(getLocationDescendantKeys(key)) : [];
   var parentSelect = document.getElementById('location_parent');
@@ -16508,18 +16804,35 @@ function closeLocationModal() {
   document.getElementById('locationModal').style.display = 'none';
 }
 
-function saveLocationLocal() {
+async function saveLocationLocal() {
   var key = document.getElementById('location_key').value;
   var name = document.getElementById('location_name').value.trim();
   if (!name) { alert('Name is required.'); return; }
   var existing = key ? locations[key] : null;
   var newKey = key || ('local_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+
+  var flags = [];
+  if (document.getElementById('location_flag_priority').checked) flags.push('priority');
+  if (document.getElementById('location_flag_needs_review').checked) flags.push('needs_review');
+  if (document.getElementById('location_flag_monitor').checked) flags.push('monitor');
+
+  var photoId = existing ? existing.photoId : null;
+  if (location_currentPhoto) photoId = await Photos.save(location_currentPhoto);
+
+  var fileAttach = existing ? existing.fileAttach : null;
+  if (location_currentFileAttach) fileAttach = location_currentFileAttach;
+
   var data = {
     name: name,
     type: document.getElementById('location_type').value,
     notes: document.getElementById('location_notes').value.trim(),
     wkt: document.getElementById('location_wkt').value || null,
     parentKey: document.getElementById('location_parent').value || null,
+    idtag: document.getElementById('location_idtag').value.trim(),
+    ownerUUID: document.getElementById('location_owner').value || null,
+    flags: flags,
+    photoId: photoId,
+    fileAttach: fileAttach,
     archived: existing ? !!existing.archived : false,
     synced: false,
     farmosUUID: existing ? existing.farmosUUID : null
@@ -17651,6 +17964,29 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     </select>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="location_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">ID Tag</label>
+    <input id="location_idtag" type="text" placeholder="Asset tag / parcel number" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner</label>
+    <select id="location_owner" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <option value="">— unassigned —</option>
+    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Flags</label>
+    <div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="location_flag_priority" style="width:auto;"> 🔴 Priority</label>
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="location_flag_needs_review" style="width:auto;"> 🟡 Needs Review</label>
+      <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="location_flag_monitor" style="width:auto;"> 🔵 Monitor</label>
+    </div>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Photo</label>
+    <div id="locationPhotoPreview" style="margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button type="button" onclick="location_takePhoto()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('locationPhotoInput').click()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" id="locationClearPhotoBtn" onclick="location_clearPhoto()" class="secondary" style="display:none;margin:0;padding:12px;font-size:14px;background:#5a1a1a;">✕</button>
+    </div>
+    <input type="file" id="locationPhotoInput" accept="image/*" style="display:none;" onchange="location_handlePhoto(this)">
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Attached File (deed, permit, etc.)</label>
+    <div id="locationFilePreview" style="margin-bottom:8px;"></div>
+    <input type="file" id="locationFileInput" accept=".pdf,.doc,.docx,.txt,.csv" onchange="location_handleFileAttach(this)" style="width:100%;margin-bottom:12px;color:#eee;">
     <div class="box" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px;">
       <span id="locationShapeStatus" style="font-size:13px;color:#aaa;">No shape drawn yet</span>
       <button onclick="openLocationMap()" class="secondary" style="margin:0;padding:8px 12px;">📍 Draw on Map</button>
