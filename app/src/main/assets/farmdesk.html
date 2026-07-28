@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785201776;
+const APP_VERSION = 1785256377;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -17234,6 +17234,7 @@ function deleteLocationLocal() {
 
 // ===== MAP DRAWING (lazy-loaded Leaflet + Leaflet.Draw, live tiles only) =====
 var _leafletLoaded = false;
+var _leafletFailed = false;
 var _locationMap = null;
 var _locationDrawnLayer = null;
 var _locationDrawControl = null;
@@ -17354,37 +17355,50 @@ function locWalkExit() {
   var btn = document.getElementById('locWalkBtn'); if (btn) btn.style.display = '';
 }
 
-function _loadLeaflet(callback) {
-  if (_leafletLoaded && window.L) { callback(); return; }
-  var cssId = 'leaflet-css';
-  if (!document.getElementById(cssId)) {
-    var link = document.createElement('link');
-    link.id = cssId;
-    link.rel = 'stylesheet';
-    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
-    document.head.appendChild(link);
-    var drawLink = document.createElement('link');
-    drawLink.rel = 'stylesheet';
-    drawLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css';
-    document.head.appendChild(drawLink);
-  }
-  // Diagnostic: try a plain fetch() first to learn the REAL failure reason
-  // (network block, CORS, timeout, DNS) instead of the generic <script> onerror,
-  // which never reports why it failed.
-  fetch('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js', { method: 'HEAD', mode: 'no-cors' })
-    .then(function() { console.log('FarmDesk map: fetch HEAD to cdnjs succeeded'); })
-    .catch(function(err) { console.log('FarmDesk map: fetch HEAD to cdnjs FAILED: ' + err.message); showFatalErrorBanner('Map library fetch() failed: ' + err.message); });
+// Map libraries load from a CDN. This is an OPTIONAL, local-first feature — if
+// it can't load (offline, blocked, or a restricted WebView), the app must keep
+// working and must NOT show a fatal error. We try several CDNs so one blocked or
+// unreachable source doesn't kill the map, and fail with a gentle one-time toast.
+var LEAFLET_CDNS = [
+  // Offline-first: vendored copies shipped with the app. Tried first so the map,
+  // drawing, and Walk mode work with zero network. CDNs below are online fallback.
+  { css: 'leaflet/leaflet.css', js: 'leaflet/leaflet.js', drawCss: 'leaflet/leaflet.draw.css', drawJs: 'leaflet/leaflet.draw.js' },
+  { css: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css', js: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js', drawCss: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css', drawJs: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js' },
+  { css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', js: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', drawCss: 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css', drawJs: 'https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js' },
+  { css: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css', js: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js', drawCss: 'https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css', drawJs: 'https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js' }
+];
 
+function _loadLeaflet(callback, onFail) {
+  if (_leafletLoaded && window.L) { callback(); return; }
+  _loadLeafletFrom(0, callback, onFail);
+}
+
+function _loadLeafletFrom(idx, callback, onFail) {
+  if (idx >= LEAFLET_CDNS.length) {
+    if (!_leafletFailed) {
+      _leafletFailed = true;
+      console.log('FarmDesk map: Leaflet could not be loaded from any CDN (offline or blocked). App continues normally.');
+      if (typeof showToast === 'function') showToast('🗺️ Map couldn\'t load (offline or blocked). Everything else works — drawing/Walk needs a connection.');
+    }
+    if (typeof onFail === 'function') onFail();
+    return;
+  }
+  var cdn = LEAFLET_CDNS[idx];
   var script = document.createElement('script');
-  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+  script.src = cdn.js;
   script.onload = function() {
+    // Add matching CSS from the CDN that actually worked
+    if (!document.getElementById('leaflet-css')) {
+      var link = document.createElement('link'); link.id = 'leaflet-css'; link.rel = 'stylesheet'; link.href = cdn.css; document.head.appendChild(link);
+      var dl = document.createElement('link'); dl.rel = 'stylesheet'; dl.href = cdn.drawCss; document.head.appendChild(dl);
+    }
     var drawScript = document.createElement('script');
-    drawScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js';
-    drawScript.onload = function() { _leafletLoaded = true; callback(); };
-    drawScript.onerror = function(e) { showFatalErrorBanner('Leaflet.Draw script failed to load. window.L is ' + (typeof window.L) + '. Check the banner above for the fetch() diagnostic.'); };
+    drawScript.src = cdn.drawJs;
+    drawScript.onload = function() { _leafletLoaded = true; _leafletFailed = false; callback(); };
+    drawScript.onerror = function() { console.log('FarmDesk map: draw plugin failed from CDN ' + idx + ', trying next'); _loadLeafletFrom(idx + 1, callback, onFail); };
     document.head.appendChild(drawScript);
   };
-  script.onerror = function(e) { showFatalErrorBanner('Leaflet script failed to load (script.onerror fired). Check the banner above for the fetch() diagnostic.'); };
+  script.onerror = function() { console.log('FarmDesk map: Leaflet failed from CDN ' + idx + ', trying next'); _loadLeafletFrom(idx + 1, callback, onFail); };
   document.head.appendChild(script);
 }
 

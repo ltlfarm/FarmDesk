@@ -68,6 +68,7 @@ jobs:
           cp sw.js pwa/sw.js
           cp icon192.png pwa/icon192.png
           cp icon512.png pwa/icon512.png
+          cp -r leaflet pwa/leaflet
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

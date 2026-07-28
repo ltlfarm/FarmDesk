@@ -1,14 +1,22 @@
-const CACHE = "farmdesk-v1";
+const CACHE = "farmdesk-v2";
 const FILES = [
-  "./index.html",
+  "./farmdesk.html",
   "./manifest.json",
   "./icon192.png",
-  "./icon512.png"
+  "./icon512.png",
+  // Vendored map library — cached so the map/draw/Walk mode work offline
+  "./leaflet/leaflet.js",
+  "./leaflet/leaflet.css",
+  "./leaflet/leaflet.draw.js",
+  "./leaflet/leaflet.draw.css"
 ];
 
 self.addEventListener("install", e => {
   e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(FILES))
+    // Cache core files; ignore any that 404 so one missing file can't break install
+    caches.open(CACHE).then(c => Promise.all(
+      FILES.map(f => c.add(f).catch(err => console.log("SW: skip " + f, err)))
+    ))
   );
   self.skipWaiting();
 });
