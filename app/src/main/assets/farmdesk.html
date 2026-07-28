@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785201560;
+const APP_VERSION = 1785201776;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -13054,6 +13054,39 @@ async function eq_fetchAssets() {
             });
           });
         });
+
+        // Pull equipment readings — these are observation logs whose name starts
+        // with "<value> <unit>: ..." (e.g. "1245.5 hours: Big Tractor"). Without
+        // this, readings pushed fine but never came back on fetch/other devices.
+        try {
+          var rRes = await fetchWithTimeout(apiUrl('/api/log/observation?page[limit]=100&sort=-timestamp&include=asset'), { headers: headers });
+          if (rRes.ok) {
+            var rData = await rRes.json();
+            (rData.data || []).forEach(function(log) {
+              var rAssetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+              var rAssetArr = Array.isArray(rAssetRel) ? rAssetRel : (rAssetRel ? [rAssetRel] : []);
+              rAssetArr.forEach(function(a) {
+                var itemKey = eqUuidSet[a.id];
+                if (!itemKey) return;
+                var nm = log.attributes.name || '';
+                var rm = nm.match(/^([\d.]+)\s+(\S+?):/); // "<value> <unit>: name"
+                if (!rm) return; // not a reading-shaped observation — skip
+                var qRel = log.relationships && log.relationships.quantity && log.relationships.quantity.data;
+                var qArr = Array.isArray(qRel) ? qRel : (qRel ? [qRel] : []);
+                var rts = log.attributes.timestamp;
+                fetchedHistory.push({
+                  id: 'farmos_' + log.id, itemKey: itemKey, logType: 'reading',
+                  readingValue: rm[1], readingUnit: rm[2],
+                  notes: (log.attributes.notes && (log.attributes.notes.value || log.attributes.notes)) || '',
+                  ts: (isNaN(Number(rts)) ? rts : new Date(Number(rts) * 1000).toISOString()),
+                  synced: true, farmosUUID: log.id,
+                  quantityUUID: qArr.length ? qArr[0].id : null
+                });
+              });
+            });
+          }
+        } catch(e) { /* readings best-effort */ }
+
         var localPending = eq_history.filter(function(l) { return !l.synced; });
         eq_history = fetchedHistory.concat(localPending);
         localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
