@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785199171;
+const APP_VERSION = 1785200658;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -17170,6 +17170,9 @@ var _leafletLoaded = false;
 var _locationMap = null;
 var _locationDrawnLayer = null;
 var _locationDrawControl = null;
+var _walkMode = false;
+var _walkPoints = [];       // captured GPS corners [[lat,lng], ...]
+var _walkLayerGroup = null; // in-progress markers/outline while walking
 var _streetTileLayer = null;
 var _satelliteTileLayer = null;
 var _satelliteActive = false;
@@ -17198,6 +17201,90 @@ function recenterOnGPS() {
   }, function(err) {
     showToast('Could not get location — check location permission for this app');
   }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
+// ===== WALK MODE — capture a paddock boundary by walking to each corner =====
+// Each "Add Corner" drops a vertex at the phone's live GPS position, which is
+// typically far more accurate than eyeballing corners on satellite imagery.
+// On Finish the points become the same drawn shape the tap-tools produce, so
+// Save Shape and everything downstream is unchanged.
+function locWalkStart() {
+  if (!_locationMap) return;
+  if (!navigator.geolocation) { showToast('GPS not available on this device'); return; }
+  _walkMode = true;
+  _walkPoints = [];
+  if (_walkLayerGroup) { _locationMap.removeLayer(_walkLayerGroup); }
+  _walkLayerGroup = L.layerGroup().addTo(_locationMap);
+  var bar = document.getElementById('locWalkBar'); if (bar) bar.style.display = 'flex';
+  var btn = document.getElementById('locWalkBtn'); if (btn) btn.style.display = 'none';
+  locWalkRender();
+  showToast('Walk to your first corner, then tap Add Corner');
+}
+
+function locWalkAddCorner() {
+  if (!navigator.geolocation) { showToast('GPS not available'); return; }
+  var btn = document.getElementById('locWalkAddBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '\ud83d\udce1 Reading\u2026'; }
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    _walkPoints.push([pos.coords.latitude, pos.coords.longitude]);
+    var acc = (pos.coords.accuracy != null) ? Math.round(pos.coords.accuracy) : null;
+    locWalkRender();
+    if (btn) { btn.disabled = false; btn.textContent = '\u2795 Add Corner'; }
+    showToast('Corner ' + _walkPoints.length + (acc != null ? ' \u00b7 \u00b1' + acc + 'm' : ''));
+  }, function(err) {
+    if (btn) { btn.disabled = false; btn.textContent = '\u2795 Add Corner'; }
+    showToast('Could not get a GPS fix \u2014 try again');
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+}
+
+function locWalkUndo() {
+  if (!_walkPoints.length) return;
+  _walkPoints.pop();
+  locWalkRender();
+}
+
+function locWalkRender() {
+  if (!_walkLayerGroup) return;
+  _walkLayerGroup.clearLayers();
+  _walkPoints.forEach(function(pt, i) {
+    L.circleMarker(pt, { radius: 6, color: '#3a7', fillColor: '#3a7', fillOpacity: 0.9, weight: 2 })
+      .bindTooltip(String(i + 1), { permanent: true, direction: 'top' })
+      .addTo(_walkLayerGroup);
+  });
+  if (_walkPoints.length === 1) {
+    _locationMap.setView(_walkPoints[0], Math.max(_locationMap.getZoom() || 0, 18));
+  } else if (_walkPoints.length === 2) {
+    L.polyline(_walkPoints, { color: '#3a7', weight: 2, dashArray: '4,4' }).addTo(_walkLayerGroup);
+  } else if (_walkPoints.length >= 3) {
+    L.polygon(_walkPoints, { color: '#3a7', weight: 2, fillOpacity: 0.15 }).addTo(_walkLayerGroup);
+  }
+  var st = document.getElementById('locWalkStatus');
+  if (st) st.textContent = _walkPoints.length + ' corner' + (_walkPoints.length === 1 ? '' : 's') + ' captured';
+}
+
+function locWalkFinish() {
+  if (_walkPoints.length === 2) { alert('A boundary needs at least 3 corners. Walk to one more corner, or Undo down to a single point to drop a pin.'); return; }
+  if (!_walkPoints.length) { locWalkExit(); return; }
+  if (_locationDrawnLayer) _locationDrawnLayer.clearLayers();
+  var finalLayer;
+  if (_walkPoints.length === 1) {
+    finalLayer = L.marker(_walkPoints[0]);
+  } else {
+    finalLayer = L.polygon(_walkPoints, { color: '#3388ff', weight: 2, fillOpacity: 0.2 });
+  }
+  if (_locationDrawnLayer) _locationDrawnLayer.addLayer(finalLayer);
+  if (finalLayer.getBounds) { try { _locationMap.fitBounds(finalLayer.getBounds(), { maxZoom: 19, padding: [30,30] }); } catch(e) {} }
+  var savedCount = _walkPoints.length;
+  locWalkExit();
+  showToast((savedCount === 1 ? 'Pin' : 'Boundary') + ' captured \u2014 tap Save Shape to keep it');
+}
+
+function locWalkExit() {
+  _walkMode = false;
+  if (_walkLayerGroup) { _locationMap.removeLayer(_walkLayerGroup); _walkLayerGroup = null; }
+  _walkPoints = [];
+  var bar = document.getElementById('locWalkBar'); if (bar) bar.style.display = 'none';
+  var btn = document.getElementById('locWalkBtn'); if (btn) btn.style.display = '';
 }
 
 function _loadLeaflet(callback) {
@@ -17362,10 +17449,15 @@ function openLocationMap() {
       });
 
       _locationMap.invalidateSize();
+      // Reset any prior walk-mode state each time the map opens
+      _walkMode = false; _walkPoints = [];
+      var _wb = document.getElementById('locWalkBar'); if (_wb) _wb.style.display = 'none';
+      var _wbn = document.getElementById('locWalkBtn'); if (_wbn) _wbn.style.display = '';
     }, 100);
   });
 }
 function closeLocationMap() {
+  if (_walkMode) locWalkExit();
   document.getElementById('locationMapModal').style.display = 'none';
 }
 function saveLocationShape() {
@@ -18279,12 +18371,24 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 <div id="locationMapModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#111;z-index:1000;">
   <div style="position:absolute;top:0;left:0;right:0;z-index:1001;background:#2a2a2a;padding:10px;display:flex;justify-content:space-between;align-items:center;">
     <button onclick="closeLocationMap()" class="secondary" style="margin:0;">✕ Cancel</button>
-    <span style="color:#aaa;font-size:13px;">Draw a boundary or drop a pin</span>
+    <span style="color:#aaa;font-size:13px;">Draw, drop a pin, or 🚶 walk it</span>
     <button onclick="saveLocationShape()" style="margin:0;">💾 Save Shape</button>
   </div>
   <div id="locationMapDiv" style="position:absolute;top:52px;left:0;right:0;bottom:0;"></div>
   <button id="satelliteToggleBtn" onclick="toggleSatelliteView()" style="display:none;position:absolute;top:62px;right:10px;z-index:1002;margin:0;padding:8px 12px;background:#2a2a2a;">🛰️ Satellite</button>
   <button id="gpsRecenterBtn" onclick="recenterOnGPS()" style="position:absolute;top:114px;right:10px;z-index:1002;margin:0;padding:8px 12px;background:#2a2a2a;">📍 GPS</button>
+  <button id="locWalkBtn" onclick="locWalkStart()" style="position:absolute;top:166px;right:10px;z-index:1002;margin:0;padding:8px 12px;background:#2a2a2a;">🚶 Walk</button>
+  <div id="locWalkBar" style="display:none;flex-direction:column;gap:8px;position:absolute;bottom:0;left:0;right:0;z-index:1002;background:#2a2a2a;padding:10px;box-shadow:0 -2px 8px rgba(0,0,0,0.4);">
+    <div id="locWalkStatus" style="color:#8bd;font-size:13px;text-align:center;">0 corners captured</div>
+    <div style="display:flex;gap:8px;">
+      <button id="locWalkAddBtn" onclick="locWalkAddCorner()" style="flex:2;margin:0;padding:14px;font-size:15px;">➕ Add Corner</button>
+      <button onclick="locWalkUndo()" class="secondary" style="flex:1;margin:0;padding:14px;">↶ Undo</button>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="locWalkFinish()" style="flex:1;margin:0;padding:12px;background:#2a6a3a;">✓ Finish</button>
+      <button onclick="locWalkExit()" class="secondary" style="flex:1;margin:0;padding:12px;">✕ Exit Walk</button>
+    </div>
+  </div>
 </div>
 
 <div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="closeEdit()">
