@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785198700;
+const APP_VERSION = 1785198881;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8248,24 +8248,33 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) el.textContent = "Fetching locations...";
     try {
       const [landRes, structRes, waterRes] = await Promise.all([
-        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner,land_type'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner,structure_type'), { headers: authHeaders }),
         fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent,owner'), { headers: authHeaders })
       ]);
       const newLocations = {};
       function absorbLocationRes(res, typeName) {
         if (!res.ok) return;
         return res.json().then(function(d) {
+          const stMap = {};
+          (d.included || []).forEach(function(inc) {
+            if (inc.type === 'taxonomy_term--land_type' || inc.type === 'taxonomy_term--structure_type') stMap[inc.id] = (inc.attributes && inc.attributes.name) || '';
+          });
           (d.data || []).forEach(function(l) {
             const geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
             const parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
             const parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
             const ownerRel = l.relationships && l.relationships.owner && l.relationships.owner.data;
             const ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
+            const stVocab = typeName === 'land' ? 'land_type' : (typeName === 'structure' ? 'structure_type' : null);
+            const stRel = stVocab && l.relationships && l.relationships[stVocab] && l.relationships[stVocab].data;
+            const stId = stRel ? (Array.isArray(stRel) ? (stRel[0] && stRel[0].id) : stRel.id) : null;
             const existingLoc = locations[l.id];
             newLocations[l.id] = {
               name: l.attributes.name || '(unnamed)',
               type: typeName,
+              subtype: stId ? (stMap[stId] || '') : '',
+              subtypeId: stId || '',
               notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
               wkt: geomVal || null,
               archived: !!l.attributes.archived,
@@ -9080,6 +9089,42 @@ async function ledger_pushToFarmOS() {
   }
 }
 
+// Shows/hides the location Subtype field (water has no core sub-type) and
+// fills its datalist with known land_type/structure_type terms for autocomplete.
+function location_refreshSubtype() {
+  var sel = document.getElementById('location_type');
+  var row = document.getElementById('location_subtype_row');
+  var dl  = document.getElementById('location_subtype_list');
+  if (!sel || !row) return;
+  var t = sel.value;
+  if (t === 'water') { row.style.display = 'none'; return; }
+  row.style.display = '';
+  var vocab = t === 'land' ? 'land_type' : 'structure_type';
+  var tax = JSON.parse(localStorage.getItem('farmdesk_location_taxonomy') || '{}');
+  var terms = tax[vocab] || [];
+  if (dl) dl.innerHTML = terms.map(function(x) { return '<option value="' + (x.name || '').replace(/"/g, '&quot;') + '">'; }).join('');
+}
+
+// Find-or-create a land_type/structure_type taxonomy term by name (universal —
+// no hardcoded UUIDs). Caches into farmdesk_location_taxonomy.
+async function getOrCreateLocationSubtype(vocab, name, token) {
+  if (!name) return null;
+  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var tax = JSON.parse(localStorage.getItem('farmdesk_location_taxonomy') || '{}');
+  if (!tax[vocab]) tax[vocab] = [];
+  var hit = tax[vocab].find(function(t) { return (t.name || '').toLowerCase() === name.toLowerCase(); });
+  if (hit && hit.uuid) return hit.uuid;
+  try {
+    var gr = await fetchWithTimeout(apiUrl('/api/taxonomy_term/' + vocab + '?filter[name]=' + encodeURIComponent(name) + '&page[limit]=1'), { headers: h });
+    if (gr.ok) { var gd = await gr.json(); if (gd.data && gd.data.length) { tax[vocab].push({ uuid: gd.data[0].id, name: name }); localStorage.setItem('farmdesk_location_taxonomy', JSON.stringify(tax)); return gd.data[0].id; } }
+  } catch(e) {}
+  try {
+    var cr = await fetchWithTimeout(apiUrl('/api/taxonomy_term/' + vocab), { method: 'POST', headers: h, body: JSON.stringify({ data: { type: 'taxonomy_term--' + vocab, attributes: { name: name } } }) });
+    if (cr.ok) { var cd = await cr.json(); tax[vocab].push({ uuid: cd.data.id, name: name }); localStorage.setItem('farmdesk_location_taxonomy', JSON.stringify(tax)); return cd.data.id; }
+  } catch(e) {}
+  return null;
+}
+
 // Processes queued Location save/delete actions — the network half of the
 // local-first Locations flow. Called BEFORE processPendingGoatActions so a
 // brand-new location can be resolved to a real UUID in the same sync batch
@@ -9118,6 +9163,18 @@ async function processPendingLocationActions(token, logFn) {
           // so the parent link catches up automatically on the next sync pass.
         } else {
           relationships.parent = { data: [] }; // explicitly clear any previous parent
+        }
+        // Sub-type taxonomy: land_type for land, structure_type for structure
+        // (water has no core sub-type). Find-or-create the term, universal.
+        if (bundle === 'land' || bundle === 'structure') {
+          var stVocab = bundle === 'land' ? 'land_type' : 'structure_type';
+          if (loc.subtype) {
+            var stId = loc.subtypeId || await getOrCreateLocationSubtype(stVocab, loc.subtype, token);
+            if (stId) { relationships[stVocab] = { data: { type: 'taxonomy_term--' + stVocab, id: stId } }; loc.subtypeId = stId; }
+          } else {
+            relationships[stVocab] = { data: null }; // cleared → remove any previous sub-type
+            loc.subtypeId = '';
+          }
         }
         var payloadData = { type: 'asset--' + bundle, attributes: attrs, relationships: relationships };
         var res;
@@ -9480,6 +9537,97 @@ async function pushMedInputLog(l, matUUID, animalUUID, token) {
   if (!lRes.ok) throw new Error('log--input: HTTP ' + lRes.status);
 }
 
+// Find-or-create a taxonomy_term--unit by name (universal — no hardcoded UUIDs).
+// Caches into farmdesk_stock_taxonomy.units so repeat lookups are free.
+async function getOrCreateUnitTerm(name, token) {
+  if (!name) return null;
+  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  var tax = JSON.parse(localStorage.getItem('farmdesk_stock_taxonomy') || '{}');
+  if (!tax.units) tax.units = [];
+  var hit = tax.units.find(function(u) { return (u.name || '').toLowerCase() === name.toLowerCase(); });
+  if (hit && hit.uuid) return hit.uuid;
+  // Look up on the server
+  try {
+    var gr = await fetchWithTimeout(apiUrl('/api/taxonomy_term/unit?filter[name]=' + encodeURIComponent(name) + '&page[limit]=1'), { headers: h });
+    if (gr.ok) {
+      var gd = await gr.json();
+      if (gd.data && gd.data.length) {
+        tax.units.push({ uuid: gd.data[0].id, name: name });
+        localStorage.setItem('farmdesk_stock_taxonomy', JSON.stringify(tax));
+        return gd.data[0].id;
+      }
+    }
+  } catch(e) {}
+  // Create it
+  try {
+    var cr = await fetchWithTimeout(apiUrl('/api/taxonomy_term/unit'), { method: 'POST', headers: h, body: JSON.stringify({ data: { type: 'taxonomy_term--unit', attributes: { name: name } } }) });
+    if (cr.ok) {
+      var cd = await cr.json();
+      tax.units.push({ uuid: cd.data.id, name: name });
+      localStorage.setItem('farmdesk_stock_taxonomy', JSON.stringify(tax));
+      return cd.data.id;
+    }
+  } catch(e) {}
+  return null;
+}
+
+// Create (or PATCH on edit) farmOS quantity--standard entities for a weight or
+// vitals log so the values are stored as real, chartable farmOS measurements —
+// not just notes text. Returns an array of quantity refs for the log's
+// `quantity` relationship. Quantity UUIDs are stored on l.data._qty so an edit
+// re-pushes the SAME quantities (PATCH) instead of creating duplicates.
+async function syncGoatQuantities(l, token) {
+  if (!l || !l.data) return [];
+  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  if (!l.data._qty) l.data._qty = {};
+  var specs = [];
+  if (l.type === 'weight') {
+    if (l.data.weight !== undefined && l.data.weight !== null && l.data.weight !== '')
+      specs.push({ key: 'weight', measure: 'weight', value: l.data.weight, label: 'Weight', unit: 'lbs' });
+  } else if (l.type === 'vitals') {
+    if (l.data.temp)    specs.push({ key: 'temp',    measure: 'temperature', value: l.data.temp,    label: 'Temp', unit: '\u00B0F' });
+    if (l.data.hr)      specs.push({ key: 'hr',      measure: 'rate',        value: l.data.hr,      label: 'Heart rate' });
+    if (l.data.resp)    specs.push({ key: 'resp',    measure: 'rate',        value: l.data.resp,    label: 'Respiration' });
+    if (l.data.rumen)   specs.push({ key: 'rumen',   measure: 'rate',        value: l.data.rumen,   label: 'Rumen' });
+    if (l.data.famacha) specs.push({ key: 'famacha', measure: 'rating',      value: l.data.famacha, label: 'FAMACHA' });
+  } else {
+    return [];
+  }
+  var refs = [];
+  for (var i = 0; i < specs.length; i++) {
+    var s = specs[i];
+    var v = parseFloat(s.value);
+    if (isNaN(v)) continue;
+    var frac = { numerator: String(Math.round(v * 100)), denominator: '100' };
+    var existing = l.data._qty[s.key];
+    // Edit case: PATCH the existing quantity's value in place
+    if (existing && existing.uuid) {
+      try {
+        var pr = await fetchWithTimeout(apiUrl('/api/quantity/standard/' + existing.uuid), {
+          method: 'PATCH', headers: h,
+          body: JSON.stringify({ data: { type: 'quantity--standard', id: existing.uuid, attributes: { value: frac, label: s.label } } })
+        });
+        if (pr.ok) { refs.push({ type: 'quantity--standard', id: existing.uuid }); continue; }
+      } catch(e) {}
+      // fall through to create if the PATCH failed (e.g. quantity deleted server-side)
+    }
+    // Create case
+    var unitId = s.unit ? await getOrCreateUnitTerm(s.unit, token) : null;
+    var body = { data: { type: 'quantity--standard', attributes: { measure: s.measure, value: frac, label: s.label } } };
+    if (unitId) body.data.relationships = { units: { data: { type: 'taxonomy_term--unit', id: unitId } } };
+    var qr = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: h, body: JSON.stringify(body) });
+    if (!qr.ok) throw new Error('quantity ' + s.key + ' HTTP ' + qr.status);
+    var qd = await qr.json();
+    var qUUID = qd.data.id;
+    var qRev = qd.data.attributes && qd.data.attributes.drupal_internal__revision_id;
+    l.data._qty[s.key] = { uuid: qUUID };
+    var ref = { type: 'quantity--standard', id: qUUID };
+    if (qRev) ref.meta = { target_revision_id: qRev };
+    refs.push(ref);
+  }
+  return refs;
+}
+
 async function syncToFarmOS() {
   const cfg = saveFarmOSCfg();
   const logEl = document.getElementById("syncLog");
@@ -9523,6 +9671,16 @@ async function syncToFarmOS() {
     for (const l of toPost) {
       const farmosType = FARMOS_TYPE_MAP[l.type] || "activity";
       const payload = buildFarmOSPayload(l);
+      // Weight/vitals → real farmOS quantities (chartable, exportable), attached to the log
+      if (l.type === "weight" || l.type === "vitals") {
+        try {
+          const qRefs = await syncGoatQuantities(l, token);
+          if (qRefs.length) {
+            if (!payload.data.relationships) payload.data.relationships = {};
+            payload.data.relationships.quantity = { data: qRefs };
+          }
+        } catch(qe) { logEl.textContent += `  ⚠️ Quantity create failed: ${qe.message}\n`; }
+      }
       const url = apiUrl("/api/log/" + farmosType);
       try {
         const res = await fetchWithTimeout(url, { method: "POST", headers, body: JSON.stringify(payload) });
@@ -9636,6 +9794,16 @@ async function syncToFarmOS() {
       const payload = buildFarmOSPayload(l);
       payload.data.type = "log--" + farmosType;
       payload.data.id = l.id; // JSON:API PATCH requires id in data object
+      // Weight/vitals → update the same quantities in place (create if missing)
+      if (l.type === "weight" || l.type === "vitals") {
+        try {
+          const qRefs = await syncGoatQuantities(l, token);
+          if (qRefs.length) {
+            if (!payload.data.relationships) payload.data.relationships = {};
+            payload.data.relationships.quantity = { data: qRefs };
+          }
+        } catch(qe) { logEl.textContent += `  ⚠️ Quantity update failed: ${qe.message}\n`; }
+      }
       const url = apiUrl("/api/log/" + farmosType + "/" + l.id);
       try {
         const res = await fetchWithTimeout(url, { method: "PATCH", headers, body: JSON.stringify(payload) });
@@ -13595,6 +13763,7 @@ async function bd_syncToFarmOS() {
         // Don't copy p.log back over l since p.log may have stale values.
         l.synced = true;
         if (p.log && p.log.farmosUUID) { l.farmosUUID = p.log.farmosUUID; l.farmosBundle = p.log.farmosBundle; }
+        if (p.log && p.log._qtyWeight) l._qtyWeight = p.log._qtyWeight;
         // Preserve any timestamp/notes edits the user made on this log
         if (p.log && p.log.timestamp && p.log.timestamp !== l.timestamp) {
           l.timestamp = p.log.timestamp;
@@ -13769,6 +13938,42 @@ async function bd_getOrCreateEggsProductUUID(token) {
   return getOrCreateProductUUID('Eggs', token, { cacheKey: BD_EGGS_PRODUCT_KEY });
 }
 
+// Create (or PATCH on edit) a weight quantity--standard for a bird weight log,
+// so weight is stored as real chartable farmOS data — not just notes text.
+// The quantity UUID is threaded onto the log (log._qtyWeight) the same way
+// farmosUUID is, so an edit PATCHes the same quantity instead of duplicating.
+async function bd_syncWeightQuantity(log, token) {
+  if (log.type !== 'weight') return [];
+  var v = parseFloat(log.weight);
+  if (isNaN(v)) return [];
+  var h = bd_postHeaders(token);
+  var frac = { numerator: String(Math.round(v * 100)), denominator: '100' };
+  // Edit case: update the existing quantity in place
+  if (log._qtyWeight && log._qtyWeight.uuid) {
+    try {
+      var pr = await fetchWithTimeout(apiUrl('/api/quantity/standard/' + log._qtyWeight.uuid), {
+        method: 'PATCH', headers: h,
+        body: JSON.stringify({ data: { type: 'quantity--standard', id: log._qtyWeight.uuid, attributes: { value: frac, label: 'Weight' } } })
+      });
+      if (pr.ok) return [{ type: 'quantity--standard', id: log._qtyWeight.uuid }];
+    } catch(e) {}
+    // fall through to create if the PATCH failed (e.g. quantity deleted server-side)
+  }
+  // Create case
+  var unitId = await getOrCreateUnitTerm(log.weightUnit || 'lbs', token);
+  var body = { data: { type: 'quantity--standard', attributes: { measure: 'weight', value: frac, label: 'Weight' } } };
+  if (unitId) body.data.relationships = { units: { data: { type: 'taxonomy_term--unit', id: unitId } } };
+  var qr = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: h, body: JSON.stringify(body) });
+  if (!qr.ok) throw new Error('weight quantity HTTP ' + qr.status);
+  var qd = await qr.json();
+  var qUUID = qd.data.id;
+  var qRev = qd.data.attributes && qd.data.attributes.drupal_internal__revision_id;
+  log._qtyWeight = { uuid: qUUID };
+  var ref = { type: 'quantity--standard', id: qUUID };
+  if (qRev) ref.meta = { target_revision_id: qRev };
+  return [ref];
+}
+
 async function bd_pushLog(log, token) {
   var ftype = bd_farmosLogType(log.type);
   var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === log.birdId; })[0];
@@ -13798,6 +14003,14 @@ async function bd_pushLog(log, token) {
         }
       }
     } catch(qe) { /* egg inventory tracking is a nice-to-have — log itself still saves below */ }
+  }
+
+  // Weight → real farmOS quantity (chartable, exportable), attached to the log.
+  if (log.type === 'weight') {
+    try {
+      var wRefs = await bd_syncWeightQuantity(log, token);
+      if (wRefs.length) payload.data.relationships.quantity = { data: wRefs };
+    } catch(we) { /* weight quantity is a nice-to-have — log itself still saves below */ }
   }
 
   var res = await fetchWithTimeout(apiUrl('/api/log/' + ftype), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
@@ -13834,6 +14047,13 @@ async function bd_patchLog(log, token) {
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
   var patchOwnerUUID = getOwnerUUID();
   if (patchOwnerUUID) payload.data.relationships.owner = { data: [{ type: 'user--user', id: patchOwnerUUID }] };
+  // Weight → update the same quantity in place (create if missing).
+  if (log.type === 'weight') {
+    try {
+      var wRefs = await bd_syncWeightQuantity(log, token);
+      if (wRefs.length) payload.data.relationships.quantity = { data: wRefs };
+    } catch(we) { /* weight quantity is a nice-to-have — log itself still saves */ }
+  }
   var res = await fetchWithTimeout(apiUrl('/api/log/' + ftype + '/' + log.farmosUUID), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Re-upload the photo if present — same gap as the POST path above, now closed on edit too.
@@ -14411,7 +14631,7 @@ async function bd_saveLog() {
   // of creating a duplicate — mirrors GoatDesk's _activeTaskId mechanism.
   var existingTask = bd_activeTaskId ? bd_history.filter(function(x) { return x.id === bd_activeTaskId; })[0] : null;
   var logData = { id: existingTask ? existingTask.id : (Date.now() + '_' + Math.random().toString(36).slice(2)), type: t, birdId: bd_currentBirdId, birdTag: bird ? (bird.tag||'') : '', birdName: bird ? (bird.name||'') : '', timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, status: 'done', synced: false };
-  if (existingTask) { logData.farmosUUID = existingTask.farmosUUID; logData.farmosBundle = existingTask.farmosBundle; }
+  if (existingTask) { logData.farmosUUID = existingTask.farmosUUID; logData.farmosBundle = existingTask.farmosBundle; if (existingTask._qtyWeight) logData._qtyWeight = existingTask._qtyWeight; }
   var dateStr = bd_localISO(new Date(timeVal)).slice(0,10);
   var birdLabel = bird ? (bird.tag || bird.name || 'Bird') : 'Bird';
   if (t === 'weight') {
@@ -16327,24 +16547,33 @@ async function locationsFetch() {
     var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
     var [landRes, structRes, waterRes] = await Promise.all([
-      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner'), { headers: headers }),
-      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner,land_type'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner,structure_type'), { headers: headers }),
       fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent,owner'), { headers: headers })
     ]);
     var newLocations = {};
     async function absorb(res, typeName) {
       if (!res.ok) return;
       var d = await res.json();
+      var stMap = {};
+      (d.included || []).forEach(function(inc) {
+        if (inc.type === 'taxonomy_term--land_type' || inc.type === 'taxonomy_term--structure_type') stMap[inc.id] = (inc.attributes && inc.attributes.name) || '';
+      });
       (d.data || []).forEach(function(l) {
         var geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
         var parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
         var parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
         var ownerRel = l.relationships && l.relationships.owner && l.relationships.owner.data;
         var ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
+        var stVocab = typeName === 'land' ? 'land_type' : (typeName === 'structure' ? 'structure_type' : null);
+        var stRel = stVocab && l.relationships && l.relationships[stVocab] && l.relationships[stVocab].data;
+        var stId = stRel ? (Array.isArray(stRel) ? (stRel[0] && stRel[0].id) : stRel.id) : null;
         var existingLoc = locations[l.id];
         newLocations[l.id] = {
           name: l.attributes.name || '(unnamed)',
           type: typeName,
+          subtype: stId ? (stMap[stId] || '') : '',
+          subtypeId: stId || '',
           notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
           wkt: geomVal || null,
           archived: !!l.attributes.archived,
@@ -16365,6 +16594,18 @@ async function locationsFetch() {
     });
     locations = newLocations;
     localStorage.setItem(LS.locations, JSON.stringify(locations));
+
+    // Cache land_type/structure_type term lists for the Subtype autocomplete
+    try {
+      var [ltRes, stRes] = await Promise.all([
+        fetchWithTimeout(apiUrl('/api/taxonomy_term/land_type?page[limit]=100'), { headers: headers }),
+        fetchWithTimeout(apiUrl('/api/taxonomy_term/structure_type?page[limit]=100'), { headers: headers })
+      ]);
+      var ltax = JSON.parse(localStorage.getItem('farmdesk_location_taxonomy') || '{}');
+      if (ltRes.ok) { var ltd = await ltRes.json(); ltax.land_type = (ltd.data || []).map(function(t) { return { uuid: t.id, name: t.attributes.name }; }); }
+      if (stRes.ok) { var std = await stRes.json(); ltax.structure_type = (std.data || []).map(function(t) { return { uuid: t.id, name: t.attributes.name }; }); }
+      localStorage.setItem('farmdesk_location_taxonomy', JSON.stringify(ltax));
+    } catch(e) { /* subtype autocomplete is best-effort */ }
 
     // ===== Pull location-referencing logs (Observation/Activity/Input/Maintenance) =====
     try {
@@ -16598,6 +16839,8 @@ function openLocationModal(key) {
   document.getElementById('location_key').value = key || '';
   document.getElementById('location_name').value = loc ? (loc.name||'') : '';
   document.getElementById('location_type').value = loc ? (loc.type||'land') : 'land';
+  document.getElementById('location_subtype').value = loc ? (loc.subtype||'') : '';
+  location_refreshSubtype();
   document.getElementById('location_notes').value = loc ? (loc.notes||'') : '';
   document.getElementById('location_wkt').value = loc ? (loc.wkt||'') : '';
   document.getElementById('locationShapeStatus').textContent = (loc && loc.wkt) ? '\ud83d\udccd Shape saved' : 'No shape drawn yet';
@@ -16662,7 +16905,7 @@ function openLocationDetail(key) {
   document.getElementById('locationDetailTitle').textContent = (typeIcon[loc.type] || '') + ' ' + (loc.name || '—');
   var syncTag = loc.synced === false ? '⏳ pending' : '✓ synced';
   var shapeTag = loc.wkt ? '📍 shape saved' : 'no shape drawn';
-  document.getElementById('locationDetailMeta').textContent = syncTag + ' · ' + shapeTag;
+  document.getElementById('locationDetailMeta').textContent = (loc.subtype ? loc.subtype + ' · ' : '') + syncTag + ' · ' + shapeTag;
 
   var hierarchyHTML = '';
   if (loc.parentKey && locations[loc.parentKey]) {
@@ -16822,9 +17065,17 @@ async function saveLocationLocal() {
   var fileAttach = existing ? existing.fileAttach : null;
   if (location_currentFileAttach) fileAttach = location_currentFileAttach;
 
+  var typeVal = document.getElementById('location_type').value;
+  var subtypeVal = document.getElementById('location_subtype') ? document.getElementById('location_subtype').value.trim() : '';
+  if (typeVal === 'water') subtypeVal = ''; // water has no core sub-type
+  // Keep the resolved term UUID only if the sub-type name didn't change
+  var subtypeIdVal = (existing && existing.subtype === subtypeVal) ? (existing.subtypeId || '') : '';
+
   var data = {
     name: name,
-    type: document.getElementById('location_type').value,
+    type: typeVal,
+    subtype: subtypeVal,
+    subtypeId: subtypeIdVal,
     notes: document.getElementById('location_notes').value.trim(),
     wkt: document.getElementById('location_wkt').value || null,
     parentKey: document.getElementById('location_parent').value || null,
@@ -17953,11 +18204,16 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Name *</label>
     <input id="location_name" type="text" placeholder="e.g. North Pasture, Main Barn" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Type</label>
-    <select id="location_type" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+    <select id="location_type" onchange="location_refreshSubtype()" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       <option value="land">🌾 Land</option>
       <option value="structure">🏡 Structure</option>
       <option value="water">💧 Water</option>
     </select>
+    <div id="location_subtype_row">
+      <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Subtype (optional)</label>
+      <input id="location_subtype" list="location_subtype_list" type="text" placeholder="e.g. Pasture, Garden, Barn, Coop" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+      <datalist id="location_subtype_list"></datalist>
+    </div>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Parent Location (optional)</label>
     <select id="location_parent" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       <option value="">— none (top-level) —</option>
