@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785198881;
+const APP_VERSION = 1785199171;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -12642,6 +12642,14 @@ function eq_saveMoveLog() {
 }
 
 // ===== EQUIPMENT: push pending actions to farmOS =====
+// Maps an equipment reading unit to the correct farmOS measure so hours and
+// miles are stored as real time/length measurements, not generic counts.
+function eq_readingMeasure(unit) {
+  if (unit === 'hours') return 'time';
+  if (unit === 'miles') return 'length';
+  return 'count';
+}
+
 async function eq_syncToFarmOS(logFn) {
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) return { ok: 0, fail: 0 };
@@ -12799,17 +12807,29 @@ async function eq_syncToFarmOS(logFn) {
         var mData;
         if (entry.logType === 'reading') {
           var qRelationship = {};
+          // Readings are real measurements: hours → time, miles → length, with
+          // proper units (find-or-create). The fraction handles decimals — a
+          // non-integer numerator like "1245.5" would be rejected by farmOS.
+          var rv = parseFloat(entry.readingValue);
+          var rFrac = isNaN(rv) ? { numerator: '0', denominator: '1' } : { numerator: String(Math.round(rv * 100)), denominator: '100' };
+          var rMeasure = eq_readingMeasure(entry.readingUnit);
+          var rLabel = entry.readingUnit ? (entry.readingUnit.charAt(0).toUpperCase() + entry.readingUnit.slice(1)) : 'Reading';
+          var rUnitId = await getOrCreateUnitTerm(entry.readingUnit, token);
+          var rQtyAttrs = { measure: rMeasure, value: rFrac, label: rLabel };
+          var rQtyRel = rUnitId ? { units: { data: { type: 'taxonomy_term--unit', id: rUnitId } } } : null;
           if (entry.quantityUUID) {
-            // Editing an existing reading — update its quantity value in place
+            // Editing an existing reading — update value/measure/units in place
+            var patchQ = { data: { type: 'quantity--standard', id: entry.quantityUUID, attributes: rQtyAttrs } };
+            if (rQtyRel) patchQ.data.relationships = rQtyRel;
             await fetchWithTimeout(apiUrl('/api/quantity/standard/' + entry.quantityUUID), {
-              method: 'PATCH', headers: headers,
-              body: JSON.stringify({ data: { type: 'quantity--standard', id: entry.quantityUUID, attributes: { value: { numerator: String(entry.readingValue), denominator: '1' } } } })
+              method: 'PATCH', headers: headers, body: JSON.stringify(patchQ)
             });
             qRelationship = { quantity: { data: [{ type: 'quantity--standard', id: entry.quantityUUID }] } };
           } else {
+            var newQ = { data: { type: 'quantity--standard', attributes: rQtyAttrs } };
+            if (rQtyRel) newQ.data.relationships = rQtyRel;
             var qRes = await fetchWithTimeout(apiUrl('/api/quantity/standard'), {
-              method: 'POST', headers: headers,
-              body: JSON.stringify({ data: { type: 'quantity--standard', attributes: { measure: 'count', value: { numerator: String(entry.readingValue), denominator: '1' } } } })
+              method: 'POST', headers: headers, body: JSON.stringify(newQ)
             });
             if (qRes.ok) {
               var qData = await qRes.json();
