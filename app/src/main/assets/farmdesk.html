@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785200658;
+const APP_VERSION = 1785201560;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8346,15 +8346,16 @@ async function fetchAnimalUUIDs(silent = false) {
 
     // include=image fetches the image file data alongside each log in one request
     const [actRes, obsRes, medRes, maintRes, birthRes] = await Promise.all([
-      fetchWithTimeout(apiUrl("/api/log/activity?page[limit]=30&sort=-timestamp&include=image"),    { headers: authHeaders }),
-      fetchWithTimeout(apiUrl("/api/log/observation?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
-      fetchWithTimeout(apiUrl("/api/log/medical?page[limit]=30&sort=-timestamp&include=image"),     { headers: authHeaders }),
-      fetchWithTimeout(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image"), { headers: authHeaders }),
-      fetchWithTimeout(apiUrl("/api/log/birth?page[limit]=30&sort=-timestamp&include=image"),       { headers: authHeaders })
+      fetchWithTimeout(apiUrl("/api/log/activity?page[limit]=30&sort=-timestamp&include=image,quantity"),    { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/observation?page[limit]=30&sort=-timestamp&include=image,quantity"), { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/medical?page[limit]=30&sort=-timestamp&include=image,quantity"),     { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/maintenance?page[limit]=30&sort=-timestamp&include=image,quantity"), { headers: authHeaders }),
+      fetchWithTimeout(apiUrl("/api/log/birth?page[limit]=30&sort=-timestamp&include=image,quantity"),       { headers: authHeaders })
     ]);
 
     const allLogs = [];
     const imageUrlMap = {}; // file UUID -> absolute URL, built from included array
+    const qtyMap = {};      // quantity UUID -> {measure,label,value}, from included array
     for (const res of [actRes, obsRes, medRes, maintRes, birthRes]) {
       if (res.ok) {
         const d = await res.json();
@@ -8364,6 +8365,14 @@ async function fetchAnimalUUIDs(silent = false) {
             // uri.url may be relative — make it absolute
             const url = inc.attributes.uri.url;
             imageUrlMap[inc.id] = url.startsWith("http") ? url : (cfg.url + url);
+          }
+          // Build quantity map so weight/vitals can be read back as structured fields
+          if (inc.type === "quantity--standard") {
+            const v = inc.attributes?.value;
+            let num = null;
+            if (v && v.numerator != null && v.denominator) num = parseFloat(v.numerator) / parseFloat(v.denominator);
+            else if (v != null && typeof v !== "object") num = parseFloat(v);
+            qtyMap[inc.id] = { measure: inc.attributes?.measure || "", label: inc.attributes?.label || "", value: num };
           }
         });
         (d.data || []).forEach(l => {
@@ -8473,7 +8482,9 @@ async function fetchAnimalUUIDs(silent = false) {
                     if (imageArr.length > 0 && imageUrlMap[imageArr[0].id]) parsed.photoUrl = imageUrlMap[imageArr[0].id];
                     return parsed;
                   }
-                  const parsed = parseFarmOSNotes(log.type, attrs.name, attrs.notes?.value || "", attrs.quantity || []);
+                  const qRel = log.relationships?.quantity?.data || [];
+                  const qArr = (Array.isArray(qRel) ? qRel : [qRel]).map(q => qtyMap[q.id]).filter(Boolean);
+                  const parsed = parseFarmOSNotes(log.type, attrs.name, attrs.notes?.value || "", qArr);
                   // Read veterinarian field from medical logs
                   if (log.type === 'log--medical' && attrs.veterinarian) {
                     parsed.vet = attrs.veterinarian;
@@ -8727,7 +8738,30 @@ function parseFarmOSNotes(farmosType, name, notes, quantities) {
       if (wq && wq.value) return { weight: parseFloat(wq.value) };
     }
     if (n.startsWith("Vitals:")) {
-      return { note: nt, sev: "Low" };
+      const qArr = Array.isArray(quantities) ? quantities : [];
+      const byLabel = (lab) => {
+        const q = qArr.find(x => (x.label || "").toLowerCase() === lab.toLowerCase());
+        return (q && q.value != null && !isNaN(q.value)) ? String(q.value) : "";
+      };
+      const vt = {
+        temp:    byLabel("Temp"),
+        hr:      byLabel("Heart rate"),
+        resp:    byLabel("Respiration"),
+        rumen:   byLabel("Rumen"),
+        famacha: byLabel("FAMACHA")
+      };
+      // Fallback: older vitals logs (recorded before structured quantities)
+      // stored the readings in notes text as "T:.. HR:.. R:.. Ru:.. FAMACHA:.."
+      if (!vt.temp && !vt.hr && !vt.resp && !vt.rumen && !vt.famacha) {
+        let mm;
+        if ((mm = nt.match(/T:\s*([\d.]+)/)))       vt.temp = mm[1];
+        if ((mm = nt.match(/HR:\s*([\d.]+)/)))       vt.hr = mm[1];
+        if ((mm = nt.match(/\bR:\s*([\d.]+)/)))      vt.resp = mm[1]; // \b avoids matching the R in HR:
+        if ((mm = nt.match(/Ru:\s*([\d.]+)/)))       vt.rumen = mm[1];
+        if ((mm = nt.match(/FAMACHA:\s*([\d.]+)/i)))  vt.famacha = mm[1];
+      }
+      vt.note = nt;
+      return vt;
     }
     // Parse severity from notes text — stored as "note text (Severity)"
     const sevMatch = nt.match(/\(([A-Z][a-z]+)\)\s*(?:Logged by:.*)?$/);
