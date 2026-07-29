@@ -1860,7 +1860,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785256377;
+const APP_VERSION = 1785292036;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8248,33 +8248,28 @@ async function fetchAnimalUUIDs(silent = false) {
     if (!silent && el) el.textContent = "Fetching locations...";
     try {
       const [landRes, structRes, waterRes] = await Promise.all([
-        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner,land_type'), { headers: authHeaders }),
-        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner,structure_type'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner'), { headers: authHeaders }),
+        fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner'), { headers: authHeaders }),
         fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent,owner'), { headers: authHeaders })
       ]);
       const newLocations = {};
       function absorbLocationRes(res, typeName) {
         if (!res.ok) return;
         return res.json().then(function(d) {
-          const stMap = {};
-          (d.included || []).forEach(function(inc) {
-            if (inc.type === 'taxonomy_term--land_type' || inc.type === 'taxonomy_term--structure_type') stMap[inc.id] = (inc.attributes && inc.attributes.name) || '';
-          });
           (d.data || []).forEach(function(l) {
             const geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
             const parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
             const parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
             const ownerRel = l.relationships && l.relationships.owner && l.relationships.owner.data;
             const ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
-            const stVocab = typeName === 'land' ? 'land_type' : (typeName === 'structure' ? 'structure_type' : null);
-            const stRel = stVocab && l.relationships && l.relationships[stVocab] && l.relationships[stVocab].data;
-            const stId = stRel ? (Array.isArray(stRel) ? (stRel[0] && stRel[0].id) : stRel.id) : null;
+            const stField = typeName === 'land' ? 'land_type' : (typeName === 'structure' ? 'structure_type' : null);
+            const stVal = (stField && l.attributes[stField]) ? l.attributes[stField] : '';
             const existingLoc = locations[l.id];
             newLocations[l.id] = {
               name: l.attributes.name || '(unnamed)',
               type: typeName,
-              subtype: stId ? (stMap[stId] || '') : '',
-              subtypeId: stId || '',
+              subtype: stVal,
+              subtypeId: '',
               notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
               wkt: geomVal || null,
               archived: !!l.attributes.archived,
@@ -9124,7 +9119,7 @@ async function ledger_pushToFarmOS() {
 }
 
 // Shows/hides the location Subtype field (water has no core sub-type) and
-// fills its datalist with known land_type/structure_type terms for autocomplete.
+// fills its datalist with common farmOS land_type/structure_type values.
 function location_refreshSubtype() {
   var sel = document.getElementById('location_type');
   var row = document.getElementById('location_subtype_row');
@@ -9133,30 +9128,13 @@ function location_refreshSubtype() {
   var t = sel.value;
   if (t === 'water') { row.style.display = 'none'; return; }
   row.style.display = '';
-  var vocab = t === 'land' ? 'land_type' : 'structure_type';
-  var tax = JSON.parse(localStorage.getItem('farmdesk_location_taxonomy') || '{}');
-  var terms = tax[vocab] || [];
-  if (dl) dl.innerHTML = terms.map(function(x) { return '<option value="' + (x.name || '').replace(/"/g, '&quot;') + '">'; }).join('');
-}
-
-// Find-or-create a land_type/structure_type taxonomy term by name (universal —
-// no hardcoded UUIDs). Caches into farmdesk_location_taxonomy.
-async function getOrCreateLocationSubtype(vocab, name, token) {
-  if (!name) return null;
-  var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
-  var tax = JSON.parse(localStorage.getItem('farmdesk_location_taxonomy') || '{}');
-  if (!tax[vocab]) tax[vocab] = [];
-  var hit = tax[vocab].find(function(t) { return (t.name || '').toLowerCase() === name.toLowerCase(); });
-  if (hit && hit.uuid) return hit.uuid;
-  try {
-    var gr = await fetchWithTimeout(apiUrl('/api/taxonomy_term/' + vocab + '?filter[name]=' + encodeURIComponent(name) + '&page[limit]=1'), { headers: h });
-    if (gr.ok) { var gd = await gr.json(); if (gd.data && gd.data.length) { tax[vocab].push({ uuid: gd.data[0].id, name: name }); localStorage.setItem('farmdesk_location_taxonomy', JSON.stringify(tax)); return gd.data[0].id; } }
-  } catch(e) {}
-  try {
-    var cr = await fetchWithTimeout(apiUrl('/api/taxonomy_term/' + vocab), { method: 'POST', headers: h, body: JSON.stringify({ data: { type: 'taxonomy_term--' + vocab, attributes: { name: name } } }) });
-    if (cr.ok) { var cd = await cr.json(); tax[vocab].push({ uuid: cd.data.id, name: name }); localStorage.setItem('farmdesk_location_taxonomy', JSON.stringify(tax)); return cd.data.id; }
-  } catch(e) {}
-  return null;
+  // farmOS stores these as string type values. Common defaults are offered as
+  // suggestions; the field accepts free text, and a value farmOS rejects is
+  // simply dropped on sync (the location still saves).
+  var defaults = (t === 'land')
+    ? ['field', 'paddock', 'bed', 'landmark', 'property', 'water', 'other']
+    : ['building', 'greenhouse'];
+  if (dl) dl.innerHTML = defaults.map(function(v) { return '<option value="' + v + '">'; }).join('');
 }
 
 // Processes queued Location save/delete actions — the network half of the
@@ -9198,31 +9176,25 @@ async function processPendingLocationActions(token, logFn) {
         } else {
           relationships.parent = { data: [] }; // explicitly clear any previous parent
         }
-        // Sub-type taxonomy: land_type for land, structure_type for structure
-        // (water has no core sub-type). Find-or-create the term, universal.
-        if (bundle === 'land' || bundle === 'structure') {
-          var stVocab = bundle === 'land' ? 'land_type' : 'structure_type';
-          if (loc.subtype) {
-            var stId = loc.subtypeId || await getOrCreateLocationSubtype(stVocab, loc.subtype, token);
-            if (stId) { relationships[stVocab] = { data: { type: 'taxonomy_term--' + stVocab, id: stId } }; loc.subtypeId = stId; }
-          } else {
-            relationships[stVocab] = { data: null }; // cleared → remove any previous sub-type
-            loc.subtypeId = '';
-          }
+        // Sub-type: land_type / structure_type are STRING attributes in farmOS
+        // (values like "field", "paddock", "building") — NOT taxonomy relationships.
+        if ((bundle === 'land' || bundle === 'structure') && loc.subtype) {
+          attrs[bundle === 'land' ? 'land_type' : 'structure_type'] = loc.subtype;
         }
         var payloadData = { type: 'asset--' + bundle, attributes: attrs, relationships: relationships };
-        var res;
-        if (loc.farmosUUID) {
-          payloadData.id = loc.farmosUUID;
-          res = await fetchWithTimeout(apiUrl('/api/asset/' + bundle + '/' + loc.farmosUUID), {
-            method: 'PATCH', headers: headers,
-            body: JSON.stringify({ data: payloadData })
-          });
-        } else {
-          res = await fetchWithTimeout(apiUrl('/api/asset/' + bundle), {
-            method: 'POST', headers: headers,
-            body: JSON.stringify({ data: payloadData })
-          });
+        async function sendLoc_() {
+          if (loc.farmosUUID) {
+            payloadData.id = loc.farmosUUID;
+            return await fetchWithTimeout(apiUrl('/api/asset/' + bundle + '/' + loc.farmosUUID), { method: 'PATCH', headers: headers, body: JSON.stringify({ data: payloadData }) });
+          }
+          return await fetchWithTimeout(apiUrl('/api/asset/' + bundle), { method: 'POST', headers: headers, body: JSON.stringify({ data: payloadData }) });
+        }
+        var res = await sendLoc_();
+        // A sub-type value farmOS doesn't recognize must never block the location
+        // itself from saving — drop it and retry once.
+        if (!res.ok && (bundle === 'land' || bundle === 'structure')) {
+          var stField_ = bundle === 'land' ? 'land_type' : 'structure_type';
+          if (attrs[stField_] != null) { delete attrs[stField_]; res = await sendLoc_(); }
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var resData = await res.json();
@@ -16634,33 +16606,28 @@ async function locationsFetch() {
     var token = await getCachedToken(cfg);
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
     var [landRes, structRes, waterRes] = await Promise.all([
-      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner,land_type'), { headers: headers }),
-      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner,structure_type'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/land?page[limit]=100&include=parent,owner'), { headers: headers }),
+      fetchWithTimeout(apiUrl('/api/asset/structure?page[limit]=100&include=parent,owner'), { headers: headers }),
       fetchWithTimeout(apiUrl('/api/asset/water?page[limit]=100&include=parent,owner'), { headers: headers })
     ]);
     var newLocations = {};
     async function absorb(res, typeName) {
       if (!res.ok) return;
       var d = await res.json();
-      var stMap = {};
-      (d.included || []).forEach(function(inc) {
-        if (inc.type === 'taxonomy_term--land_type' || inc.type === 'taxonomy_term--structure_type') stMap[inc.id] = (inc.attributes && inc.attributes.name) || '';
-      });
       (d.data || []).forEach(function(l) {
         var geomVal = l.attributes.intrinsic_geometry && l.attributes.intrinsic_geometry.value;
         var parentRel = l.relationships && l.relationships.parent && l.relationships.parent.data;
         var parentArr = Array.isArray(parentRel) ? parentRel : (parentRel ? [parentRel] : []);
         var ownerRel = l.relationships && l.relationships.owner && l.relationships.owner.data;
         var ownerArr = Array.isArray(ownerRel) ? ownerRel : (ownerRel ? [ownerRel] : []);
-        var stVocab = typeName === 'land' ? 'land_type' : (typeName === 'structure' ? 'structure_type' : null);
-        var stRel = stVocab && l.relationships && l.relationships[stVocab] && l.relationships[stVocab].data;
-        var stId = stRel ? (Array.isArray(stRel) ? (stRel[0] && stRel[0].id) : stRel.id) : null;
+        var stField = typeName === 'land' ? 'land_type' : (typeName === 'structure' ? 'structure_type' : null);
+        var stVal = (stField && l.attributes[stField]) ? l.attributes[stField] : '';
         var existingLoc = locations[l.id];
         newLocations[l.id] = {
           name: l.attributes.name || '(unnamed)',
           type: typeName,
-          subtype: stId ? (stMap[stId] || '') : '',
-          subtypeId: stId || '',
+          subtype: stVal,
+          subtypeId: '',
           notes: ((l.attributes.notes && (l.attributes.notes.value || l.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
           wkt: geomVal || null,
           archived: !!l.attributes.archived,
@@ -16676,23 +16643,21 @@ async function locationsFetch() {
       });
     }
     await Promise.all([absorb(landRes, 'land'), absorb(structRes, 'structure'), absorb(waterRes, 'water')]);
+    // Preserve local unsynced (pending) locations
     Object.keys(locations).forEach(function(k) {
       if (locations[k] && locations[k].synced === false) newLocations[k] = locations[k];
     });
+    // Defensive: if a bundle's fetch failed, DON'T drop already-synced locations of
+    // that type — keep the local copy so a transient error can't wipe the list.
+    [['land', landRes], ['structure', structRes], ['water', waterRes]].forEach(function(pair) {
+      if (!pair[1] || !pair[1].ok) {
+        Object.keys(locations).forEach(function(k) {
+          if (locations[k] && locations[k].type === pair[0] && !newLocations[k]) newLocations[k] = locations[k];
+        });
+      }
+    });
     locations = newLocations;
     localStorage.setItem(LS.locations, JSON.stringify(locations));
-
-    // Cache land_type/structure_type term lists for the Subtype autocomplete
-    try {
-      var [ltRes, stRes] = await Promise.all([
-        fetchWithTimeout(apiUrl('/api/taxonomy_term/land_type?page[limit]=100'), { headers: headers }),
-        fetchWithTimeout(apiUrl('/api/taxonomy_term/structure_type?page[limit]=100'), { headers: headers })
-      ]);
-      var ltax = JSON.parse(localStorage.getItem('farmdesk_location_taxonomy') || '{}');
-      if (ltRes.ok) { var ltd = await ltRes.json(); ltax.land_type = (ltd.data || []).map(function(t) { return { uuid: t.id, name: t.attributes.name }; }); }
-      if (stRes.ok) { var std = await stRes.json(); ltax.structure_type = (std.data || []).map(function(t) { return { uuid: t.id, name: t.attributes.name }; }); }
-      localStorage.setItem('farmdesk_location_taxonomy', JSON.stringify(ltax));
-    } catch(e) { /* subtype autocomplete is best-effort */ }
 
     // ===== Pull location-referencing logs (Observation/Activity/Input/Maintenance) =====
     try {
