@@ -1890,7 +1890,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785297193;
+const APP_VERSION = 1785346637;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -15683,6 +15683,34 @@ const BE_LS = { colonies: 'farmdesk_bee_colonies', pending: 'farmdesk_bee_pendin
 let be_colonies = JSON.parse(localStorage.getItem(BE_LS.colonies) || '[]');
 let be_pending  = JSON.parse(localStorage.getItem(BE_LS.pending) || '[]');
 let be_editId = null;
+// The farm_bee asset bundle machine name differs by instance (hive / colony / …).
+// Discovered from the JSON:API index on first sync and cached, so we never guess.
+var be_bundle = localStorage.getItem('farmdesk_bee_bundle') || 'hive';
+
+async function be_resolveBundle(token) {
+  var cached = localStorage.getItem('farmdesk_bee_bundle');
+  if (cached) { be_bundle = cached; return cached; }
+  var h = be_postHeaders(token);
+  // 1) Ask the JSON:API index which asset resource is the bee/hive/colony one
+  try {
+    var r = await fetchWithTimeout(apiUrl('/api/'), { headers: h });
+    if (r.ok) {
+      var d = await r.json();
+      var links = (d && d.links) || {};
+      var hit = Object.keys(links).find(function(k) { return /^asset--/.test(k) && /(hive|colony|bee)/i.test(k); });
+      if (hit) { be_bundle = hit.replace('asset--', ''); localStorage.setItem('farmdesk_bee_bundle', be_bundle); return be_bundle; }
+    }
+  } catch(e) {}
+  // 2) Fallback: probe the likely names
+  var candidates = ['hive', 'colony', 'bee', 'bee_colony', 'beehive'];
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      var rr = await fetchWithTimeout(apiUrl('/api/asset/' + candidates[i] + '?page[limit]=1'), { headers: h });
+      if (rr.ok) { be_bundle = candidates[i]; localStorage.setItem('farmdesk_bee_bundle', be_bundle); return be_bundle; }
+    } catch(e) {}
+  }
+  return null;
+}
 
 function be_postHeaders(token) {
   return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
@@ -15694,6 +15722,7 @@ function be_show(id) {
   document.querySelectorAll('.be-bottom-nav button').forEach(function(b) { b.classList.remove('active'); });
   var nav = document.getElementById('be-nav-' + id); if (nav) nav.classList.add('active');
   if (id === 'colonies') be_renderColonies();
+  if (id === 'history') be_renderHistory();
   if (id === 'sync') be_updateSyncBadge();
 }
 
@@ -15723,10 +15752,13 @@ function be_renderColonies() {
   list.innerHTML = active.map(function(c) {
     var locName = c.locationKey && locations[c.locationKey] ? locations[c.locationKey].name : '';
     var id = c.uuid || c._localId;
-    return '<div class="box" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;" onclick="be_editColony(\'' + id + '\')">' +
-      '<div style="flex:1;min-width:0;"><div style="font-weight:600;">🐝 ' + (c.name || '(unnamed)') + '</div>' +
-      (locName ? '<div style="font-size:13px;color:#888;">📍 ' + locName + '</div>' : '') +
-      (c.notes ? '<div style="font-size:12px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.notes + '</div>' : '') + '</div>' +
+    return '<div class="box" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+      '<div style="flex:1;min-width:0;cursor:pointer;" onclick="be_editColony(\'' + id + '\')">' +
+        '<div style="font-weight:600;">🐝 ' + (c.name || '(unnamed)') + '</div>' +
+        (locName ? '<div style="font-size:13px;color:#888;">📍 ' + locName + '</div>' : '') +
+        (c.notes ? '<div style="font-size:12px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.notes + '</div>' : '') +
+      '</div>' +
+      '<button onclick="be_openEventModal(\'' + id + '\')" style="margin:0;padding:9px 11px;font-size:13px;flex:0 0 auto;">📋 Log</button>' +
       '<div style="font-size:12px;color:' + (c.synced ? '#3a7' : '#c90') + ';">' + (c.synced ? '✓' : '⏳') + '</div>' +
     '</div>';
   }).join('');
@@ -15814,10 +15846,10 @@ async function be_pushCreateColony(colony, token) {
   var flags = [];
   if (colony.flags) { if (colony.flags.monitor) flags.push('monitor'); if (colony.flags.priority) flags.push('priority'); if (colony.flags.needsReview) flags.push('needs_review'); }
   if (flags.length) attrs.flag = flags;
-  var payload = { data: { type: 'asset--hive', attributes: attrs } };
+  var payload = { data: { type: ('asset--' + be_bundle), attributes: attrs } };
   var ownerUUID = getOwnerUUID();
   if (ownerUUID) payload.data.relationships = { owner: { data: [{ type: 'user--user', id: ownerUUID }] } };
-  var res = await fetchWithTimeout(apiUrl('/api/asset/hive'), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify(payload) });
+  var res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 200)); }
   var data = await res.json();
   var lc = be_colonies.filter(function(c) { return c._localId === colony._localId; })[0];
@@ -15834,8 +15866,8 @@ async function be_pushUpdateColony(colony, token) {
   var flags = [];
   if (colony.flags) { if (colony.flags.monitor) flags.push('monitor'); if (colony.flags.priority) flags.push('priority'); if (colony.flags.needsReview) flags.push('needs_review'); }
   attrs.flag = flags;
-  var payload = { data: { type: 'asset--hive', id: colony.uuid, attributes: attrs } };
-  var res = await fetchWithTimeout(apiUrl('/api/asset/hive/' + colony.uuid), { method: 'PATCH', headers: be_postHeaders(token), body: JSON.stringify(payload) });
+  var payload = { data: { type: ('asset--' + be_bundle), id: colony.uuid, attributes: attrs } };
+  var res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '/' + colony.uuid), { method: 'PATCH', headers: be_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var lc = be_colonies.filter(function(c) { return c.uuid === colony.uuid; })[0];
   if (lc) { lc.synced = true; localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies)); }
@@ -15849,16 +15881,16 @@ async function be_pushMoveColony(colonyUUID, locationKey, token) {
     body: JSON.stringify({ data: {
       type: 'log--activity',
       attributes: { name: 'Move: colony → ' + (loc.name || ''), timestamp: String(Math.floor(Date.now() / 1000)), status: 'done', is_movement: true },
-      relationships: { asset: { data: [{ type: 'asset--hive', id: colonyUUID }] }, location: { data: [{ type: locBundle, id: locationKey }] } }
+      relationships: { asset: { data: [{ type: ('asset--' + be_bundle), id: colonyUUID }] }, location: { data: [{ type: locBundle, id: locationKey }] } }
     }})
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
 }
 
 async function be_pushArchiveColony(colonyUUID, token) {
-  var res = await fetchWithTimeout(apiUrl('/api/asset/hive/' + colonyUUID), {
+  var res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '/' + colonyUUID), {
     method: 'PATCH', headers: be_postHeaders(token),
-    body: JSON.stringify({ data: { type: 'asset--hive', id: colonyUUID, attributes: { archived: true } } })
+    body: JSON.stringify({ data: { type: ('asset--' + be_bundle), id: colonyUUID, attributes: { archived: true } } })
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
 }
@@ -15869,7 +15901,14 @@ async function be_syncToFarmOS() {
   var logEl = document.getElementById('be-sync-log'); if (logEl) logEl.textContent = 'Connecting...\n';
   var token;
   try { token = await getCachedToken(cfg); } catch(e) { showToast('Connection failed'); if (logEl) logEl.textContent += 'Auth failed: ' + e.message + '\n'; return; }
+  var resolved = await be_resolveBundle(token);
+  if (!resolved) { showToast('Could not find the Bee colony asset type in farmOS — is the Bee module enabled?'); if (logEl) logEl.textContent += '❌ No bee asset bundle found on this instance.\n'; return; }
+  if (logEl) logEl.textContent += 'Using asset type: ' + be_bundle + '\n';
   var todo = be_pending.filter(function(p) { return !p.synced; });
+  // Colony create/update/move/archive must run before events, so a new colony
+  // has a real UUID before its events try to reference it.
+  var order = { create_colony: 0, update_colony: 1, move_colony: 2, archive_colony: 3, create_event: 4 };
+  todo.sort(function(a, b) { return (order[a.action] || 9) - (order[b.action] || 9); });
   var ok = 0, fail = 0;
   for (var i = 0; i < todo.length; i++) {
     var a = todo[i];
@@ -15878,6 +15917,7 @@ async function be_syncToFarmOS() {
       else if (a.action === 'update_colony') await be_pushUpdateColony(a.colony, token);
       else if (a.action === 'move_colony')   await be_pushMoveColony(a.colonyUUID, a.locationKey, token);
       else if (a.action === 'archive_colony') await be_pushArchiveColony(a.colonyUUID, token);
+      else if (a.action === 'create_event')  await be_pushEvent(a.log, token);
       a.synced = true; ok++;
       if (logEl) logEl.textContent += '✅ ' + a.action + '\n';
     } catch(e) { fail++; if (logEl) logEl.textContent += '❌ ' + a.action + ': ' + e.message + '\n'; }
@@ -15886,7 +15926,7 @@ async function be_syncToFarmOS() {
   localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
   localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
   localStorage.setItem(BE_LS.lastSync, String(Date.now()));
-  be_updateSyncBadge(); be_renderColonies();
+  be_updateSyncBadge(); be_renderColonies(); be_renderHistory();
   showToast('Bees sync: ' + ok + ' ok' + (fail ? ', ' + fail + ' failed' : ''));
 }
 
@@ -15895,11 +15935,13 @@ async function be_fetchColonies() {
   if (!cfg.url) { showToast('Set up farmOS connection in Settings first'); return; }
   var token;
   try { token = await getCachedToken(cfg); } catch(e) { showToast('Connection failed'); return; }
+  var resolvedF = await be_resolveBundle(token);
+  if (!resolvedF) { showToast('No Bee colony asset type found — is the Bee module enabled in farmOS?'); return; }
   var res;
-  try { res = await fetchWithTimeout(apiUrl('/api/asset/hive?page[limit]=100&include=location'), { headers: be_postHeaders(token) }); }
+  try { res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '?page[limit]=100&include=location'), { headers: be_postHeaders(token) }); }
   catch(e) { showToast('Fetch failed'); return; }
   if (!res.ok) {
-    if (res.status === 404) showToast('No "hive" asset type — is the Bee module enabled in farmOS?');
+    if (res.status === 404) showToast("No '" + be_bundle + "' asset type found — is the Bee module enabled?");
     else showToast('Fetch failed: HTTP ' + res.status);
     return;
   }
@@ -15921,6 +15963,186 @@ async function be_fetchColonies() {
   localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
   be_renderColonies();
   showToast('✅ Colonies fetched (' + fetched.length + ')');
+}
+
+// ===== BEEDESK STAGE 2: colony events — inspection, weight, feeding, treatment, harvest =====
+BE_LS.logs = 'farmdesk_bee_logs';
+let be_logs = JSON.parse(localStorage.getItem(BE_LS.logs) || '[]');
+let be_eventColonyKey = null;
+
+const BE_EVENT_TYPES = [
+  { v: 'inspection', label: '🔍 Inspection' },
+  { v: 'weight',     label: '⚖️ Weight' },
+  { v: 'feeding',    label: '🍯 Feeding' },
+  { v: 'treatment',  label: '💊 Treatment' },
+  { v: 'harvest',    label: '🍯 Honey Harvest' }
+];
+
+function be_openEventModal(colonyKey) {
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === colonyKey; })[0];
+  if (!c) return;
+  be_eventColonyKey = colonyKey;
+  be_closeColonyModal();
+  document.getElementById('be-event-colony').textContent = c.name || '';
+  document.getElementById('be-event-type').innerHTML = BE_EVENT_TYPES.map(function(t) { return '<option value="' + t.v + '">' + t.label + '</option>'; }).join('');
+  var now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('be-event-time').value = now.toISOString().slice(0, 16);
+  document.getElementById('be-event-notes').value = '';
+  be_renderEventFields();
+  document.getElementById('be-event-modal').style.display = 'block';
+}
+
+function be_closeEventModal() { document.getElementById('be-event-modal').style.display = 'none'; }
+
+function be_renderEventFields() {
+  var t = document.getElementById('be-event-type').value;
+  var box = document.getElementById('be-event-fields');
+  var h = '';
+  if (t === 'inspection') {
+    h = '<label>Queen seen</label><select id="be-ev-queen"><option value="">—</option><option>Yes</option><option>No</option><option>Eggs seen</option></select>' +
+        '<label>Temperament</label><select id="be-ev-temper"><option value="">—</option><option>Calm</option><option>Normal</option><option>Defensive</option></select>' +
+        '<label>Brood pattern</label><input id="be-ev-brood" placeholder="e.g. solid, spotty">' +
+        '<label>Population (frames of bees)</label><input id="be-ev-pop" type="number" inputmode="decimal" placeholder="e.g. 8">';
+  } else if (t === 'weight') {
+    h = '<label>Weight (lbs)</label><input id="be-ev-weight" type="number" inputmode="decimal" placeholder="e.g. 85">';
+  } else if (t === 'feeding') {
+    h = '<label>Feed type</label><select id="be-ev-feedtype"><option>1:1 syrup</option><option>2:1 syrup</option><option>Pollen patty</option><option>Fondant</option><option>Other</option></select>' +
+        '<label>Amount</label><div style="display:flex;gap:6px;"><input id="be-ev-feedamt" type="number" inputmode="decimal" placeholder="e.g. 2" style="flex:2;"><select id="be-ev-feedunit" style="flex:1;"><option>lbs</option><option>qt</option><option>gal</option></select></div>';
+  } else if (t === 'treatment') {
+    h = '<label>Product</label><input id="be-ev-product" placeholder="e.g. Apivar, Oxalic acid, Formic Pro">' +
+        '<label>Dose</label><input id="be-ev-dose" placeholder="e.g. 2 strips">' +
+        '<label>Lot number</label><input id="be-ev-lot" placeholder="Optional">';
+  } else if (t === 'harvest') {
+    h = '<label>Honey harvested (lbs)</label><input id="be-ev-honey" type="number" inputmode="decimal" placeholder="e.g. 40">';
+  }
+  box.innerHTML = h;
+}
+
+function be_saveEvent() {
+  var colonyKey = be_eventColonyKey;
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === colonyKey; })[0];
+  if (!c) { showToast('Colony not found'); return; }
+  var t = document.getElementById('be-event-type').value;
+  var timeVal = document.getElementById('be-event-time').value;
+  if (!timeVal) { showToast('Set a date/time'); return; }
+  var notes = document.getElementById('be-event-notes').value.trim();
+  var data = {};
+  if (t === 'inspection') {
+    data.queen = document.getElementById('be-ev-queen').value;
+    data.temper = document.getElementById('be-ev-temper').value;
+    data.brood = document.getElementById('be-ev-brood').value.trim();
+    data.pop = document.getElementById('be-ev-pop').value;
+  } else if (t === 'weight') {
+    data.weight = document.getElementById('be-ev-weight').value;
+    if (!data.weight) { showToast('Enter a weight'); return; }
+  } else if (t === 'feeding') {
+    data.feedType = document.getElementById('be-ev-feedtype').value;
+    data.amt = document.getElementById('be-ev-feedamt').value;
+    data.unit = document.getElementById('be-ev-feedunit').value;
+  } else if (t === 'treatment') {
+    data.product = document.getElementById('be-ev-product').value.trim();
+    data.dose = document.getElementById('be-ev-dose').value.trim();
+    data.lot = document.getElementById('be-ev-lot').value.trim();
+    if (!data.product) { showToast('Enter a product'); return; }
+  } else if (t === 'harvest') {
+    data.honey = document.getElementById('be-ev-honey').value;
+    if (!data.honey) { showToast('Enter honey amount'); return; }
+  }
+  var log = {
+    id: 'belog_' + Date.now(), colonyKey: colonyKey, colonyName: c.name || '',
+    type: t, ts: new Date(timeVal).toISOString(), data: data, notes: notes,
+    synced: false, farmosUUID: null
+  };
+  be_logs.unshift(log);
+  be_pending.push({ action: 'create_event', log: log, id: log.id, synced: false });
+  localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
+  localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  be_closeEventModal(); be_updateSyncBadge(); be_renderHistory();
+  showToast('Event logged');
+}
+
+function be_eventSummary(log) {
+  var d = log.data || {};
+  if (log.type === 'inspection') { var p = []; if (d.queen) p.push('Queen: ' + d.queen); if (d.temper) p.push(d.temper); if (d.brood) p.push('Brood: ' + d.brood); if (d.pop) p.push(d.pop + ' frames'); return p.join(' · ') || 'Inspection'; }
+  if (log.type === 'weight')    return (d.weight || '?') + ' lbs';
+  if (log.type === 'feeding')   return (d.feedType || 'Feed') + ' — ' + (d.amt || '?') + ' ' + (d.unit || '');
+  if (log.type === 'treatment') return (d.product || 'Treatment') + (d.dose ? ' (' + d.dose + ')' : '') + (d.lot ? ' · lot ' + d.lot : '');
+  if (log.type === 'harvest')   return (d.honey || '?') + ' lbs honey';
+  return log.type;
+}
+
+function be_renderHistory() {
+  var list = document.getElementById('be-history-list'); if (!list) return;
+  if (!be_logs.length) { list.innerHTML = '<div class="box" style="text-align:center;color:#888;">No events yet. Open a colony and tap Log Event.</div>'; return; }
+  var icon = { inspection: '🔍', weight: '⚖️', feeding: '🍯', treatment: '💊', harvest: '🍯' };
+  list.innerHTML = be_logs.slice(0, 200).map(function(l) {
+    return '<div class="box" style="display:flex;justify-content:space-between;gap:8px;">' +
+      '<div style="flex:1;min-width:0;"><div style="font-weight:600;">' + (icon[l.type] || '') + ' ' + (l.colonyName || '') + '</div>' +
+      '<div style="font-size:13px;color:#aaa;">' + be_eventSummary(l) + '</div>' +
+      (l.notes ? '<div style="font-size:12px;color:#777;">' + l.notes + '</div>' : '') +
+      '<div style="font-size:11px;color:#666;">' + new Date(l.ts).toLocaleString() + '</div></div>' +
+      '<div style="font-size:12px;color:' + (l.synced ? '#3a7' : '#c90') + ';">' + (l.synced ? '✓' : '⏳') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// POST a quantity--standard and return its relationship ref (or null on failure).
+async function be_makeQuantity(measure, value, unitName, label, token) {
+  var v = parseFloat(value); if (isNaN(v)) return null;
+  var frac = { numerator: String(Math.round(v * 100)), denominator: '100' };
+  var body = { data: { type: 'quantity--standard', attributes: { measure: measure, value: frac, label: label } } };
+  if (unitName) { var uid = await getOrCreateUnitTerm(unitName, token); if (uid) body.data.relationships = { units: { data: { type: 'taxonomy_term--unit', id: uid } } }; }
+  var r = await fetchWithTimeout(apiUrl('/api/quantity/standard'), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify(body) });
+  if (!r.ok) return null;
+  var qd = await r.json();
+  var ref = { type: 'quantity--standard', id: qd.data.id };
+  var rev = qd.data.attributes && qd.data.attributes.drupal_internal__revision_id; if (rev) ref.meta = { target_revision_id: rev };
+  return ref;
+}
+
+async function be_pushEvent(log, token) {
+  // Resolve the colony's current UUID — it may have synced earlier in this batch
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === log.colonyKey; })[0];
+  var colonyUUID = c ? c.uuid : null;
+  if (!colonyUUID) throw new Error('colony not synced yet');
+  var d = log.data || {};
+  var attrs = { timestamp: String(Math.floor(new Date(log.ts).getTime() / 1000)), status: 'done' };
+  var qtyRefs = [], notesParts = [], bundle, name;
+  if (log.type === 'inspection') {
+    bundle = 'observation'; name = 'Inspection: ' + log.colonyName;
+    if (d.queen) notesParts.push('Queen: ' + d.queen);
+    if (d.temper) notesParts.push('Temperament: ' + d.temper);
+    if (d.brood) notesParts.push('Brood: ' + d.brood);
+    if (d.pop) notesParts.push('Population: ' + d.pop + ' frames');
+  } else if (log.type === 'weight') {
+    bundle = 'observation'; name = 'Weight: ' + log.colonyName;
+    notesParts.push((d.weight || '?') + ' lbs');
+    var wq = await be_makeQuantity('weight', d.weight, 'lbs', 'Weight', token); if (wq) qtyRefs.push(wq);
+  } else if (log.type === 'feeding') {
+    bundle = 'input'; name = 'Feeding: ' + log.colonyName;
+    notesParts.push((d.feedType || 'Feed') + ' — ' + (d.amt || '?') + ' ' + (d.unit || ''));
+    var fmeasure = (d.unit === 'qt' || d.unit === 'gal') ? 'volume' : 'weight';
+    var fq = await be_makeQuantity(fmeasure, d.amt, d.unit, 'Feed', token); if (fq) qtyRefs.push(fq);
+  } else if (log.type === 'treatment') {
+    bundle = 'input'; name = 'Treatment: ' + log.colonyName;
+    if (d.lot) attrs.lot_number = d.lot;
+    notesParts.push((d.product || 'Treatment') + (d.dose ? ' (' + d.dose + ')' : ''));
+  } else if (log.type === 'harvest') {
+    bundle = 'harvest'; name = 'Honey harvest: ' + log.colonyName;
+    notesParts.push((d.honey || '?') + ' lbs honey');
+    var hq = await be_makeQuantity('weight', d.honey, 'lbs', 'Honey', token); if (hq) qtyRefs.push(hq);
+  } else { bundle = 'observation'; name = log.type; }
+  if (log.notes) notesParts.push(log.notes);
+  attrs.name = name;
+  if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
+  var rel = { asset: { data: [{ type: ('asset--' + be_bundle), id: colonyUUID }] } };
+  var ownerUUID = getOwnerUUID(); if (ownerUUID) rel.owner = { data: [{ type: 'user--user', id: ownerUUID }] };
+  if (qtyRefs.length) rel.quantity = { data: qtyRefs };
+  var res = await fetchWithTimeout(apiUrl('/api/log/' + bundle), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify({ data: { type: 'log--' + bundle, attributes: attrs, relationships: rel } }) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 150)); }
+  var rd = await res.json();
+  var ll = be_logs.filter(function(x) { return x.id === log.id; })[0];
+  if (ll) { ll.synced = true; ll.farmosUUID = rd.data.id; localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs)); }
 }
 
 const MODULES = [
@@ -18430,7 +18652,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
   </div>
   <!-- HISTORY SCREEN (events land here in Stage 2) -->
   <div id="be-screen-history" class="screen">
-    <div class="box"><h3 style="margin:0 0 6px;">History</h3><p style="color:#888;font-size:14px;margin:0;">Colony events — inspections, feeding, treatments, honey harvests, weights — arrive in the next update.</p></div>
+    <div class="box"><h3 style="margin:0;">Colony Events</h3><p style="color:#888;font-size:13px;margin:6px 0 0;">Inspections, weights, feedings, treatments, and honey harvests.</p></div>
+    <div id="be-history-list"></div>
   </div>
   <!-- SYNC SCREEN -->
   <div id="be-screen-sync" class="screen">
@@ -18473,11 +18696,30 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-review" style="width:auto;margin:0;"> Needs review</label>
     </div>
     <div id="be-colony-archive-row" style="display:none;margin-bottom:8px;">
+      <button onclick="be_openEventModal(be_editId)" class="wide" style="margin-bottom:8px;">📋 Log Event</button>
       <button onclick="be_archiveColony()" class="secondary wide" style="background:#5a2a2a;">Archive (deadout / combined)</button>
     </div>
     <div style="display:flex;gap:8px;margin-top:6px;">
       <button onclick="be_saveColony()" style="flex:1;">Save</button>
       <button class="secondary" onclick="be_closeColonyModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BEE EVENT MODAL (add colony event) — body level ===== -->
+<div id="be-event-modal" class="bd-modal" onclick="if(event.target===this)be_closeEventModal()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:88vh;overflow-y:auto;">
+    <h3 style="margin:0 0 12px;">Log Event — <span id="be-event-colony" style="color:#eee;"></span></h3>
+    <label>Event type</label>
+    <select id="be-event-type" onchange="be_renderEventFields()"></select>
+    <div id="be-event-fields" style="margin-top:4px;"></div>
+    <label>Date / Time</label>
+    <input type="datetime-local" id="be-event-time">
+    <label>Notes</label>
+    <textarea id="be-event-notes" placeholder="Optional notes" style="width:100%;box-sizing:border-box;min-height:60px;"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button onclick="be_saveEvent()" style="flex:1;">Save Event</button>
+      <button class="secondary" onclick="be_closeEventModal()" style="flex:0 0 auto;">Cancel</button>
     </div>
   </div>
 </div>
