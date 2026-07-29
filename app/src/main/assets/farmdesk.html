@@ -574,6 +574,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
 
     <div id="sch_type_fields" style="margin-top:4px;"></div>
 
+    <label>Assign to</label>
+    <select id="sch_assign"></select>
+
     <label>Notes</label>
     <textarea id="sch_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
 
@@ -604,6 +607,9 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     </div>
 
     <div id="sch_b_type_fields" style="margin-top:4px;"></div>
+
+    <label>Assign to</label>
+    <select id="sch_b_assign"></select>
 
     <label>Notes</label>
     <textarea id="sch_b_notes" placeholder="Optional notes" rows="2" style="width:100%;margin-top:4px;"></textarea>
@@ -1884,7 +1890,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785296716;
+const APP_VERSION = 1785297193;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6609,8 +6615,27 @@ function renderScheduler() {
   // not whatever was last picked inside this screen on a previous visit.
   const activeModId = localStorage.getItem(MODULE_KEY) || 'goats';
   if (enabled.some(m => m.id === activeModId)) modSel.value = activeModId;
+  populateAssigneeSelects();
   renderSchedulerModule();
   renderAllPendingTasks();
+}
+
+// Fills the Scheduler "Assign to" pickers from the fetched farmOS user map.
+// Default option = the Active User (owner falls through to getOwnerUUID); any
+// other choice assigns the task's farmOS owner to that specific person.
+function populateAssigneeSelects() {
+  var map = {};
+  try { map = JSON.parse(localStorage.getItem('farmdesk_user_uuids') || '{}'); } catch(e) {}
+  var active = (localStorage.getItem(LS.activeUser) || '').trim();
+  var opts = '<option value="">— ' + (active ? active + ' (Active User)' : 'Active User') + ' —</option>';
+  Object.keys(map).sort().forEach(function(nameLower) {
+    var display = nameLower.charAt(0).toUpperCase() + nameLower.slice(1);
+    opts += '<option value="' + map[nameLower] + '">' + display + '</option>';
+  });
+  ['sch_assign', 'sch_b_assign'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = opts;
+  });
 }
 
 function renderSchedulerModule() {
@@ -6822,6 +6847,7 @@ function saveScheduledBirdTasks() {
   const type    = document.getElementById("sch_b_type")?.value;
   const timeVal = document.getElementById("sch_b_time")?.value;
   const notes   = document.getElementById("sch_b_notes")?.value || "";
+  const schBAssignee = document.getElementById("sch_b_assign")?.value || "";
   const result  = document.getElementById("sch_b_result");
 
   if (!timeVal) { result.textContent = "⚠️ Please set a date and time."; return; }
@@ -6874,6 +6900,7 @@ function saveScheduledBirdTasks() {
       notes: notes,
       status: 'pending',
       synced: false,
+      assigneeUUID: schBAssignee || undefined,
       logName: (type.charAt(0).toUpperCase()+type.slice(1)) + ' - ' + (bird ? (bird.tag||bird.name) : 'Bird') + ' - scheduled'
     }, taskExtra);
     bd_history.unshift(logData);
@@ -7103,6 +7130,7 @@ function saveScheduledTasks() {
   const type    = document.getElementById("sch_type")?.value;
   const timeVal = document.getElementById("sch_time")?.value;
   const notes   = document.getElementById("sch_notes")?.value || "";
+  const schAssignee = document.getElementById("sch_assign")?.value || "";
   const result  = document.getElementById("sch_result");
 
   if (!timeVal) { result.textContent = "⚠️ Please set a date and time."; return; }
@@ -7150,6 +7178,7 @@ function saveScheduledTasks() {
       data:     { ...taskData },
       synced:   false,
       loggedBy: cfg.user || "",
+      assigneeUUID: schAssignee || undefined,
       status:   "pending"
     };
     logs.push(task);
@@ -8897,7 +8926,7 @@ function buildFarmOSPayload(l) {
     payload.data.relationships = {};
   }
   // Set owner relationship for proper attribution in farmOS
-  const ownerUUID = getOwnerUUID();
+  const ownerUUID = l.assigneeUUID || getOwnerUUID();
   if (ownerUUID) {
     if (!payload.data.relationships) payload.data.relationships = {};
     payload.data.relationships.owner = { data: [{ type: "user--user", id: ownerUUID }] };
@@ -14080,7 +14109,7 @@ async function bd_pushLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
-  var ownerUUID = getOwnerUUID();
+  var ownerUUID = log.assigneeUUID || getOwnerUUID();
   if (ownerUUID) payload.data.relationships.owner = { data: [{ type: 'user--user', id: ownerUUID }] };
 
   // Eggs increment the shared Eggs Product's inventory in farmOS, same
