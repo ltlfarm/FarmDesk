@@ -1890,7 +1890,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785346637;
+const APP_VERSION = 1785349265;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -15691,18 +15691,19 @@ async function be_resolveBundle(token) {
   var cached = localStorage.getItem('farmdesk_bee_bundle');
   if (cached) { be_bundle = cached; return cached; }
   var h = be_postHeaders(token);
-  // 1) Ask the JSON:API index which asset resource is the bee/hive/colony one
+  // 1) Ask the JSON:API index (at /api, no trailing slash) which asset resource
+  //    is the bee/hive/colony/apiary one — robust to whatever farm_bee names it.
   try {
-    var r = await fetchWithTimeout(apiUrl('/api/'), { headers: h });
+    var r = await fetchWithTimeout(apiUrl('/api'), { headers: h });
     if (r.ok) {
       var d = await r.json();
       var links = (d && d.links) || {};
-      var hit = Object.keys(links).find(function(k) { return /^asset--/.test(k) && /(hive|colony|bee)/i.test(k); });
+      var hit = Object.keys(links).find(function(k) { return /^asset--/.test(k) && /(hive|colony|bee|apiar)/i.test(k); });
       if (hit) { be_bundle = hit.replace('asset--', ''); localStorage.setItem('farmdesk_bee_bundle', be_bundle); return be_bundle; }
     }
   } catch(e) {}
-  // 2) Fallback: probe the likely names
-  var candidates = ['hive', 'colony', 'bee', 'bee_colony', 'beehive'];
+  // 2) Fallback: probe the likely names directly
+  var candidates = ['hive', 'colony', 'bee', 'bee_colony', 'beehive', 'bee_hive', 'apiary'];
   for (var i = 0; i < candidates.length; i++) {
     try {
       var rr = await fetchWithTimeout(apiUrl('/api/asset/' + candidates[i] + '?page[limit]=1'), { headers: h });
@@ -15753,7 +15754,7 @@ function be_renderColonies() {
     var locName = c.locationKey && locations[c.locationKey] ? locations[c.locationKey].name : '';
     var id = c.uuid || c._localId;
     return '<div class="box" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
-      '<div style="flex:1;min-width:0;cursor:pointer;" onclick="be_editColony(\'' + id + '\')">' +
+      '<div style="flex:1;min-width:0;cursor:pointer;" onclick="be_openColonyDrawer(\'' + id + '\')">' +
         '<div style="font-weight:600;">🐝 ' + (c.name || '(unnamed)') + '</div>' +
         (locName ? '<div style="font-size:13px;color:#888;">📍 ' + locName + '</div>' : '') +
         (c.notes ? '<div style="font-size:12px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.notes + '</div>' : '') +
@@ -15793,6 +15794,31 @@ function be_editColony(id) {
 }
 
 function be_closeColonyModal() { document.getElementById('be-colony-modal').style.display = 'none'; }
+
+// Detail drawer — opens first when a colony is tapped (Edit opens the form).
+let be_drawerId = null;
+function be_openColonyDrawer(id) {
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === id; })[0];
+  if (!c) return;
+  be_drawerId = id;
+  document.getElementById('be-drawer-title').textContent = '🐝 ' + (c.name || '(unnamed)');
+  var locName = c.locationKey && locations[c.locationKey] ? locations[c.locationKey].name : '';
+  var flags = [];
+  if (c.flags) { if (c.flags.monitor) flags.push('Monitor'); if (c.flags.priority) flags.push('Priority'); if (c.flags.needsReview) flags.push('Needs review'); }
+  document.getElementById('be-drawer-meta').textContent = (c.synced ? '✓ synced' : '⏳ pending') + (locName ? ' · 📍 ' + locName : '') + (flags.length ? ' · ' + flags.join(', ') : '');
+  document.getElementById('be-drawer-notes').textContent = c.notes || '';
+  var evts = be_logs.filter(function(l) { return l.colonyKey === id; }).slice(0, 8);
+  var icon = { inspection: '🔍', weight: '⚖️', feeding: '🍯', treatment: '💊', harvest: '🍯' };
+  document.getElementById('be-drawer-events').innerHTML = evts.length
+    ? '<div style="font-size:13px;color:#888;margin:8px 0 4px;">Recent events</div>' + evts.map(function(l) {
+        return '<div style="font-size:13px;color:#ccc;padding:4px 0;border-top:1px solid #3a3a3a;">' + (icon[l.type] || '') + ' ' + be_eventSummary(l) + ' <span style="color:#666;">· ' + new Date(l.ts).toLocaleDateString() + '</span>' + (l.synced ? '' : ' ⏳') + '</div>';
+      }).join('')
+    : '<div style="font-size:13px;color:#666;margin-top:8px;">No events yet.</div>';
+  document.getElementById('be-colony-drawer').style.display = '';
+}
+function be_closeColonyDrawer() { document.getElementById('be-colony-drawer').style.display = 'none'; }
+function be_drawerLogEvent() { be_closeColonyDrawer(); be_openEventModal(be_drawerId); }
+function be_drawerEdit() { be_closeColonyDrawer(); be_editColony(be_drawerId); }
 
 function be_saveColony() {
   var name = document.getElementById('be-colony-name').value.trim();
@@ -18172,6 +18198,9 @@ function closeTopOverlay() {
     { id: 'bd-edit-modal',     test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeEditModal(); } },
     { id: 'bd-formula-modal',  test: function(el) { return el.style.display === 'block'; }, close: function() { bd_closeFormulaModal(); } },
     { id: 'locationDetailModal', test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationDetail(); } },
+    { id: 'be-colony-drawer',  test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { be_closeColonyDrawer(); } },
+    { id: 'be-event-modal',    test: function(el) { return el.style.display === 'block'; }, close: function() { be_closeEventModal(); } },
+    { id: 'be-colony-modal',   test: function(el) { return el.style.display === 'block'; }, close: function() { be_closeColonyModal(); } },
     { id: 'locationLogModal',    test: function(el) { return el.style.display === 'block'; }, close: function() { closeLocationLogModal(); } },
     { id: 'locationModal',       test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationModal(); } },
     { id: 'locationMapModal',    test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationMap(); } },
@@ -18702,6 +18731,24 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <div style="display:flex;gap:8px;margin-top:6px;">
       <button onclick="be_saveColony()" style="flex:1;">Save</button>
       <button class="secondary" onclick="be_closeColonyModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BEE COLONY DETAIL DRAWER — body level ===== -->
+<div id="be-colony-drawer" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;" onclick="be_closeColonyDrawer()">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong id="be-drawer-title" style="font-size:18px;"></strong>
+      <button onclick="be_closeColonyDrawer()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="be-drawer-meta" style="font-size:13px;color:#888;margin-bottom:8px;"></div>
+    <div id="be-drawer-notes" style="font-size:14px;color:#ccc;margin-bottom:6px;white-space:pre-wrap;"></div>
+    <div id="be-drawer-events" style="margin-bottom:14px;"></div>
+    <button onclick="be_drawerLogEvent()" class="wide" style="margin-bottom:8px;">📋 Log Event</button>
+    <div style="display:flex;gap:8px;">
+      <button onclick="be_drawerEdit()" style="flex:1;">✏️ Edit</button>
+      <button onclick="be_closeColonyDrawer()" class="secondary" style="flex:0 0 auto;">Close</button>
     </div>
   </div>
 </div>
