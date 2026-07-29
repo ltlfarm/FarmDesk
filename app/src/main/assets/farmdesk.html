@@ -1050,6 +1050,21 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     </div>
   </div>
 
+  <!-- Bees -->
+  <div class="set-group">
+    <div class="set-head" onclick="toggleSetGroup(this)">
+      <span>🐝 Bees</span><span class="set-arrow">▼</span>
+    </div>
+    <div class="set-body">
+      <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track your bee <strong>colonies</strong>. A colony is the living unit — bees plus queen — recorded in farmOS as a "Bee colony" asset. A divided box holding two colonies is simply two colonies at the same location.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>➕ Add Colony</strong> — Give it a name, an optional location, notes, and flags (Monitor / Priority / Needs review).</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Location</strong> — Pick from your Locations. A scattered hive or trap works as its own point location (drop a pin with Walk mode); a bee yard works as an apiary area. The physical box itself can be tracked separately under Equipment.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap a colony</strong> — Edit it, move it to a different location, or archive it (for a deadout or a combined colony).</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬆️ Push / ⬇️ Fetch</strong> — Push new and changed colonies to farmOS, or fetch the current list.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;">Requires the <strong>Bee</strong> module enabled in farmOS. Colony events — inspections, feeding, treatments, honey harvests, and weights — are coming in the next update.</p>
+    </div>
+  </div>
+
   <!-- Settings -->
   <div class="set-group">
     <div class="set-head" onclick="toggleSetGroup(this)">
@@ -1057,7 +1072,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     </div>
     <div class="set-body">
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>FarmOS Connection</strong> — Enter your farmOS URL, username, and password. Tap Test Connection to verify.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Modules</strong> — Turn Goats, Birds, Inventory, Locations, or Equipment on or off to fit your farm. At least one must stay on. Use arrows to reorder them in the header bar.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Modules</strong> — Turn Goats, Birds, Inventory, Locations, Equipment, or Bees on or off to fit your farm. At least one must stay on. Use arrows to reorder them in the header bar.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Logo</strong> — Pick a photo to show in the header. Syncs to farmOS so all devices see it.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Name</strong> — Used in exported filenames.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Standalone Mode</strong> — Use FarmDesk without a farmOS server. Hides all sync options. Export XML to save your data.</p>
@@ -1860,7 +1875,7 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785292036;
+const APP_VERSION = 1785296547;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -15603,6 +15618,256 @@ document.getElementById('syncStatus').textContent = _lastSync ? 'Synced ' + _las
 //   3. Add onPullFromFarmOS: async function(token, cfg) {} to pull data on Sync All.
 //   4. Done — the switcher bar, Settings toggles, and back button pick it up.
 // Every module can be enabled/disabled independently (minimum one enabled).
+// ===== BEEDESK (COLONIES) MODULE — asset--hive =====
+// A "Colony" is a Bee colony (farmOS asset--hive, label "Bee colony"). Standard
+// fields only — name, notes, flags, owner, and Location via Move — so nothing
+// can break the way an assumed field would. Physical boxes = Equipment; spots
+// and apiaries = Locations (points or areas). Events (inspection, harvest,
+// feeding, treatment, weight, split/combine) come in Stage 2.
+const BE_LS = { colonies: 'farmdesk_bee_colonies', pending: 'farmdesk_bee_pending', lastSync: 'farmdesk_bee_lastSync' };
+let be_colonies = JSON.parse(localStorage.getItem(BE_LS.colonies) || '[]');
+let be_pending  = JSON.parse(localStorage.getItem(BE_LS.pending) || '[]');
+let be_editId = null;
+
+function be_postHeaders(token) {
+  return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+}
+
+function be_show(id) {
+  document.querySelectorAll('#module-beedesk .screen').forEach(function(s) { s.classList.remove('active'); });
+  var el = document.getElementById('be-screen-' + id); if (el) el.classList.add('active');
+  document.querySelectorAll('.be-bottom-nav button').forEach(function(b) { b.classList.remove('active'); });
+  var nav = document.getElementById('be-nav-' + id); if (nav) nav.classList.add('active');
+  if (id === 'colonies') be_renderColonies();
+  if (id === 'sync') be_updateSyncBadge();
+}
+
+function be_updateSyncBadge() {
+  var pend = be_pending.filter(function(p) { return !p.synced; }).length;
+  var el = document.getElementById('be-pending-count'); if (el) el.textContent = pend;
+  var ls = document.getElementById('be-last-sync');
+  if (ls) { var t = localStorage.getItem(BE_LS.lastSync); ls.textContent = t ? new Date(parseInt(t)).toLocaleString() : 'Never'; }
+}
+
+function be_locationOptions(selectedKey) {
+  var opts = '<option value="">— No location —</option>';
+  Object.keys(locations).forEach(function(k) {
+    var l = locations[k]; if (!l) return;
+    var icon = l.type === 'structure' ? '🏡' : (l.type === 'water' ? '💧' : '🌾');
+    opts += '<option value="' + k + '"' + (k === selectedKey ? ' selected' : '') + '>' + icon + ' ' + (l.name || '(unnamed)') + '</option>';
+  });
+  return opts;
+}
+
+function be_renderColonies() {
+  var q = document.getElementById('be-search') ? document.getElementById('be-search').value.trim().toLowerCase() : '';
+  var list = document.getElementById('be-colony-list'); if (!list) return;
+  var active = be_colonies.filter(function(c) { return c.status !== 'archived'; });
+  if (q) active = active.filter(function(c) { return (c.name || '').toLowerCase().indexOf(q) !== -1; });
+  if (!active.length) { list.innerHTML = '<div class="box" style="text-align:center;color:#888;">No colonies yet. Tap + to add one.</div>'; return; }
+  list.innerHTML = active.map(function(c) {
+    var locName = c.locationKey && locations[c.locationKey] ? locations[c.locationKey].name : '';
+    var id = c.uuid || c._localId;
+    return '<div class="box" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;" onclick="be_editColony(\'' + id + '\')">' +
+      '<div style="flex:1;min-width:0;"><div style="font-weight:600;">🐝 ' + (c.name || '(unnamed)') + '</div>' +
+      (locName ? '<div style="font-size:13px;color:#888;">📍 ' + locName + '</div>' : '') +
+      (c.notes ? '<div style="font-size:12px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + c.notes + '</div>' : '') + '</div>' +
+      '<div style="font-size:12px;color:' + (c.synced ? '#3a7' : '#c90') + ';">' + (c.synced ? '✓' : '⏳') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function be_openAddColony() {
+  be_editId = null;
+  document.getElementById('be-colony-modal-title').textContent = 'Add Colony';
+  document.getElementById('be-colony-name').value = '';
+  document.getElementById('be-colony-notes').value = '';
+  document.getElementById('be-colony-location').innerHTML = be_locationOptions('');
+  document.getElementById('be-colony-monitor').checked = false;
+  document.getElementById('be-colony-priority').checked = false;
+  document.getElementById('be-colony-review').checked = false;
+  document.getElementById('be-colony-archive-row').style.display = 'none';
+  document.getElementById('be-colony-modal').style.display = 'block';
+}
+
+function be_editColony(id) {
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === id; })[0];
+  if (!c) return;
+  be_editId = id;
+  document.getElementById('be-colony-modal-title').textContent = 'Edit Colony';
+  document.getElementById('be-colony-name').value = c.name || '';
+  document.getElementById('be-colony-notes').value = c.notes || '';
+  document.getElementById('be-colony-location').innerHTML = be_locationOptions(c.locationKey || '');
+  document.getElementById('be-colony-monitor').checked = !!(c.flags && c.flags.monitor);
+  document.getElementById('be-colony-priority').checked = !!(c.flags && c.flags.priority);
+  document.getElementById('be-colony-review').checked = !!(c.flags && c.flags.needsReview);
+  document.getElementById('be-colony-archive-row').style.display = '';
+  document.getElementById('be-colony-modal').style.display = 'block';
+}
+
+function be_closeColonyModal() { document.getElementById('be-colony-modal').style.display = 'none'; }
+
+function be_saveColony() {
+  var name = document.getElementById('be-colony-name').value.trim();
+  if (!name) { showToast('Enter a colony name'); return; }
+  var notes = document.getElementById('be-colony-notes').value.trim();
+  var locationKey = document.getElementById('be-colony-location').value;
+  var flags = {
+    monitor:    document.getElementById('be-colony-monitor').checked,
+    priority:   document.getElementById('be-colony-priority').checked,
+    needsReview: document.getElementById('be-colony-review').checked
+  };
+  if (be_editId) {
+    var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_editId; })[0];
+    if (c) {
+      var locChanged = (c.locationKey || '') !== (locationKey || '');
+      c.name = name; c.notes = notes; c.flags = flags; c.locationKey = locationKey; c.synced = false;
+      if (c.uuid) {
+        be_pending.push({ action: 'update_colony', colonyUUID: c.uuid, colony: c, id: 'upd_' + Date.now(), synced: false });
+        if (locChanged && locationKey) be_pending.push({ action: 'move_colony', colonyUUID: c.uuid, locationKey: locationKey, id: 'mv_' + Date.now(), synced: false });
+      }
+    }
+  } else {
+    var nc = { _localId: 'local_' + Date.now(), uuid: null, name: name, notes: notes, flags: flags, locationKey: locationKey, status: 'active', synced: false };
+    be_colonies.push(nc);
+    be_pending.push({ action: 'create_colony', colony: nc, id: nc._localId, synced: false });
+  }
+  localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+  localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  be_closeColonyModal();
+  be_updateSyncBadge();
+  showToast('Colony saved');
+  be_renderColonies();
+}
+
+function be_archiveColony() {
+  if (!be_editId) return;
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_editId; })[0];
+  if (!c) return;
+  if (!confirm('Archive colony "' + (c.name || '') + '"? Use for a deadout or combined colony.')) return;
+  c.status = 'archived'; c.synced = false;
+  if (c.uuid) be_pending.push({ action: 'archive_colony', colonyUUID: c.uuid, id: 'arch_' + Date.now(), synced: false });
+  localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+  localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  be_closeColonyModal(); be_updateSyncBadge(); be_renderColonies();
+  showToast('Colony archived');
+}
+
+async function be_pushCreateColony(colony, token) {
+  var attrs = { name: colony.name || 'Colony' };
+  if (colony.notes) attrs.notes = { value: colony.notes, format: 'default' };
+  var flags = [];
+  if (colony.flags) { if (colony.flags.monitor) flags.push('monitor'); if (colony.flags.priority) flags.push('priority'); if (colony.flags.needsReview) flags.push('needs_review'); }
+  if (flags.length) attrs.flag = flags;
+  var payload = { data: { type: 'asset--hive', attributes: attrs } };
+  var ownerUUID = getOwnerUUID();
+  if (ownerUUID) payload.data.relationships = { owner: { data: [{ type: 'user--user', id: ownerUUID }] } };
+  var res = await fetchWithTimeout(apiUrl('/api/asset/hive'), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 200)); }
+  var data = await res.json();
+  var lc = be_colonies.filter(function(c) { return c._localId === colony._localId; })[0];
+  if (lc && data.data && data.data.id) {
+    lc.uuid = data.data.id; lc.synced = true;
+    localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+    if (lc.locationKey) { try { await be_pushMoveColony(lc.uuid, lc.locationKey, token); } catch(e) { /* move is best-effort; colony still created */ } }
+  }
+}
+
+async function be_pushUpdateColony(colony, token) {
+  if (!colony.uuid) return;
+  var attrs = { name: colony.name || 'Colony', notes: { value: colony.notes || '', format: 'default' } };
+  var flags = [];
+  if (colony.flags) { if (colony.flags.monitor) flags.push('monitor'); if (colony.flags.priority) flags.push('priority'); if (colony.flags.needsReview) flags.push('needs_review'); }
+  attrs.flag = flags;
+  var payload = { data: { type: 'asset--hive', id: colony.uuid, attributes: attrs } };
+  var res = await fetchWithTimeout(apiUrl('/api/asset/hive/' + colony.uuid), { method: 'PATCH', headers: be_postHeaders(token), body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  var lc = be_colonies.filter(function(c) { return c.uuid === colony.uuid; })[0];
+  if (lc) { lc.synced = true; localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies)); }
+}
+
+async function be_pushMoveColony(colonyUUID, locationKey, token) {
+  var loc = locations[locationKey]; if (!loc) return;
+  var locBundle = loc.type === 'structure' ? 'asset--structure' : (loc.type === 'water' ? 'asset--water' : 'asset--land');
+  var res = await fetchWithTimeout(apiUrl('/api/log/activity'), {
+    method: 'POST', headers: be_postHeaders(token),
+    body: JSON.stringify({ data: {
+      type: 'log--activity',
+      attributes: { name: 'Move: colony → ' + (loc.name || ''), timestamp: String(Math.floor(Date.now() / 1000)), status: 'done', is_movement: true },
+      relationships: { asset: { data: [{ type: 'asset--hive', id: colonyUUID }] }, location: { data: [{ type: locBundle, id: locationKey }] } }
+    }})
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+}
+
+async function be_pushArchiveColony(colonyUUID, token) {
+  var res = await fetchWithTimeout(apiUrl('/api/asset/hive/' + colonyUUID), {
+    method: 'PATCH', headers: be_postHeaders(token),
+    body: JSON.stringify({ data: { type: 'asset--hive', id: colonyUUID, attributes: { archived: true } } })
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+}
+
+async function be_syncToFarmOS() {
+  var cfg = JSON.parse(localStorage.getItem('farmdesk_cfg') || '{}');
+  if (!cfg.url) { showToast('Set up farmOS connection in Settings first'); return; }
+  var logEl = document.getElementById('be-sync-log'); if (logEl) logEl.textContent = 'Connecting...\n';
+  var token;
+  try { token = await getCachedToken(cfg); } catch(e) { showToast('Connection failed'); if (logEl) logEl.textContent += 'Auth failed: ' + e.message + '\n'; return; }
+  var todo = be_pending.filter(function(p) { return !p.synced; });
+  var ok = 0, fail = 0;
+  for (var i = 0; i < todo.length; i++) {
+    var a = todo[i];
+    try {
+      if (a.action === 'create_colony')      await be_pushCreateColony(a.colony, token);
+      else if (a.action === 'update_colony') await be_pushUpdateColony(a.colony, token);
+      else if (a.action === 'move_colony')   await be_pushMoveColony(a.colonyUUID, a.locationKey, token);
+      else if (a.action === 'archive_colony') await be_pushArchiveColony(a.colonyUUID, token);
+      a.synced = true; ok++;
+      if (logEl) logEl.textContent += '✅ ' + a.action + '\n';
+    } catch(e) { fail++; if (logEl) logEl.textContent += '❌ ' + a.action + ': ' + e.message + '\n'; }
+  }
+  be_pending = be_pending.filter(function(p) { return !p.synced; });
+  localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+  localStorage.setItem(BE_LS.lastSync, String(Date.now()));
+  be_updateSyncBadge(); be_renderColonies();
+  showToast('Bees sync: ' + ok + ' ok' + (fail ? ', ' + fail + ' failed' : ''));
+}
+
+async function be_fetchColonies() {
+  var cfg = JSON.parse(localStorage.getItem('farmdesk_cfg') || '{}');
+  if (!cfg.url) { showToast('Set up farmOS connection in Settings first'); return; }
+  var token;
+  try { token = await getCachedToken(cfg); } catch(e) { showToast('Connection failed'); return; }
+  var res;
+  try { res = await fetchWithTimeout(apiUrl('/api/asset/hive?page[limit]=100&include=location'), { headers: be_postHeaders(token) }); }
+  catch(e) { showToast('Fetch failed'); return; }
+  if (!res.ok) {
+    if (res.status === 404) showToast('No "hive" asset type — is the Bee module enabled in farmOS?');
+    else showToast('Fetch failed: HTTP ' + res.status);
+    return;
+  }
+  var data = await res.json();
+  var localUnsynced = be_colonies.filter(function(c) { return !c.uuid; }); // brand-new, not yet pushed
+  var fetched = (data.data || []).filter(function(a) { return !(a.attributes && a.attributes.archived); }).map(function(a) {
+    var locRel = a.relationships && a.relationships.location && a.relationships.location.data;
+    var locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
+    var flg = a.attributes.flag || [];
+    return {
+      _localId: 'srv_' + a.id, uuid: a.id,
+      name: a.attributes.name || '(unnamed)',
+      notes: (a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || '',
+      flags: { monitor: flg.indexOf('monitor') !== -1, priority: flg.indexOf('priority') !== -1, needsReview: flg.indexOf('needs_review') !== -1 },
+      locationKey: locArr.length ? locArr[0].id : '', status: 'active', synced: true
+    };
+  });
+  be_colonies = fetched.concat(localUnsynced);
+  localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+  be_renderColonies();
+  showToast('✅ Colonies fetched (' + fetched.length + ')');
+}
+
 const MODULES = [
   { id: 'goats', label: '🐐 Goats', title: '🐐 FarmDesk',
     containerId: 'module-goatdesk',
@@ -15658,6 +15923,17 @@ const MODULES = [
       eq_showInternal('dashboard');
     },
     onPullFromFarmOS: async function() { await eq_fetchAssets(); }
+  },
+  { id: 'bees', label: '🐝 Bees', title: '🐝 FarmDesk',
+    containerId: 'module-beedesk',
+    onActivate: function() {
+      document.querySelectorAll('#module-beedesk .screen').forEach(function(s) { s.classList.remove('active'); });
+      var el = document.getElementById('be-screen-colonies'); if (el) el.classList.add('active');
+      document.querySelectorAll('.be-bottom-nav button').forEach(function(b) { b.classList.remove('active'); });
+      var nav = document.getElementById('be-nav-colonies'); if (nav) nav.classList.add('active');
+      be_renderColonies(); be_updateSyncBadge();
+    },
+    onPullFromFarmOS: async function() { await be_fetchColonies(); }
   }
 ];
 
@@ -18084,6 +18360,70 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     </div>
     <div id="profile-modal-content"></div>
     <button class="secondary wide" onclick="closeProfile()" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
+<!-- ===== BEEDESK (COLONIES) MODULE ===== -->
+<div id="module-beedesk" style="display:none;">
+  <!-- COLONIES SCREEN -->
+  <div id="be-screen-colonies" class="screen active">
+    <div class="box" style="display:flex;gap:8px;align-items:center;">
+      <input id="be-search" placeholder="Search colonies..." oninput="be_renderColonies()" style="flex:1;margin:0;">
+      <button onclick="be_openAddColony()" style="margin:0;padding:12px 16px;font-size:20px;">+</button>
+    </div>
+    <div id="be-colony-list"></div>
+  </div>
+  <!-- HISTORY SCREEN (events land here in Stage 2) -->
+  <div id="be-screen-history" class="screen">
+    <div class="box"><h3 style="margin:0 0 6px;">History</h3><p style="color:#888;font-size:14px;margin:0;">Colony events — inspections, feeding, treatments, honey harvests, weights — arrive in the next update.</p></div>
+  </div>
+  <!-- SYNC SCREEN -->
+  <div id="be-screen-sync" class="screen">
+    <div class="box">
+      <h3 style="margin:0 0 6px;">farmOS Sync</h3>
+      <p style="color:#888;font-size:14px;margin:0 0 10px;">Colonies save locally. Push when connected.</p>
+      <div style="font-size:16px;margin-bottom:10px;">Pending: <strong id="be-pending-count" style="color:#c90;">0</strong> &nbsp;|&nbsp; Last sync: <span id="be-last-sync" style="color:#888;">Never</span></div>
+      <button onclick="be_syncToFarmOS()" class="wide sync-push-btn">⬆️ Push to farmOS</button>
+    </div>
+    <div class="box">
+      <strong>Connection</strong>
+      <button onclick="openSharedSettings()" class="secondary wide" style="margin:6px 0 8px;">⚙️ Change in Settings</button>
+      <button onclick="be_fetchColonies()" class="wide">⬇️ Fetch Colonies from farmOS</button>
+    </div>
+    <div id="be-sync-log" style="font-size:13px;color:#888;padding:10px;white-space:pre-wrap;"></div>
+  </div>
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav be-bottom-nav">
+    <button id="be-nav-colonies" onclick="be_show('colonies')" class="active">🐝 Colonies</button>
+    <button id="be-nav-history" onclick="be_show('history')">📋 History</button>
+    <button id="be-nav-scheduler" onclick="show('scheduler')">📅 Scheduler</button>
+    <button id="be-nav-sync" onclick="be_show('sync')">🔄 Sync</button>
+  </nav>
+</div>
+
+<!-- ===== BEE COLONY MODAL (add/edit) — body level ===== -->
+<div id="be-colony-modal" class="bd-modal" onclick="if(event.target===this)be_closeColonyModal()" style="display:none;">
+  <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:85vh;overflow-y:auto;">
+    <h3 id="be-colony-modal-title">Add Colony</h3>
+    <label>Name *</label>
+    <input id="be-colony-name" placeholder="e.g. North Field Hive 1">
+    <label>Location (apiary or hive spot)</label>
+    <select id="be-colony-location"></select>
+    <label>Notes</label>
+    <textarea id="be-colony-notes" placeholder="Queen source, install date, temperament..." style="width:100%;box-sizing:border-box;min-height:70px;"></textarea>
+    <label style="margin-top:8px;">Flags</label>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
+      <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-monitor" style="width:auto;margin:0;"> Monitor</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-priority" style="width:auto;margin:0;"> Priority</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-review" style="width:auto;margin:0;"> Needs review</label>
+    </div>
+    <div id="be-colony-archive-row" style="display:none;margin-bottom:8px;">
+      <button onclick="be_archiveColony()" class="secondary wide" style="background:#5a2a2a;">Archive (deadout / combined)</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button onclick="be_saveColony()" style="flex:1;">Save</button>
+      <button class="secondary" onclick="be_closeColonyModal()" style="flex:0 0 auto;">Cancel</button>
+    </div>
   </div>
 </div>
 
