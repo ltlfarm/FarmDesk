@@ -1869,13 +1869,22 @@ function buildCategorySelectHTML(selectedId) {
     '<select id="f_log_category" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">' + opts + '</select>';
 }
 
-// Returns farmOS user UUID for the owner relationship on logs.
-// Loaded from cache on startup, fetched on first connection.
+// Returns the farmOS user UUID for the owner relationship on logs/assets.
+// Prefers the currently-selected Active User (mapped to their farmOS UUID) so
+// records are OWNED — and tasks are ASSIGNED — to the right person. Falls back
+// to the connected account when the active user isn't a known farmOS user.
 function getOwnerUUID() {
+  try {
+    var active = (localStorage.getItem(LS.activeUser) || '').trim().toLowerCase();
+    if (active) {
+      var map = JSON.parse(localStorage.getItem('farmdesk_user_uuids') || '{}');
+      if (map[active]) return map[active];
+    }
+  } catch(e) {}
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785296547;
+const APP_VERSION = 1785296716;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7888,6 +7897,23 @@ async function testFarmOS() {
           }
         }
       } catch(e) { /* best-effort — logs still push without owner */ }
+      // Fetch all farmOS users → name→UUID map, so the Active User (and the
+      // Scheduler's "Assign to" picker) can OWN/ASSIGN logs to the right person.
+      try {
+        const usersRes = await fetchWithTimeout(apiUrl("/api/user/user?page[limit]=100"), {
+          headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.api+json" }
+        });
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          const uMap = {};
+          (usersData.data || []).forEach(function(u) {
+            if (!u.id) return;
+            const nm = ((u.attributes && (u.attributes.display_name || u.attributes.name)) || "").trim();
+            if (nm) uMap[nm.toLowerCase()] = u.id;
+          });
+          if (Object.keys(uMap).length) localStorage.setItem("farmdesk_user_uuids", JSON.stringify(uMap));
+        }
+      } catch(e) { /* best-effort — owner falls back to the connected account */ }
     } else {
       el.textContent = "❌ API error: " + res.status;
       el.style.color = "#c00";
