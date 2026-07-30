@@ -1946,7 +1946,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785426471;
+const APP_VERSION = 1785427240;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9410,6 +9410,24 @@ async function processPendingLocationActions(token, logFn) {
             if (l.locationKey === a.payload.key) l.locationKey = realUUID;
           });
           localStorage.setItem(LS.locationLogs, JSON.stringify(locationLogs));
+          // Cascade: a drop-pin Move (Bees or Equipment) queued against this
+          // temp key before the pin itself finished syncing must follow it.
+          if (typeof be_colonies !== 'undefined') {
+            be_colonies.forEach(function(c) { if (c.locationKey === a.payload.key) c.locationKey = realUUID; });
+            localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+          }
+          if (typeof be_pending !== 'undefined') {
+            be_pending.forEach(function(p) { if (p.action === 'move_colony' && p.locationKey === a.payload.key) p.locationKey = realUUID; });
+            localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+          }
+          if (typeof equipmentLocations !== 'undefined') {
+            Object.keys(equipmentLocations).forEach(function(k) { if (equipmentLocations[k].locationUuid === a.payload.key) equipmentLocations[k].locationUuid = realUUID; });
+            localStorage.setItem(EQ_LS.locations, JSON.stringify(equipmentLocations));
+          }
+          if (typeof eq_pending !== 'undefined') {
+            eq_pending.forEach(function(p) { if (p.type === 'move' && p.locationUuid === a.payload.key) p.locationUuid = realUUID; });
+            localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
+          }
         }
         localStorage.setItem(LS.locations, JSON.stringify(locations));
 
@@ -12773,11 +12791,34 @@ function eq_openMoveModal() {
       locArr.map(function(l){ return '<option value="' + l.uuid + '">' + (l.type === 'structure' ? '🏡 ' : l.type === 'water' ? '💧 ' : '🌾 ') + l.name + '</option>'; }).join('') +
     '</select>' +
     (locArr.length ? '' : '<p style="color:#888;font-size:13px;margin-top:4px;">No locations found — add one in the Locations tab first.</p>') +
+    '<div style="text-align:center;margin:10px 0;color:#666;font-size:12px;">— or —</div>' +
+    '<button type="button" class="secondary wide" style="margin:0 0 10px;" onclick="eq_dropPinMove()">📍 Drop pin here</button>' +
     '<label style="margin-top:10px;">Notes</label>' +
     '<textarea id="eqMoveNotes" rows="2" placeholder="Optional notes"></textarea>';
   modal.style.display = 'block';
 }
 function eq_closeMoveModal() { document.getElementById('eqMoveModal').style.display = 'none'; }
+
+function eq_dropPinMove() {
+  if (!_eqDetailKey) return;
+  var it = eq_items.find(function(x) { return x.key === _eqDetailKey; });
+  if (!it) return;
+  if (!it.farmosUUID) { showToast('⚠️ Sync this item to farmOS first'); return; }
+  if (!navigator.geolocation) { showToast('GPS not available on this device'); return; }
+  showToast('Getting GPS position...');
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    var locKey = dropPinLocation((it.name || 'Equipment') + ' spot', pos.coords.latitude, pos.coords.longitude);
+    var sel = document.getElementById('eqMoveLocationSelect');
+    if (sel) {
+      var opt = document.createElement('option');
+      opt.value = locKey; opt.textContent = '🌾 ' + locations[locKey].name; opt.selected = true;
+      sel.appendChild(opt); sel.value = locKey;
+    }
+    showToast('📍 Pin dropped — tap Save to move here');
+  }, function(err) {
+    showToast('Could not get a GPS fix — try again');
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+}
 
 function eq_saveMoveLog() {
   var it = eq_items.find(function(x) { return x.key === _eqDetailKey; });
@@ -12811,6 +12852,10 @@ async function eq_syncToFarmOS(logFn) {
   if (!cfg.url || !cfg.user || !cfg.pass) return { ok: 0, fail: 0 };
   var token = await getCachedToken(cfg);
   var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
+  // Push any not-yet-synced Locations first (covers a freshly dropped pin) so
+  // a move below references a real farmOS UUID, not a local temp key. Safe to
+  // call from every module's sync — it only touches unsynced entries once.
+  try { await processPendingLocationActions(token, logFn || function(){}); } catch(e) { if (logFn) logFn('⚠️ Location sync error: ' + e.message + '\n'); }
   var items = eq_pending.filter(function(a) { return !a.synced; });
   var ok = 0, fail = 0;
   for (var i = 0; i < items.length; i++) {
@@ -15913,6 +15958,69 @@ function be_openColonyDrawer(id) {
 function be_closeColonyDrawer() { document.getElementById('be-colony-drawer').style.display = 'none'; }
 function be_drawerLogEvent() { be_closeColonyDrawer(); be_openEventModal(be_drawerId); }
 function be_drawerEdit() { be_closeColonyDrawer(); be_editColony(be_drawerId); }
+function be_drawerMove() { be_closeColonyDrawer(); be_openMoveModal(); }
+
+// ===== BEES: Move colony to a Location — dropdown pick, or drop a GPS pin =====
+function be_openMoveModal() {
+  if (!be_drawerId) return;
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_drawerId; })[0];
+  if (!c) return;
+  var modal = document.getElementById('beMoveModal');
+  var fields = document.getElementById('beMoveFields');
+  if (!modal || !fields) return;
+  var locArr = Object.entries(locations).filter(function(e){ return !e[1].archived; }).map(function(e){ return { uuid: e[0], name: e[1].name, type: e[1].type }; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var current = c.locationKey && locations[c.locationKey] ? locations[c.locationKey].name : '';
+  fields.innerHTML =
+    '<p style="color:#888;font-size:13px;margin:0 0 8px;">' + (c.name || 'Colony') + (current ? ' — currently at ' + current : ' — no location set') + '</p>' +
+    (c.uuid ? '' : '<p style="color:#c66;font-size:13px;margin:0 0 8px;">Not yet synced to farmOS — sync this colony first, then Move.</p>') +
+    '<label>Move to</label>' +
+    '<select id="beMoveLocationSelect">' +
+      '<option value="">— select location —</option>' +
+      locArr.map(function(l){ return '<option value="' + l.uuid + '">' + (l.type === 'structure' ? '🏡 ' : l.type === 'water' ? '💧 ' : '🌾 ') + l.name + '</option>'; }).join('') +
+    '</select>' +
+    '<div style="text-align:center;margin:10px 0;color:#666;font-size:12px;">— or —</div>' +
+    '<button type="button" class="secondary wide" style="margin:0;" onclick="be_dropPinMove()">📍 Drop pin here</button>';
+  modal.style.display = 'block';
+}
+function be_closeMoveModal() { document.getElementById('beMoveModal').style.display = 'none'; }
+
+function be_saveMoveColony() {
+  if (!be_drawerId) return;
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_drawerId; })[0];
+  if (!c) return;
+  if (!c.uuid) { showToast('⚠️ Sync this colony to farmOS first'); return; }
+  var locKey = document.getElementById('beMoveLocationSelect').value;
+  if (!locKey) { showToast('⚠️ Select a location'); return; }
+  c.locationKey = locKey; c.synced = false;
+  be_pending.push({ action: 'move_colony', colonyUUID: c.uuid, locationKey: locKey, id: 'mv_' + Date.now(), synced: false });
+  localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+  localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  be_updateSyncBadge();
+  be_closeMoveModal();
+  showToast('✅ Moved ' + (c.name || 'colony') + ' locally — will sync to farmOS next push');
+  be_renderColonies();
+}
+
+function be_dropPinMove() {
+  if (!be_drawerId) return;
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_drawerId; })[0];
+  if (!c) return;
+  if (!c.uuid) { showToast('⚠️ Sync this colony to farmOS first'); return; }
+  if (!navigator.geolocation) { showToast('GPS not available on this device'); return; }
+  showToast('Getting GPS position...');
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    var locKey = dropPinLocation((c.name || 'Colony') + ' spot', pos.coords.latitude, pos.coords.longitude);
+    var sel = document.getElementById('beMoveLocationSelect');
+    if (sel) {
+      var opt = document.createElement('option');
+      opt.value = locKey; opt.textContent = '🌾 ' + locations[locKey].name; opt.selected = true;
+      sel.appendChild(opt); sel.value = locKey;
+    }
+    showToast('📍 Pin dropped — tap Save to move here');
+  }, function(err) {
+    showToast('Could not get a GPS fix — try again');
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+}
 
 function be_saveColony() {
   var name = document.getElementById('be-colony-name').value.trim();
@@ -16026,6 +16134,12 @@ async function be_syncToFarmOS() {
   var resolved = await be_resolveBundle(token);
   if (!resolved) { showToast('Could not find the Bee colony asset type in farmOS — is the Bee module enabled?'); if (logEl) logEl.textContent += '❌ No bee asset bundle found on this instance.\n'; return; }
   if (logEl) logEl.textContent += 'Using asset type: ' + be_bundle + '\n';
+  // Push any not-yet-synced Locations first (covers a freshly dropped pin) so
+  // a move below references a real farmOS UUID, not a local temp key.
+  try {
+    var locResult = await processPendingLocationActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
+    if (locResult.ok || locResult.fail) { if (logEl) logEl.textContent += 'Locations: ' + locResult.ok + ' ok, ' + locResult.fail + ' failed.\n'; }
+  } catch(e) { if (logEl) logEl.textContent += '⚠️ Location sync error: ' + e.message + '\n'; }
   var todo = be_pending.filter(function(p) { return !p.synced; });
   // Colony create/update/move/archive must run before events, so a new colony
   // has a real UUID before its events try to reference it.
@@ -17916,6 +18030,24 @@ function recenterOnGPS() {
   }, { enableHighAccuracy: true, timeout: 10000 });
 }
 
+// Shared helper: creates a local point Location at (lat,lng) and queues it for
+// sync, without going through the Locations tab or Walk mode. Used by the
+// Equipment and Bees "📍 Drop pin here" Move buttons to mark a scattered spot
+// (feeder, waterer, hive/trap) with one tap. Returns the new local key.
+function dropPinLocation(name, lat, lng) {
+  var newKey = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  locations[newKey] = {
+    name: name, type: 'land', subtype: '', subtypeId: '', notes: '',
+    wkt: 'POINT(' + lng + ' ' + lat + ')',
+    parentKey: null, idtag: '', ownerUUIDs: [], ownerUUID: null,
+    flags: [], photoId: null, fileAttach: null, archived: false,
+    synced: false, farmosUUID: null
+  };
+  localStorage.setItem(LS.locations, JSON.stringify(locations));
+  queuePendingAction('locationSave', { key: newKey });
+  return newKey;
+}
+
 // ===== WALK MODE — capture a paddock boundary by walking to each corner =====
 // Each "Add Corner" drops a vertex at the phone's live GPS position, which is
 // typically far more accurate than eyeballing corners on satellite imagery.
@@ -18302,6 +18434,7 @@ function closeTopOverlay() {
     { id: 'be-colony-drawer',  test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { be_closeColonyDrawer(); } },
     { id: 'be-event-modal',    test: function(el) { return el.style.display === 'block'; }, close: function() { be_closeEventModal(); } },
     { id: 'be-colony-modal',   test: function(el) { return el.style.display === 'block'; }, close: function() { be_closeColonyModal(); } },
+    { id: 'beMoveModal',       test: function(el) { return el.style.display === 'block'; }, close: function() { be_closeMoveModal(); } },
     { id: 'locationLogModal',    test: function(el) { return el.style.display === 'block'; }, close: function() { closeLocationLogModal(); } },
     { id: 'locationModal',       test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationModal(); } },
     { id: 'locationMapModal',    test: function(el) { return el.style.display === ''  || el.style.display === 'block'; }, close: function() { closeLocationMap(); } },
@@ -18849,9 +18982,24 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <div id="be-drawer-notes" style="font-size:14px;color:#ccc;margin-bottom:6px;white-space:pre-wrap;"></div>
     <div id="be-drawer-events" style="margin-bottom:14px;"></div>
     <button onclick="be_drawerLogEvent()" class="wide" style="margin-bottom:8px;">📋 Log Event</button>
-    <div style="display:flex;gap:8px;">
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button onclick="be_drawerMove()" class="secondary" style="flex:1;">📍 Move</button>
       <button onclick="be_drawerEdit()" style="flex:1;">✏️ Edit</button>
-      <button onclick="be_closeColonyDrawer()" class="secondary" style="flex:0 0 auto;">Close</button>
+    </div>
+    <button onclick="be_closeColonyDrawer()" class="secondary wide" style="margin:0;">Close</button>
+  </div>
+</div>
+
+<!-- ===== BEE MOVE MODAL (move colony to a Location) — body level ===== -->
+<div id="beMoveModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;">
+  <div style="background:#2a2a2a;margin:20px auto;max-width:480px;border-radius:10px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:18px;">📍 Move Colony</strong>
+      <button onclick="be_closeMoveModal()" style="padding:6px 12px;margin:0;background:#555;">✕</button>
+    </div>
+    <div id="beMoveFields"></div>
+    <div style="margin-top:12px;">
+      <button onclick="be_saveMoveColony()" style="width:100%;margin:0;">💾 Save</button>
     </div>
   </div>
 </div>
