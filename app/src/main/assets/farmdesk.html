@@ -1946,7 +1946,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785427240;
+const APP_VERSION = 1785427593;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7592,8 +7592,19 @@ function clearLogs() {
       if (typeof be_renderColonies === 'function') be_renderColonies();
       if (typeof be_renderHistory === 'function') be_renderHistory();
       if (typeof be_updateSyncBadge === 'function') be_updateSyncBadge();
+      // Equipment
+      localStorage.removeItem(EQ_LS.assets);
+      localStorage.removeItem(EQ_LS.history);
+      localStorage.removeItem(EQ_LS.pending);
+      localStorage.removeItem(EQ_LS.lastSync);
+      localStorage.removeItem(EQ_LS.locations);
+      localStorage.removeItem(EQ_LS.groups);
+      localStorage.removeItem(EQ_LS.photoIds);
+      eq_items = []; eq_history = []; eq_pending = []; equipmentLocations = {}; eq_groups = [];
+      _eqDetailKey = null;
+      if (typeof eq_renderList === 'function') eq_renderList();
       renderSettings(); renderRecent(); renderDashboard();
-      showToast("✅ All logs, ledger, locations, bees, and inventory cleared");
+      showToast("✅ All logs, ledger, locations, bees, equipment, and inventory cleared");
     }
   });
 }
