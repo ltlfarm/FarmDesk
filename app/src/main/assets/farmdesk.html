@@ -703,6 +703,12 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       </div>
 
       <div class="set-sub">
+        <strong>👤 Default Owners</strong>
+        <p style="color:#888;font-size:13px;">Who new records are assigned to by default. Pulled from your farmOS users (tap Test Connection first if the list is empty). Any form can override this per record.</p>
+        <div id="defaultOwnersBox" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="set-sub">
         <strong>🪦 Show Archived</strong>
         <p style="color:#888;font-size:13px;">See sold, deceased, or retired animals right in the app — no need for the farmOS web UI.</p>
         <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:8px;margin-top:6px;"><input type="checkbox" id="showArchivedGoats" onchange="setShowArchived('goats', this.checked); renderAnimalsScreen();" style="width:auto;"> Goats</label>
@@ -1543,10 +1549,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <input id="eq_serial" type="text" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">ID Tag</label>
     <input id="eq_idtag" type="text" placeholder="Asset tag / barcode number" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner</label>
-    <select id="eq_owner" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-      <option value="">— unassigned —</option>
-    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner(s)</label>
+    <div id="eq_owner_box" style="margin-bottom:8px;"></div>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Flags</label>
     <div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
       <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="eq_flag_priority" style="width:auto;"> 🔴 Priority</label>
@@ -1890,7 +1894,53 @@ function getOwnerUUID() {
   return window._farmosUserUUID || localStorage.getItem(LS.userUUID) || null;
 }
 
-const APP_VERSION = 1785349265;
+// Owner picker shared across modules. Builds a uuid→name map ENTIRELY from the
+// farmOS users fetched on connect — nothing hardcoded, so any farm works.
+function allOwnersList() {
+  var out = {};
+  try {
+    var map = JSON.parse(localStorage.getItem('farmdesk_user_uuids') || '{}');
+    Object.keys(map).forEach(function(nameLower) { out[map[nameLower]] = nameLower.charAt(0).toUpperCase() + nameLower.slice(1); });
+  } catch(e) {}
+  return out;
+}
+// Farm-wide default owners (chosen in Settings). New records get these unless
+// a form explicitly picks others.
+function getDefaultOwners() {
+  try { return JSON.parse(localStorage.getItem('farmdesk_default_owners') || '[]'); } catch(e) { return []; }
+}
+// Single source of truth for who owns a record: explicit picks win, else the
+// farm-wide default owners, else the current Active User. Always returns an array.
+function resolveOwners(explicit) {
+  if (explicit && explicit.length) return explicit.slice();
+  var def = getDefaultOwners();
+  if (def.length) return def.slice();
+  var a = getOwnerUUID();
+  return a ? [a] : [];
+}
+// Returns a JSON:API owner relationship object (or null if no owners resolved).
+function ownerRel(explicit) {
+  var arr = resolveOwners(explicit);
+  return arr.length ? { data: arr.map(function(u) { return { type: 'user--user', id: u }; }) } : null;
+}
+// Renders multi-select owner checkboxes. `cls` is a unique class for readback.
+function ownerCheckboxesHTML(cls, selectedUUIDs) {
+  var owners = allOwnersList();
+  var sel = selectedUUIDs || [];
+  var keys = Object.keys(owners);
+  if (!keys.length) return '<div style="color:#888;font-size:13px;">No users loaded — tap Test Connection in Settings.</div>';
+  return keys.map(function(uuid) {
+    var checked = sel.indexOf(uuid) !== -1 ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;margin:0 0 4px;"><input type="checkbox" class="' + cls + '" value="' + uuid + '"' + checked + ' style="width:auto;margin:0;"> ' + owners[uuid] + '</label>';
+  }).join('');
+}
+function readOwnerCheckboxes(cls) {
+  var arr = [];
+  document.querySelectorAll('input.' + cls + ':checked').forEach(function(cb) { arr.push(cb.value); });
+  return arr;
+}
+
+const APP_VERSION = 1785374968;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4258,10 +4308,19 @@ function generateReport(mode) {
   }
 }
 
+function saveDefaultOwners() {
+  var arr = readOwnerCheckboxes('default-owner-cb');
+  localStorage.setItem('farmdesk_default_owners', JSON.stringify(arr));
+  showToast(arr.length ? ('Default owners saved (' + arr.length + ')') : 'Default owners cleared');
+}
+
 function renderSettings() {
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const userInfo = document.getElementById("settingsUserInfo");
   if (userInfo) userInfo.textContent = cfg.user ? `Logged in as: ${cfg.user}` : "Not logged in";
+  const doBox = document.getElementById("defaultOwnersBox");
+  if (doBox) doBox.innerHTML = ownerCheckboxesHTML('default-owner-cb', getDefaultOwners()) +
+    '<button onclick="saveDefaultOwners()" class="wide" style="margin-top:8px;">Save default owners</button>';
   const dbgLine = document.getElementById("cfgDebugLine");
   if (dbgLine) {
     const sdCfg = JSON.parse(localStorage.getItem("farmdesk_cfg") || "null");
@@ -7504,8 +7563,17 @@ function clearLogs() {
       contacts = [];
       localStorage.setItem(LS.locations, JSON.stringify({}));
       locations = {};
+      // Bees
+      localStorage.removeItem(BE_LS.colonies);
+      localStorage.removeItem(BE_LS.pending);
+      localStorage.removeItem(BE_LS.lastSync);
+      localStorage.removeItem(BE_LS.logs);
+      be_colonies = []; be_pending = []; be_logs = [];
+      if (typeof be_renderColonies === 'function') be_renderColonies();
+      if (typeof be_renderHistory === 'function') be_renderHistory();
+      if (typeof be_updateSyncBadge === 'function') be_updateSyncBadge();
       renderSettings(); renderRecent(); renderDashboard();
-      showToast("✅ All logs, ledger, locations, and inventory cleared");
+      showToast("✅ All logs, ledger, locations, bees, and inventory cleared");
     }
   });
 }
@@ -8926,10 +8994,10 @@ function buildFarmOSPayload(l) {
     payload.data.relationships = {};
   }
   // Set owner relationship for proper attribution in farmOS
-  const ownerUUID = l.assigneeUUID || getOwnerUUID();
-  if (ownerUUID) {
+  const _goatOwner = ownerRel(l.assigneeUUID ? [l.assigneeUUID] : (l.ownerUUIDs || []));
+  if (_goatOwner) {
     if (!payload.data.relationships) payload.data.relationships = {};
-    payload.data.relationships.owner = { data: [{ type: "user--user", id: ownerUUID }] };
+    payload.data.relationships.owner = _goatOwner;
   }
 
   // Set log_category if set on this log
@@ -9034,8 +9102,8 @@ async function processPendingBatchActions(token, logFn) {
       if (a.type === 'batchSell') {
         var qRef = await buildBatchSaleQuantityRef(a.payload.count, a.payload.unitPrice, b.productUUID, token);
         if (!qRef) throw new Error('Could not create inventory quantity');
-        var bOwner = getOwnerUUID();
-        var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
+        var _bOwner = ownerRel([]);
+        var rel = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [qRef] }, ...(_bOwner ? { owner: _bOwner } : {}) };
         var attrs = { name: 'Sale: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
         var res = await fetchWithTimeout(apiUrl('/api/log/sale'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--sale', attributes: attrs, relationships: rel } }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -9046,7 +9114,7 @@ async function processPendingBatchActions(token, logFn) {
         var qData = await qRes.json();
         var qUUID = qData?.data?.id, qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
         var attrs2 = { name: 'Death: ' + a.payload.count + ' ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: a.payload.notes || '', format: 'default' } };
-        var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
+        var rel2 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID, meta: { target_revision_id: qRevId } }] }, ...(_bOwner ? { owner: _bOwner } : {}) };
         var res2 = await fetchWithTimeout(apiUrl('/api/log/observation'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--observation', attributes: attrs2, relationships: rel2 } }) });
         if (!res2.ok) throw new Error('HTTP ' + res2.status);
       } else if (a.type === 'batchPromote') {
@@ -9056,7 +9124,7 @@ async function processPendingBatchActions(token, logFn) {
         var qData3 = await qRes3.json();
         var qUUID3 = qData3?.data?.id, qRevId3 = qData3?.data?.attributes?.drupal_internal__revision_id;
         var attrs3 = { name: 'Promoted to individual: ' + a.payload.species + ' (batch)', status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: 'One animal pulled from batch to be tracked individually', format: 'default' } };
-        var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
+        var rel3 = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUID3, meta: { target_revision_id: qRevId3 } }] }, ...(_bOwner ? { owner: _bOwner } : {}) };
         var res3 = await fetchWithTimeout(apiUrl('/api/log/activity'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--activity', attributes: attrs3, relationships: rel3 } }) });
         if (!res3.ok) throw new Error('HTTP ' + res3.status);
       } else if (a.type === 'batchHatch') {
@@ -9068,7 +9136,7 @@ async function processPendingBatchActions(token, logFn) {
         var qUUIDH = qDataH?.data?.id, qRevIdH = qDataH?.data?.attributes?.drupal_internal__revision_id;
         var hatchNote = ['Added ' + a.payload.count + ' ' + a.payload.species + ' to existing batch', a.payload.parent ? 'Source: ' + a.payload.parent : '', a.payload.notes || ''].filter(Boolean).join('\n');
         var attrsH = { name: 'Hatch - ' + a.payload.species + ' batch x' + a.payload.count + (a.payload.parent ? ' (source: ' + a.payload.parent + ')' : ''), status: 'done', timestamp: String(Math.floor(new Date(a.createdAt).getTime() / 1000)), notes: { value: hatchNote, format: 'default' } };
-        var relH = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUIDH, meta: { target_revision_id: qRevIdH } }] }, ...(bOwner ? { owner: { data: [{ type: 'user--user', id: bOwner }] } } : {}) };
+        var relH = { asset: { data: [{ type: 'asset--product', id: b.productUUID }] }, quantity: { data: [{ type: 'quantity--standard', id: qUUIDH, meta: { target_revision_id: qRevIdH } }] }, ...(_bOwner ? { owner: _bOwner } : {}) };
         var resH = await fetchWithTimeout(apiUrl('/api/log/birth'), { method: 'POST', headers: headers, body: JSON.stringify({ data: { type: 'log--birth', attributes: attrsH, relationships: relH } }) });
         if (!resH.ok) throw new Error('HTTP ' + resH.status);
       }
@@ -9233,7 +9301,8 @@ async function processPendingLocationActions(token, logFn) {
         if (loc.idtag) attrs.id_tag = [{ id: loc.idtag, type: 'tag' }];
         if (loc.wkt) attrs.intrinsic_geometry = { value: loc.wkt };
         var relationships = {};
-        if (loc.ownerUUID) relationships.owner = { data: [{ type: 'user--user', id: loc.ownerUUID }] };
+        var _locOwner = ownerRel(loc.ownerUUIDs || (loc.ownerUUID ? [loc.ownerUUID] : []));
+        if (_locOwner) relationships.owner = _locOwner;
         if (loc.parentKey) {
           var parentLoc = locations[loc.parentKey];
           if (parentLoc && parentLoc.farmosUUID) {
@@ -10448,14 +10517,7 @@ const MAT_TYPE_NAME = {
   '2f1ac8ab-c6b6-4f91-a504-b48e2c921e57': 'Lab'
 };
 
-// All farm users — every new asset gets these owners
-// ───── SHARED: farm user UUIDs ─────
-const ALL_OWNERS = [
-  '8bb78703-7675-412a-a1c9-bbb19ded1e7b', // Jess
-  '71afeef7-7da7-4917-88d6-4c3e0e46f226', // Tammy
-  'd4092614-9169-44d4-bdee-56f5affa6c47', // Loma
-  '18e559ae-e698-44ea-900c-b4c15eba1ff6'  // Emily
-];
+// (Owners are resolved dynamically via resolveOwners() — no hardcoded users.)
 
 // Name fragments that trigger injection prompt on Medical Use
 const INJECTABLE_KEYWORDS = ['super b', 'cdt', 'ivermectin', 'bactrim', 'penicillin', 'la-200', 'excenel', 'liquamycin'];
@@ -11419,7 +11481,7 @@ async function openEditItem(uuid) {
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Owner</label>
     <select id="editItemOwner" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       <option value="">— unassigned —</option>
-      ${Object.keys(OWNER_NAMES).map(uuid => `<option value="${uuid}"${a.ownerUUID === uuid ? ' selected' : ''}>${OWNER_NAMES[uuid]}</option>`).join('')}
+      ${Object.keys(allOwnersList()).map(uuid => `<option value="${uuid}"${a.ownerUUID === uuid ? ' selected' : ''}>${allOwnersList()[uuid]}</option>`).join('')}
     </select>
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Flags</label>
     <div style="display:flex;gap:12px;margin-top:4px;flex-wrap:wrap;">
@@ -11774,7 +11836,7 @@ async function sd_syncToFarmOS() {
             },
             relationships: {
               material_type: { data: { type: 'taxonomy_term--material_type', id: item.matTypeId } },
-              owner:         { data: ALL_OWNERS.map(id => ({ type: 'user--user', id })) }
+              owner:         { data: resolveOwners([]).map(id => ({ type: 'user--user', id })) }
             }
           }
         };
@@ -11943,7 +12005,7 @@ async function sd_syncToFarmOS() {
           const bMatch = birdAssets.find(b => (b.name === item.linkedAssetName || b.tag === item.linkedAssetName) && b.uuid);
           if (bMatch) assetRefs.push({ type: 'asset--animal', id: bMatch.uuid });
         }
-        const sdOwnerUUID = getOwnerUUID();
+        const _sdOwner = ownerRel([]);
         const lBody = {
           data: {
             type: 'log--' + logBundle,
@@ -11960,7 +12022,7 @@ async function sd_syncToFarmOS() {
             relationships: {
               asset:    { data: assetRefs },
               quantity: { data: [{ type: 'quantity--' + qBundle, id: qUUID, meta: { target_revision_id: qRevId } }] },
-              ...(sdOwnerUUID ? { owner: { data: [{ type: 'user--user', id: sdOwnerUUID }] } } : {})
+              ...(_sdOwner ? { owner: _sdOwner } : {})
             }
           }
         };
@@ -12222,14 +12284,7 @@ const EQ_LS = {
   photoIds:  "farmdesk_equipment_photoIds"   // {key: photoId}
 };
 
-// Owner display names for the same hardcoded farm-user UUIDs used elsewhere
-// in the app (ALL_OWNERS) — not fetched dynamically, matching existing convention.
-const OWNER_NAMES = {
-  '8bb78703-7675-412a-a1c9-bbb19ded1e7b': 'Jess',
-  '71afeef7-7da7-4917-88d6-4c3e0e46f226': 'Tammy',
-  'd4092614-9169-44d4-bdee-56f5affa6c47': 'Loma',
-  '18e559ae-e698-44ea-900c-b4c15eba1ff6': 'Emily'
-};
+// (Owner display names come from allOwnersList() — fetched users, not hardcoded.)
 
 let eq_items      = JSON.parse(localStorage.getItem(EQ_LS.assets)    || "[]");
 let eq_history    = JSON.parse(localStorage.getItem(EQ_LS.history)   || "[]");
@@ -12299,11 +12354,10 @@ function eq_populateGroupSelect(selectedName) {
   document.getElementById('eq_newGroupName').value = '';
 }
 
-function eq_populateOwnerSelect(selectedUUID) {
-  var sel = document.getElementById('eq_owner');
-  sel.innerHTML = '<option value="">— unassigned —</option>' +
-    Object.keys(OWNER_NAMES).map(function(uuid) { return '<option value="' + uuid + '">' + OWNER_NAMES[uuid] + '</option>'; }).join('');
-  sel.value = selectedUUID || '';
+function eq_populateOwnerSelect(selected) {
+  var sel = Array.isArray(selected) ? selected : (selected ? [selected] : []);
+  var box = document.getElementById('eq_owner_box');
+  if (box) box.innerHTML = ownerCheckboxesHTML('eq-owner-cb', sel);
 }
 
 function eq_takePhoto() {
@@ -12387,7 +12441,7 @@ function eq_openItemModal(key) {
   document.getElementById('eq_flag_needs_review').checked = !!(it && it.flags && it.flags.indexOf('needs_review') !== -1);
   document.getElementById('eq_flag_monitor').checked = !!(it && it.flags && it.flags.indexOf('monitor') !== -1);
   eq_populateGroupSelect(it ? it.groupName : null);
-  eq_populateOwnerSelect(it ? it.ownerUUID : null);
+  eq_populateOwnerSelect(it ? (it.ownerUUIDs || it.ownerUUID) : null);
   eq_currentPhoto = null;
   var photoPrev = document.getElementById('eqPhotoPreview');
   var clearBtn = document.getElementById('eqClearPhotoBtn');
@@ -12458,7 +12512,7 @@ async function eq_saveItem() {
     model: document.getElementById('eq_model').value.trim(),
     serial: document.getElementById('eq_serial').value.trim(),
     idtag: document.getElementById('eq_idtag').value.trim(),
-    ownerUUID: document.getElementById('eq_owner').value || null,
+    ownerUUIDs: readOwnerCheckboxes('eq-owner-cb'),
     flags: flags,
     notes: document.getElementById('eq_notes').value.trim(),
     photoId: photoId,
@@ -12539,7 +12593,7 @@ function eq_openDetail(key) {
     it.idtag ? ('Tag: ' + it.idtag) : null,
     it.equipTypeName ? ('Type: ' + it.equipTypeName) : null,
     it.groupName ? ('Group: ' + it.groupName) : null,
-    it.ownerUUID ? ('Owner: ' + (OWNER_NAMES[it.ownerUUID]||'')) : null
+    (it.ownerUUIDs && it.ownerUUIDs.length) ? ('Owner: ' + it.ownerUUIDs.map(function(u){ return allOwnersList()[u] || ''; }).filter(Boolean).join(', ')) : (it.ownerUUID ? ('Owner: ' + (allOwnersList()[it.ownerUUID] || '')) : null)
   ].filter(Boolean).join(' · ');
   document.getElementById('eqDetailMeta').textContent = syncTag + (sub ? ' · ' + sub : '');
   document.getElementById('eqDetailNotes').textContent = it.notes || '';
@@ -12750,7 +12804,8 @@ async function eq_syncToFarmOS(logFn) {
         };
         if (it.idtag) attrs.id_tag = [{ id: it.idtag, type: 'tag' }];
         var relationships = {};
-        if (it.ownerUUID) relationships.owner = { data: [{ type: 'user--user', id: it.ownerUUID }] };
+        var eqOwners = (it.ownerUUIDs && it.ownerUUIDs.length) ? it.ownerUUIDs : (it.ownerUUID ? [it.ownerUUID] : []);
+        if (eqOwners.length) relationships.owner = { data: eqOwners.map(function(u) { return { type: 'user--user', id: u }; }) };
 
         // Equipment type — farmOS's own dedicated taxonomy (distinct from the
         // free-form Group field). Find-or-create by name, same pattern as Group.
@@ -13053,6 +13108,7 @@ async function eq_fetchAssets() {
           model: e.attributes.model || '',
           serial: e.attributes.serial_number || '',
           idtag: (e.attributes.id_tag && e.attributes.id_tag[0]) ? e.attributes.id_tag[0].id : '',
+          ownerUUIDs: ownerArr.map(function(o) { return o.id; }),
           ownerUUID: ownerArr.length ? ownerArr[0].id : null,
           flags: Array.isArray(e.attributes.flag) ? e.attributes.flag : [],
           notes: ((e.attributes.notes && (e.attributes.notes.value || e.attributes.notes)) || '').toString().replace(/<[^>]*>/g,'').trim(),
@@ -14109,8 +14165,8 @@ async function bd_pushLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
-  var ownerUUID = log.assigneeUUID || getOwnerUUID();
-  if (ownerUUID) payload.data.relationships.owner = { data: [{ type: 'user--user', id: ownerUUID }] };
+  var _birdOwner = ownerRel(log.assigneeUUID ? [log.assigneeUUID] : (log.ownerUUIDs || []));
+  if (_birdOwner) payload.data.relationships.owner = _birdOwner;
 
   // Eggs increment the shared Eggs Product's inventory in farmOS, same
   // documented pattern as Stock's inventory adjustments.
@@ -14174,8 +14230,8 @@ async function bd_patchLog(log, token) {
   var birdUUID = bird ? bird.uuid : null;
   var payload = { data: { type: 'log--' + ftype, id: log.farmosUUID, attributes: { name: log.logName || log.type, status: log.status === 'pending' ? 'pending' : 'done', timestamp: parseInt(log.timestamp), notes: { value: bd_buildNotes(log), format: 'default' } }, relationships: {} } };
   if (birdUUID) payload.data.relationships.asset = { data: [{ type: 'asset--animal', id: birdUUID }] };
-  var patchOwnerUUID = getOwnerUUID();
-  if (patchOwnerUUID) payload.data.relationships.owner = { data: [{ type: 'user--user', id: patchOwnerUUID }] };
+  var _birdPatchOwner = ownerRel(log.assigneeUUID ? [log.assigneeUUID] : (log.ownerUUIDs || []));
+  if (_birdPatchOwner) payload.data.relationships.owner = _birdPatchOwner;
   // Weight → update the same quantity in place (create if missing).
   if (log.type === 'weight') {
     try {
@@ -15772,6 +15828,7 @@ function be_openAddColony() {
   document.getElementById('be-colony-notes').value = '';
   document.getElementById('be-colony-location').innerHTML = be_locationOptions('');
   document.getElementById('be-colony-monitor').checked = false;
+  document.getElementById('be-colony-owner-box').innerHTML = ownerCheckboxesHTML('be-colony-owner-cb', []);
   document.getElementById('be-colony-priority').checked = false;
   document.getElementById('be-colony-review').checked = false;
   document.getElementById('be-colony-archive-row').style.display = 'none';
@@ -15789,6 +15846,7 @@ function be_editColony(id) {
   document.getElementById('be-colony-monitor').checked = !!(c.flags && c.flags.monitor);
   document.getElementById('be-colony-priority').checked = !!(c.flags && c.flags.priority);
   document.getElementById('be-colony-review').checked = !!(c.flags && c.flags.needsReview);
+  document.getElementById('be-colony-owner-box').innerHTML = ownerCheckboxesHTML('be-colony-owner-cb', c.ownerUUIDs || []);
   document.getElementById('be-colony-archive-row').style.display = '';
   document.getElementById('be-colony-modal').style.display = 'block';
 }
@@ -15830,18 +15888,19 @@ function be_saveColony() {
     priority:   document.getElementById('be-colony-priority').checked,
     needsReview: document.getElementById('be-colony-review').checked
   };
+  var ownerUUIDs = readOwnerCheckboxes('be-colony-owner-cb');
   if (be_editId) {
     var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_editId; })[0];
     if (c) {
       var locChanged = (c.locationKey || '') !== (locationKey || '');
-      c.name = name; c.notes = notes; c.flags = flags; c.locationKey = locationKey; c.synced = false;
+      c.name = name; c.notes = notes; c.flags = flags; c.locationKey = locationKey; c.ownerUUIDs = ownerUUIDs; c.synced = false;
       if (c.uuid) {
         be_pending.push({ action: 'update_colony', colonyUUID: c.uuid, colony: c, id: 'upd_' + Date.now(), synced: false });
         if (locChanged && locationKey) be_pending.push({ action: 'move_colony', colonyUUID: c.uuid, locationKey: locationKey, id: 'mv_' + Date.now(), synced: false });
       }
     }
   } else {
-    var nc = { _localId: 'local_' + Date.now(), uuid: null, name: name, notes: notes, flags: flags, locationKey: locationKey, status: 'active', synced: false };
+    var nc = { _localId: 'local_' + Date.now(), uuid: null, name: name, notes: notes, flags: flags, locationKey: locationKey, ownerUUIDs: ownerUUIDs, status: 'active', synced: false };
     be_colonies.push(nc);
     be_pending.push({ action: 'create_colony', colony: nc, id: nc._localId, synced: false });
   }
@@ -15873,8 +15932,8 @@ async function be_pushCreateColony(colony, token) {
   if (colony.flags) { if (colony.flags.monitor) flags.push('monitor'); if (colony.flags.priority) flags.push('priority'); if (colony.flags.needsReview) flags.push('needs_review'); }
   if (flags.length) attrs.flag = flags;
   var payload = { data: { type: ('asset--' + be_bundle), attributes: attrs } };
-  var ownerUUID = getOwnerUUID();
-  if (ownerUUID) payload.data.relationships = { owner: { data: [{ type: 'user--user', id: ownerUUID }] } };
+  var createOwners = (colony.ownerUUIDs && colony.ownerUUIDs.length) ? colony.ownerUUIDs : (getOwnerUUID() ? [getOwnerUUID()] : []);
+  if (createOwners.length) payload.data.relationships = { owner: { data: createOwners.map(function(u) { return { type: 'user--user', id: u }; }) } };
   var res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 200)); }
   var data = await res.json();
@@ -15893,6 +15952,7 @@ async function be_pushUpdateColony(colony, token) {
   if (colony.flags) { if (colony.flags.monitor) flags.push('monitor'); if (colony.flags.priority) flags.push('priority'); if (colony.flags.needsReview) flags.push('needs_review'); }
   attrs.flag = flags;
   var payload = { data: { type: ('asset--' + be_bundle), id: colony.uuid, attributes: attrs } };
+  if (colony.ownerUUIDs && colony.ownerUUIDs.length) payload.data.relationships = { owner: { data: colony.ownerUUIDs.map(function(u) { return { type: 'user--user', id: u }; }) } };
   var res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '/' + colony.uuid), { method: 'PATCH', headers: be_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var lc = be_colonies.filter(function(c) { return c.uuid === colony.uuid; })[0];
@@ -15964,7 +16024,7 @@ async function be_fetchColonies() {
   var resolvedF = await be_resolveBundle(token);
   if (!resolvedF) { showToast('No Bee colony asset type found — is the Bee module enabled in farmOS?'); return; }
   var res;
-  try { res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '?page[limit]=100&include=location'), { headers: be_postHeaders(token) }); }
+  try { res = await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '?page[limit]=100&include=location,owner'), { headers: be_postHeaders(token) }); }
   catch(e) { showToast('Fetch failed'); return; }
   if (!res.ok) {
     if (res.status === 404) showToast("No '" + be_bundle + "' asset type found — is the Bee module enabled?");
@@ -15976,12 +16036,15 @@ async function be_fetchColonies() {
   var fetched = (data.data || []).filter(function(a) { return !(a.attributes && a.attributes.archived); }).map(function(a) {
     var locRel = a.relationships && a.relationships.location && a.relationships.location.data;
     var locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
+    var ownRel = a.relationships && a.relationships.owner && a.relationships.owner.data;
+    var ownArr = Array.isArray(ownRel) ? ownRel : (ownRel ? [ownRel] : []);
     var flg = a.attributes.flag || [];
     return {
       _localId: 'srv_' + a.id, uuid: a.id,
       name: a.attributes.name || '(unnamed)',
       notes: (a.attributes.notes && (a.attributes.notes.value || a.attributes.notes)) || '',
       flags: { monitor: flg.indexOf('monitor') !== -1, priority: flg.indexOf('priority') !== -1, needsReview: flg.indexOf('needs_review') !== -1 },
+      ownerUUIDs: ownArr.map(function(o) { return o.id; }),
       locationKey: locArr.length ? locArr[0].id : '', status: 'active', synced: true
     };
   });
@@ -16162,7 +16225,7 @@ async function be_pushEvent(log, token) {
   attrs.name = name;
   if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
   var rel = { asset: { data: [{ type: ('asset--' + be_bundle), id: colonyUUID }] } };
-  var ownerUUID = getOwnerUUID(); if (ownerUUID) rel.owner = { data: [{ type: 'user--user', id: ownerUUID }] };
+  var _evOwner = ownerRel([]); if (_evOwner) rel.owner = _evOwner;
   if (qtyRefs.length) rel.quantity = { data: qtyRefs };
   var res = await fetchWithTimeout(apiUrl('/api/log/' + bundle), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify({ data: { type: 'log--' + bundle, attributes: attrs, relationships: rel } }) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 150)); }
@@ -17481,7 +17544,7 @@ function openLocationModal(key) {
   document.getElementById('location_flag_monitor').checked = !!(loc && loc.flags && loc.flags.indexOf('monitor') !== -1);
   var ownerSelect = document.getElementById('location_owner');
   ownerSelect.innerHTML = '<option value="">\u2014 unassigned \u2014</option>' +
-    Object.keys(OWNER_NAMES).map(function(uuid) { return '<option value="' + uuid + '">' + OWNER_NAMES[uuid] + '</option>'; }).join('');
+    Object.keys(allOwnersList()).map(function(uuid) { return '<option value="' + uuid + '">' + allOwnersList()[uuid] + '</option>'; }).join('');
   ownerSelect.value = loc ? (loc.ownerUUID || '') : '';
 
   location_currentPhoto = null;
@@ -18724,6 +18787,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-priority" style="width:auto;margin:0;"> Priority</label>
       <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-review" style="width:auto;margin:0;"> Needs review</label>
     </div>
+    <label>Owner(s)</label>
+    <div id="be-colony-owner-box" style="margin-bottom:8px;"></div>
     <div id="be-colony-archive-row" style="display:none;margin-bottom:8px;">
       <button onclick="be_openEventModal(be_editId)" class="wide" style="margin-bottom:8px;">📋 Log Event</button>
       <button onclick="be_archiveColony()" class="secondary wide" style="background:#5a2a2a;">Archive (deadout / combined)</button>
