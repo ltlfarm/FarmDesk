@@ -509,6 +509,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
         <input id="animalsNewDob" type="date" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       </div>
       <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
+      <label style="display:block;margin-top:8px;color:#888;font-size:13px;">Owner(s)</label>
+      <div id="animalsNewOwner" style="margin-bottom:4px;"></div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
         <input type="checkbox" id="animalsNewIsPurchase" style="width:18px;height:18px;" onchange="document.getElementById('animalsNewPriceRow').style.display = this.checked ? '' : 'none';">
         📦 This animal was purchased (logs a Purchase record in farmOS)
@@ -1940,7 +1942,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785384276;
+const APP_VERSION = 1785391060;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6289,6 +6291,8 @@ function editAnimalProfile(name) {
     '<button type="button" onclick="openGroupModal()" class="secondary" style="width:100%;margin-bottom:8px;padding:8px;font-size:13px;">Manage Groups</button>' +
     '<input id="epNotes" placeholder="Notes" value="' + (p.notes||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:8px;box-sizing:border-box;">' +
     '<input id="epNickname" placeholder="Nickname (optional)" value="' + (p.nickname||"").replace(/"/g,"&quot;") + '" style="width:100%;margin-bottom:12px;box-sizing:border-box;">' +
+    '<label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner(s)</label>' +
+    '<div id="epOwner" style="margin-bottom:12px;">' + ownerCheckboxesHTML('ep-owner-cb', p.ownerUUIDs || []) + '</div>' +
     '<label style="color:#888;font-size:13px;">Profile Photo</label>' +
     '<div style="display:flex;gap:6px;margin:4px 0 8px;">' +
     '<button type="button" onclick="epTakeCameraBridge()" style="flex:1;margin:0;padding:10px;font-size:14px;">📷 Camera</button>' +
@@ -6325,7 +6329,9 @@ async function saveAnimalProfile(name) {
   var newTag = document.getElementById("epTag").value;
   var newNotes = document.getElementById("epNotes").value;
   var newNickname = (document.getElementById("epNickname") ? document.getElementById("epNickname").value.trim() : "") || "";
-  var coreChanged = newSex !== (p.sex||"") || newDob !== (p.birthdate||"") || newBreed !== (p.breed||"") || newTag !== (p.tag||"") || newNotes !== (p.notes||"") || newNickname !== (p.nickname||"");
+  var newOwnerUUIDs = readOwnerCheckboxes('ep-owner-cb');
+  var ownersChanged = JSON.stringify(newOwnerUUIDs) !== JSON.stringify(p.ownerUUIDs || []);
+  var coreChanged = newSex !== (p.sex||"") || newDob !== (p.birthdate||"") || newBreed !== (p.breed||"") || newTag !== (p.tag||"") || newNotes !== (p.notes||"") || newNickname !== (p.nickname||"") || ownersChanged;
 
   // Resolve photo: null = unchanged, false = explicit clear, dataURL = new photo
   var newPhotoId = p.photoId || null;
@@ -6355,6 +6361,7 @@ async function saveAnimalProfile(name) {
     nickname:  newNickname,
     tag:       newTag,
     flags:     p.flags || [],
+    ownerUUIDs: newOwnerUUIDs,
     photo:     p.photo || null,
     photoId:   newPhotoId,
     photoUrl:  newPhotoUrl
@@ -6367,7 +6374,7 @@ async function saveAnimalProfile(name) {
     queuePendingAction('profileGroup', { animalName: name, newGroup: newGroup }, true);
   }
   if (coreChanged) {
-    queuePendingAction('profileCore', { animalName: name, sex: newSex, birthdate: newDob, breed: newBreed, tag: newTag, notes: newNotes }, true);
+    queuePendingAction('profileCore', { animalName: name, sex: newSex, birthdate: newDob, breed: newBreed, tag: newTag, notes: newNotes, ownerUUIDs: newOwnerUUIDs }, true);
   }
   if (photoChanged) {
     queuePendingAction('profilePhoto', { animalName: name, photoId: newPhotoId }, true);
@@ -6439,6 +6446,8 @@ async function pushAnimalProfileCore(name, fields) {
       if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
     }
     var payload = { data: { type: 'asset--animal', id: uuid, attributes: attrs } };
+    var _gpOwner = ownerRel(fields.ownerUUIDs || []);
+    if (_gpOwner) payload.data.relationships = { owner: _gpOwner };
     var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
@@ -6460,6 +6469,8 @@ function startFlowForAnimal(name) {
 
 function renderAnimalsScreen() {
   const al = document.getElementById("animalsAnimalList");
+  var _anOwnerBox = document.getElementById("animalsNewOwner");
+  if (_anOwnerBox && !_anOwnerBox.innerHTML) _anOwnerBox.innerHTML = ownerCheckboxesHTML('animals-new-owner-cb', getDefaultOwners());
   al.innerHTML = "";
   const goatBatches = batches.filter(function(b) { return b.module === 'goat'; });
   if (goatBatches.length) {
@@ -6525,6 +6536,7 @@ function addAnimalFromScreen() {
   var sex     = document.getElementById("animalsNewSex").value || "";
   var dob     = document.getElementById("animalsNewDob").value || "";
   var notes   = (document.getElementById("animalsNewNotes").value || "").trim();
+  var ownerUUIDs = readOwnerCheckboxes('animals-new-owner-cb');
   var isPurchase = document.getElementById("animalsNewIsPurchase").checked;
   var purchasePriceVal = parseFloat(document.getElementById("animalsNewPrice").value);
   var purchasePrice = isNaN(purchasePriceVal) ? null : purchasePriceVal;
@@ -6540,6 +6552,7 @@ function addAnimalFromScreen() {
     group:     "",
     notes:     notes,
     tag:       tag,
+    ownerUUIDs: ownerUUIDs,
     photo:     null
   };
   saveProfilesSafely();
@@ -6553,6 +6566,7 @@ function addAnimalFromScreen() {
   document.getElementById("animalsNewIsPurchase").checked = false;
   document.getElementById("animalsNewPrice").value = "";
   document.getElementById("animalsNewPriceRow").style.display = "none";
+  var _anob = document.getElementById("animalsNewOwner"); if (_anob) _anob.innerHTML = ownerCheckboxesHTML('animals-new-owner-cb', getDefaultOwners());
 
   populateGoatSelect();
   renderAnimalsScreen();
@@ -8250,7 +8264,7 @@ async function fetchAnimalUUIDs(silent = false) {
     const MODULE_ANIMAL_TYPES = ["goat"]; // lowercase term names this module owns
     if (!silent && el) el.textContent = "Fetching animals...";
     let animalRows = [], typeNames = {}, groupNames = {};
-    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image,group&page[limit]=100");
+    let aUrl = apiUrl("/api/asset/animal?include=animal_type,image,group,owner&page[limit]=100");
     while (aUrl) {
       const animalRes = await fetchWithTimeout(aUrl, { headers: authHeaders });
       if (!animalRes.ok) throw new Error("Animals fetch failed: HTTP " + animalRes.status);
@@ -8324,6 +8338,7 @@ async function fetchAnimalUUIDs(silent = false) {
         group:     grpName,
         notes:     fetchedNotes,
         flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
+        ownerUUIDs: (function(){ var orel=a.relationships&&a.relationships.owner&&a.relationships.owner.data; var oarr=Array.isArray(orel)?orel:(orel?[orel]:[]); return oarr.map(function(o){return o.id;}); })(),
         photoUrl:  imgId ? (typeNames[imgId] || null) : null,
         photo:     prevPhoto,
         nickname:  Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || "")
@@ -9031,6 +9046,8 @@ async function pushPurchaseAnimal(payload, token) {
       ),
       ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
     }};
+    var _ppOwner = ownerRel((animalProfiles[payload.animalName] || {}).ownerUUIDs || []);
+    if (_ppOwner) { if (!assetPayload.data.relationships) assetPayload.data.relationships = {}; assetPayload.data.relationships.owner = _ppOwner; }
     var assetRes = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers: headers, body: JSON.stringify(assetPayload) });
     if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
     var assetData = await assetRes.json();
@@ -13530,7 +13547,7 @@ async function bd_fetchAssets() {
   try {
     var token = await getCachedToken(cfg);
     var h = bd_authHeaders(token);
-    var res = await fetchWithTimeout(apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image'), { headers: h });
+    var res = await fetchWithTimeout(apiUrl('/api/asset/animal?page[limit]=100&include=animal_type,group,image,owner'), { headers: h });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
     // Diagnostic: log raw counts so we can see what the API actually returned
@@ -13578,7 +13595,7 @@ async function bd_fetchAssets() {
         fetchedBreed = breedMatch ? breedMatch[1].trim() : '';
         fetchedNotes = rawNotes.replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
       }
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: a.attributes.archived ? 'archived' : 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), synced: true };
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: a.attributes.archived ? 'archived' : 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), ownerUUIDs: (function(){ var orel=a.relationships&&a.relationships.owner&&a.relationships.owner.data; var oarr=Array.isArray(orel)?orel:(orel?[orel]:[]); return oarr.map(function(o){return o.id;}); })(), synced: true };
     });
     var resEq = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
@@ -14305,6 +14322,8 @@ async function bd_pushCreateBird(bird, token) {
       if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
     } catch(e) { /* species set is best-effort on create — core fields still save */ }
   }
+  var _bcOwner = ownerRel(bird.ownerUUIDs || []);
+  if (_bcOwner) { if (!payload.data.relationships) payload.data.relationships = {}; payload.data.relationships.owner = _bcOwner; }
   var res = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   var data = await res.json();
@@ -14348,6 +14367,8 @@ async function bd_pushUpdateBird(bird, token) {
       if (typeId) payload.data.relationships = { animal_type: { data: { type: 'taxonomy_term--animal_type', id: typeId } } };
     } catch(e) { /* species update is best-effort — core fields still save */ }
   }
+  var _buOwner = ownerRel(bird.ownerUUIDs || []);
+  if (_buOwner) { if (!payload.data.relationships) payload.data.relationships = {}; payload.data.relationships.owner = _buOwner; }
   var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + bird.uuid), { method: 'PATCH', headers: bd_postHeaders(token), body: JSON.stringify(payload) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0,250)); }
   // Photos attach to logs, not assets — pushing straight to the bird's
@@ -14957,6 +14978,7 @@ async function bd_openAddBird() {
   if (speciesSel) { speciesSel.innerHTML = BIRD_SPECIES_DEFAULTS.map(function(s) { return '<option>' + s + '</option>'; }).join(''); speciesSel.value = BIRD_SPECIES_DEFAULTS[0] || 'Chicken'; }
   document.getElementById('bd-bird-sex').value = '';
   bd_updateBreedList(); bd_populateFlock('bd-bird-flock'); await bd_birdShowPhoto(null);
+  document.getElementById('bd-bird-owner-box').innerHTML = ownerCheckboxesHTML('bd-bird-owner-cb', getDefaultOwners());
   document.getElementById('bd-bird-modal').style.display = 'block';
 }
 async function bd_openEditBird(id) {
@@ -14973,6 +14995,7 @@ async function bd_openEditBird(id) {
   if (document.getElementById('bd-bird-nickname')) document.getElementById('bd-bird-nickname').value = bird.nickname || '';
   document.getElementById('bd-bird-breed-custom').value = bird.breed || '';
   bd_updateBreedList(); bd_populateFlock('bd-bird-flock', bird.flock); await bd_birdShowPhoto(bird);
+  document.getElementById('bd-bird-owner-box').innerHTML = ownerCheckboxesHTML('bd-bird-owner-cb', bird.ownerUUIDs || []);
   document.getElementById('bd-bird-modal').style.display = 'block';
 }
 function bd_closeBirdModal(e) { if (!e || e.target === document.getElementById('bd-bird-modal')) document.getElementById('bd-bird-modal').style.display = 'none'; }
@@ -14995,6 +15018,7 @@ async function bd_saveBird() {
   var flock   = document.getElementById('bd-bird-flock').value;
   var notes    = document.getElementById('bd-bird-notes').value.trim();
   var nickname = (document.getElementById('bd-bird-nickname') ? document.getElementById('bd-bird-nickname').value.trim() : '') || '';
+  var ownerUUIDs = readOwnerCheckboxes('bd-bird-owner-cb');
   if (!tag && !name) { bd_toast('Enter a tag or name'); return; }
   if (bd_editBirdId) {
     var bird = bd_birds.filter(function(b) { return (b.uuid || b._localId) === bd_editBirdId; })[0];
@@ -15003,12 +15027,12 @@ async function bd_saveBird() {
       var _oldPhotoId = bird.photoId || null;
       var _newPhotoId = bd_currentBirdPhoto ? await Photos.save(bd_currentBirdPhoto) : null;
       if (_oldPhotoId && _oldPhotoId !== _newPhotoId) Photos.remove(_oldPhotoId);
-      bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.nickname = nickname; bird.photoId = _newPhotoId; bird.synced = false;
+      bird.tag = tag; bird.name = name; bird.species = species; bird.breed = breed; bird.sex = sex; bird.flock = flock; bird.notes = notes; bird.nickname = nickname; bird.ownerUUIDs = ownerUUIDs; bird.photoId = _newPhotoId; bird.synced = false;
       if (bird.uuid) { bd_pending.push({ action: 'update_bird', birdUUID: bird.uuid, bird: bird, id: 'upd_' + Date.now(), synced: false }); if ((flock || '') !== _oldFlock) bd_pending.push({ action: 'group_assign', birdUUID: bird.uuid, flockName: flock, id: 'ga_' + Date.now(), synced: false }); }
     }
   } else {
     var newPhotoId = bd_currentBirdPhoto ? await Photos.save(bd_currentBirdPhoto) : null;
-    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, nickname: nickname, photoId: newPhotoId, status: 'active', synced: false };
+    var nb = { _localId: 'local_' + Date.now(), uuid: null, tag: tag, name: name, species: species, breed: breed, sex: sex, flock: flock, notes: notes, nickname: nickname, ownerUUIDs: ownerUUIDs, photoId: newPhotoId, status: 'active', synced: false };
     bd_birds.push(nb); bd_pending.push({ action: 'create_bird', bird: nb, id: nb._localId, synced: false });
   }
   document.getElementById('bd-bird-modal').style.display = 'none';
@@ -18892,6 +18916,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <input id="bd-bird-notes" placeholder="Optional notes">
     <label>Nickname (optional)</label>
     <input id="bd-bird-nickname" placeholder="Common name or alias">
+    <label>Owner(s)</label>
+    <div id="bd-bird-owner-box" style="margin-bottom:8px;"></div>
     <label style="margin-top:12px;">Profile Photo (optional)</label>
     <div style="display:flex;gap:6px;margin-top:4px;">
       <button type="button" onclick="bd_birdTakeCamera()" style="flex:1;margin:0;padding:10px;font-size:14px;background:#333;">Camera</button>
