@@ -1942,7 +1942,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785391060;
+const APP_VERSION = 1785391249;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -14745,6 +14745,7 @@ function bd_openLogSheet(id) {
   var now = new Date(); now.setSeconds(0,0);
   document.getElementById('bd-log-time').value = bd_localISO(now).slice(0,16);
   bd_currentPhoto = null; bd_renderLogFields();
+  document.getElementById('bd-log-owner-box').innerHTML = ownerCheckboxesHTML('bd-log-owner-cb', getDefaultOwners());
   document.getElementById('bd-log-modal').style.display = 'block';
 }
 
@@ -14834,7 +14835,7 @@ async function bd_saveLog() {
   // was already pushed as "pending") so this updates the same log instead
   // of creating a duplicate — mirrors GoatDesk's _activeTaskId mechanism.
   var existingTask = bd_activeTaskId ? bd_history.filter(function(x) { return x.id === bd_activeTaskId; })[0] : null;
-  var logData = { id: existingTask ? existingTask.id : (Date.now() + '_' + Math.random().toString(36).slice(2)), type: t, birdId: bd_currentBirdId, birdTag: bird ? (bird.tag||'') : '', birdName: bird ? (bird.name||'') : '', timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, status: 'done', synced: false };
+  var logData = { id: existingTask ? existingTask.id : (Date.now() + '_' + Math.random().toString(36).slice(2)), type: t, birdId: bd_currentBirdId, birdTag: bird ? (bird.tag||'') : '', birdName: bird ? (bird.name||'') : '', timestamp: ts, timeISO: new Date(timeVal).toISOString(), notes: notes, status: 'done', ownerUUIDs: readOwnerCheckboxes('bd-log-owner-cb'), synced: false };
   if (existingTask) { logData.farmosUUID = existingTask.farmosUUID; logData.farmosBundle = existingTask.farmosBundle; if (existingTask._qtyWeight) logData._qtyWeight = existingTask._qtyWeight; }
   var dateStr = bd_localISO(new Date(timeVal)).slice(0,10);
   var birdLabel = bird ? (bird.tag || bird.name || 'Bird') : 'Bird';
@@ -16099,6 +16100,7 @@ function be_openEventModal(colonyKey) {
   var now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   document.getElementById('be-event-time').value = now.toISOString().slice(0, 16);
   document.getElementById('be-event-notes').value = '';
+  document.getElementById('be-event-owner-box').innerHTML = ownerCheckboxesHTML('be-event-owner-cb', getDefaultOwners());
   be_renderEventFields();
   document.getElementById('be-event-modal').style.display = 'block';
 }
@@ -16162,6 +16164,7 @@ function be_saveEvent() {
   var log = {
     id: 'belog_' + Date.now(), colonyKey: colonyKey, colonyName: c.name || '',
     type: t, ts: new Date(timeVal).toISOString(), data: data, notes: notes,
+    ownerUUIDs: readOwnerCheckboxes('be-event-owner-cb'),
     synced: false, farmosUUID: null
   };
   be_logs.unshift(log);
@@ -16247,7 +16250,7 @@ async function be_pushEvent(log, token) {
   attrs.name = name;
   if (notesParts.length) attrs.notes = { value: notesParts.join('\n'), format: 'default' };
   var rel = { asset: { data: [{ type: ('asset--' + be_bundle), id: colonyUUID }] } };
-  var _evOwner = ownerRel([]); if (_evOwner) rel.owner = _evOwner;
+  var _evOwner = ownerRel(log.ownerUUIDs || []); if (_evOwner) rel.owner = _evOwner;
   if (qtyRefs.length) rel.quantity = { data: qtyRefs };
   var res = await fetchWithTimeout(apiUrl('/api/log/' + bundle), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify({ data: { type: 'log--' + bundle, attributes: attrs, relationships: rel } }) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 150)); }
@@ -18851,6 +18854,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <input type="datetime-local" id="be-event-time">
     <label>Notes</label>
     <textarea id="be-event-notes" placeholder="Optional notes" style="width:100%;box-sizing:border-box;min-height:60px;"></textarea>
+    <label>Owner(s)</label>
+    <div id="be-event-owner-box" style="margin-bottom:8px;"></div>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button onclick="be_saveEvent()" style="flex:1;">Save Event</button>
       <button class="secondary" onclick="be_closeEventModal()" style="flex:0 0 auto;">Cancel</button>
@@ -18873,6 +18878,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
       <button onclick="bd_setLogNow()" style="padding:10px;margin:0;font-size:13px;">Now</button>
     </div>
     <div id="bd-log-fields" style="margin-top:4px;"></div>
+    <label>Owner(s)</label>
+    <div id="bd-log-owner-box" style="margin-bottom:8px;"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button onclick="bd_saveLog()" style="flex:1;">Save</button>
       <button class="secondary" onclick="bd_closeLogModal()" style="flex:0 0 auto;">Cancel</button>
