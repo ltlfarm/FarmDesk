@@ -1940,7 +1940,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785374968;
+const APP_VERSION = 1785384276;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -10747,6 +10747,7 @@ async function refreshAssets(silent) {
         unitId:    guessUnitId(name, measure),
         notes:     notesVal,
         idtag:     (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '',
+        ownerUUIDs: ownerArr.map(function(o){ return o.id; }),
         ownerUUID: ownerArr.length ? ownerArr[0].id : null,
         flags:     Array.isArray(a.attributes.flag) ? a.attributes.flag : [],
         // File attachment is push-only for now — farmOS doesn't hand it back
@@ -11478,11 +11479,8 @@ async function openEditItem(uuid) {
     <input type="number" id="editItemThreshold" min="0" step="any" value="${thresholds[a.uuid] || 0}" placeholder="0 = off" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">ID Tag</label>
     <input type="text" id="editItemIdTag" value="${(a.idtag||'').replace(/"/g,'&quot;')}" placeholder="Asset tag / barcode" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Owner</label>
-    <select id="editItemOwner" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-      <option value="">— unassigned —</option>
-      ${Object.keys(allOwnersList()).map(uuid => `<option value="${uuid}"${a.ownerUUID === uuid ? ' selected' : ''}>${allOwnersList()[uuid]}</option>`).join('')}
-    </select>
+    <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Owner(s)</label>
+    <div style="margin-top:4px;">${ownerCheckboxesHTML('edititem-owner-cb', a.ownerUUIDs || (a.ownerUUID ? [a.ownerUUID] : []))}</div>
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Flags</label>
     <div style="display:flex;gap:12px;margin-top:4px;flex-wrap:wrap;">
       <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="editItemFlagPriority" ${(a.flags||[]).indexOf('priority')!==-1?'checked':''} style="width:auto;"> 🔴 Priority</label>
@@ -11512,7 +11510,7 @@ async function openEditItem(uuid) {
     const newNotes     = document.getElementById('editItemNotes').value.trim();
     const newThreshold = parseFloat(document.getElementById('editItemThreshold').value) || 0;
     const newIdTag     = document.getElementById('editItemIdTag').value.trim();
-    const newOwner     = document.getElementById('editItemOwner').value || null;
+    const newOwnerUUIDs = readOwnerCheckboxes('edititem-owner-cb');
     const newFlags     = [];
     if (document.getElementById('editItemFlagPriority').checked) newFlags.push('priority');
     if (document.getElementById('editItemFlagNeedsReview').checked) newFlags.push('needs_review');
@@ -11521,7 +11519,7 @@ async function openEditItem(uuid) {
     a.name   = newName;
     a.notes  = newNotes;
     a.idtag  = newIdTag;
-    a.ownerUUID = newOwner;
+    a.ownerUUIDs = newOwnerUUIDs; a.ownerUUID = newOwnerUUIDs[0] || null;
     a.flags  = newFlags;
     if (window._editItemFileAttach) a.fileAttach = window._editItemFileAttach;
 
@@ -11544,7 +11542,7 @@ async function openEditItem(uuid) {
     // Queue PATCH if real UUID
     if (!a.uuid.startsWith('local_')) {
       pending = pending.filter(p => !(p.type === 'patch_asset' && p.uuid === a.uuid));
-      pending.push({ id: 'patch_' + a.uuid, type: 'patch_asset', uuid: a.uuid, name: newName, notes: newNotes, idtag: newIdTag, ownerUUID: newOwner, flags: newFlags, fileAttach: a.fileAttach || null, synced: false });
+      pending.push({ id: 'patch_' + a.uuid, type: 'patch_asset', uuid: a.uuid, name: newName, notes: newNotes, idtag: newIdTag, ownerUUIDs: newOwnerUUIDs, flags: newFlags, fileAttach: a.fileAttach || null, synced: false });
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
       updateSyncBadge();
     }
@@ -11903,7 +11901,7 @@ async function sd_syncToFarmOS() {
         if (item.flags) patchAttrs.flag = item.flags;
         if (item.idtag) patchAttrs.id_tag = [{ id: item.idtag, type: 'tag' }];
         const patchRelationships = {};
-        if (item.ownerUUID) patchRelationships.owner = { data: [{ type: 'user--user', id: item.ownerUUID }] };
+        var _patchOwner = ownerRel(item.ownerUUIDs || (item.ownerUUID ? [item.ownerUUID] : [])); if (_patchOwner) patchRelationships.owner = _patchOwner;
         const patchBody = {
           data: {
             type: 'asset--material',
@@ -17275,6 +17273,7 @@ async function locationsFetch() {
           archived: !!l.attributes.archived,
           parentKey: parentArr.length ? parentArr[0].id : null,
           idtag: (l.attributes.id_tag && l.attributes.id_tag[0]) ? l.attributes.id_tag[0].id : '',
+          ownerUUIDs: ownerArr.map(function(o){ return o.id; }),
           ownerUUID: ownerArr.length ? ownerArr[0].id : null,
           flags: Array.isArray(l.attributes.flag) ? l.attributes.flag : [],
           photoId: existingLoc ? existingLoc.photoId : null,
@@ -17542,10 +17541,8 @@ function openLocationModal(key) {
   document.getElementById('location_flag_priority').checked = !!(loc && loc.flags && loc.flags.indexOf('priority') !== -1);
   document.getElementById('location_flag_needs_review').checked = !!(loc && loc.flags && loc.flags.indexOf('needs_review') !== -1);
   document.getElementById('location_flag_monitor').checked = !!(loc && loc.flags && loc.flags.indexOf('monitor') !== -1);
-  var ownerSelect = document.getElementById('location_owner');
-  ownerSelect.innerHTML = '<option value="">\u2014 unassigned \u2014</option>' +
-    Object.keys(allOwnersList()).map(function(uuid) { return '<option value="' + uuid + '">' + allOwnersList()[uuid] + '</option>'; }).join('');
-  ownerSelect.value = loc ? (loc.ownerUUID || '') : '';
+  var _locOwners = loc ? (loc.ownerUUIDs || (loc.ownerUUID ? [loc.ownerUUID] : [])) : getDefaultOwners();
+  document.getElementById('location_owner_box').innerHTML = ownerCheckboxesHTML('location-owner-cb', _locOwners);
 
   location_currentPhoto = null;
   var locPhotoPrev = document.getElementById('locationPhotoPreview');
@@ -17774,7 +17771,8 @@ async function saveLocationLocal() {
     wkt: document.getElementById('location_wkt').value || null,
     parentKey: document.getElementById('location_parent').value || null,
     idtag: document.getElementById('location_idtag').value.trim(),
-    ownerUUID: document.getElementById('location_owner').value || null,
+    ownerUUIDs: readOwnerCheckboxes('location-owner-cb'),
+    ownerUUID: (readOwnerCheckboxes('location-owner-cb')[0] || null),
     flags: flags,
     photoId: photoId,
     fileAttach: fileAttach,
@@ -19129,10 +19127,8 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <textarea id="location_notes" rows="2" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;"></textarea>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">ID Tag</label>
     <input id="location_idtag" type="text" placeholder="Asset tag / parcel number" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner</label>
-    <select id="location_owner" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
-      <option value="">— unassigned —</option>
-    </select>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner(s)</label>
+    <div id="location_owner_box" style="margin-bottom:8px;"></div>
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Flags</label>
     <div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
       <label style="font-size:14px;color:#eee;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="location_flag_priority" style="width:auto;"> 🔴 Priority</label>
