@@ -1252,6 +1252,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <input type="datetime-local" id="adjustTimestamp" style="width:100%;padding:12px;margin-top:4px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label>Notes (optional)</label>
     <input type="text" id="adjustNotes" placeholder="e.g. Received delivery, batch lot #" enterkeyhint="next" onkeydown="if(event.key==='Enter'){event.preventDefault();const pb=document.getElementById('priceBox');if(pb&&pb.style.display!=='none'){document.getElementById('restockSeller').focus();}else{confirmAdjust();}}">
+    <label>Owner(s)</label>
+    <div id="adjustOwnerBox" style="margin-top:4px;"></div>
   </div>
   <!-- Price box — shown on Restock only -->
   <div class="box" id="priceBox" style="display:none;">
@@ -1629,6 +1631,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <input type="datetime-local" id="eqMaint_time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="eqMaint_notes" rows="3" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;" placeholder="Oil change, repair, inspection..."></textarea>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner(s)</label>
+    <div id="eqMaint_owner_box" style="margin-bottom:12px;"></div>
     <button onclick="eq_saveMaintenanceEntry()" style="width:100%;margin:0 0 8px;">💾 Save</button>
     <button id="eqMaintDeleteBtn" onclick="eq_deleteMaintenanceEntry()" class="secondary" style="width:100%;margin:0;background:#5a1a1a;display:none;">🗑️ Delete</button>
   </div>
@@ -1942,7 +1946,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785391249;
+const APP_VERSION = 1785426471;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2283,7 +2287,9 @@ function renderFollowupHTML() {
 
 // Appended to every log form when farmOS log_category terms exist on this instance
 function renderCategoryHTML() {
-  return buildCategorySelectHTML('');
+  return buildCategorySelectHTML('') +
+    '<label style="color:#888;font-size:13px;margin-top:8px;display:block;">Owner(s)</label>' +
+    '<div id="f_owner_box" style="margin-bottom:8px;">' + ownerCheckboxesHTML('f-owner-cb', getDefaultOwners()) + '</div>';
 }
 
 function setupFollowupHandler() {
@@ -3119,7 +3125,7 @@ function saveStep() {
   const ts = getTimestamp();
 
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
-  const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, loggedBy: localStorage.getItem(LS.activeUser) || cfg.user || "" };
+  const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: localStorage.getItem(LS.activeUser) || cfg.user || "" };
   // Read optional log category
   var catEl = document.getElementById('f_log_category');
   if (catEl && catEl.value) entry.logCategoryId = catEl.value;
@@ -11154,6 +11160,7 @@ async function openAdjust(uuid) {
   setAction('increment');
   initTimestamp();
   document.getElementById('adjustNotes').value = '';
+  document.getElementById('adjustOwnerBox').innerHTML = ownerCheckboxesHTML('adjust-owner-cb', getDefaultOwners());
   document.getElementById('isInjection').checked = false;
   document.getElementById('injectionFields').style.display = 'none';
   // Notes display
@@ -11731,6 +11738,7 @@ function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, tota
     unitPrice:  (unitPrice  != null ? unitPrice  : null),
     totalPrice: (totalPrice != null ? totalPrice : null),
     timestamp,
+    ownerUUIDs: readOwnerCheckboxes('adjust-owner-cb'),
     synced:    false
   };
   pending.push(entry);
@@ -12020,7 +12028,7 @@ async function sd_syncToFarmOS() {
           const bMatch = birdAssets.find(b => (b.name === item.linkedAssetName || b.tag === item.linkedAssetName) && b.uuid);
           if (bMatch) assetRefs.push({ type: 'asset--animal', id: bMatch.uuid });
         }
-        const _sdOwner = ownerRel([]);
+        const _sdOwner = ownerRel(item.ownerUUIDs || []);
         const lBody = {
           data: {
             type: 'log--' + logBundle,
@@ -12678,6 +12686,7 @@ function eq_openMaintenanceModal(entryId) {
     document.getElementById('eqMaint_readingUnit').value = 'hours';
     document.getElementById('eqMaintDeleteBtn').style.display = 'none';
   }
+  document.getElementById('eqMaint_owner_box').innerHTML = ownerCheckboxesHTML('eqmaint-owner-cb', entry ? (entry.ownerUUIDs || []) : getDefaultOwners());
   document.getElementById('eqMaintenanceModal').style.display = 'block';
 }
 function eq_closeMaintenanceModal() { document.getElementById('eqMaintenanceModal').style.display = 'none'; }
@@ -12688,6 +12697,7 @@ function eq_saveMaintenanceEntry() {
   var timeVal = document.getElementById('eqMaint_time').value;
   var notes = document.getElementById('eqMaint_notes').value || '';
   var logType = document.getElementById('eqMaint_type').value;
+  var maintOwners = readOwnerCheckboxes('eqmaint-owner-cb');
   if (!timeVal) { showToast('⚠️ Set a date/time'); return; }
 
   if (entryId) {
@@ -12695,6 +12705,7 @@ function eq_saveMaintenanceEntry() {
     if (!existing) return;
     existing.logType = logType;
     existing.notes = notes;
+    existing.ownerUUIDs = maintOwners;
     existing.ts = new Date(timeVal).toISOString();
     existing.synced = false;
     if (logType === 'reading') {
@@ -12708,7 +12719,7 @@ function eq_saveMaintenanceEntry() {
     localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
     showToast('✅ Updated locally — will sync to farmOS next push');
   } else {
-    var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ts: new Date(timeVal).toISOString(), synced: false };
+    var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ownerUUIDs: maintOwners, ts: new Date(timeVal).toISOString(), synced: false };
     if (logType === 'reading') {
       var val = document.getElementById('eqMaint_readingValue').value;
       if (!val) { showToast('⚠️ Enter a reading value'); return; }
@@ -12951,6 +12962,8 @@ async function eq_syncToFarmOS(logFn) {
         if (!it2 || !it2.farmosUUID) throw new Error('Equipment not synced yet — will retry next sync');
         var ts2 = String(Math.floor(new Date(entry.ts).getTime() / 1000));
         var mData;
+        var _eqLogOwner = ownerRel(entry.ownerUUIDs || []);
+        var _eqOwnerObj = _eqLogOwner ? { owner: _eqLogOwner } : {};
         if (entry.logType === 'reading') {
           var qRelationship = {};
           // Readings are real measurements: hours → time, miles → length, with
@@ -12987,7 +13000,7 @@ async function eq_syncToFarmOS(logFn) {
           if (entry.farmosUUID) {
             var rRes = await fetchWithTimeout(apiUrl('/api/log/observation/' + entry.farmosUUID), {
               method: 'PATCH', headers: headers,
-              body: JSON.stringify({ data: { type: 'log--observation', id: entry.farmosUUID, attributes: rAttrs, relationships: qRelationship } })
+              body: JSON.stringify({ data: { type: 'log--observation', id: entry.farmosUUID, attributes: rAttrs, relationships: Object.assign({}, qRelationship, _eqOwnerObj) } })
             });
             if (!rRes.ok) throw new Error('HTTP ' + rRes.status);
             mData = await rRes.json();
@@ -12997,7 +13010,7 @@ async function eq_syncToFarmOS(logFn) {
               body: JSON.stringify({ data: {
                 type: 'log--observation',
                 attributes: rAttrs,
-                relationships: Object.assign({ asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }, qRelationship)
+                relationships: Object.assign({ asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }, qRelationship, _eqOwnerObj)
               }})
             });
             if (!rRes2.ok) throw new Error('HTTP ' + rRes2.status);
@@ -13008,7 +13021,7 @@ async function eq_syncToFarmOS(logFn) {
           if (entry.farmosUUID) {
             var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance/' + entry.farmosUUID), {
               method: 'PATCH', headers: headers,
-              body: JSON.stringify({ data: { type: 'log--maintenance', id: entry.farmosUUID, attributes: mAttrs } })
+              body: JSON.stringify({ data: { type: 'log--maintenance', id: entry.farmosUUID, attributes: mAttrs, relationships: _eqOwnerObj } })
             });
             if (!mRes.ok) throw new Error('HTTP ' + mRes.status);
             mData = await mRes.json();
@@ -13018,7 +13031,7 @@ async function eq_syncToFarmOS(logFn) {
               body: JSON.stringify({ data: {
                 type: 'log--maintenance',
                 attributes: mAttrs,
-                relationships: { asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }
+                relationships: Object.assign({ asset: { data: [{ type: 'asset--equipment', id: it2.farmosUUID }] } }, _eqOwnerObj)
               }})
             });
             if (!mRes2.ok) throw new Error('HTTP ' + mRes2.status);
