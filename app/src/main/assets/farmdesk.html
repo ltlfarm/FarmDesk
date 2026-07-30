@@ -1257,8 +1257,8 @@ body.role-viewer #setgrp-farmname { display: none !important; }
   </div>
   <!-- Price box — shown on Restock only -->
   <div class="box" id="priceBox" style="display:none;">
-    <strong>💰 Restock Details</strong>
-    <label>Seller (optional)</label>
+    <strong id="priceBoxTitle">💰 Restock Details</strong>
+    <label id="sellerLabel">Seller (optional)</label>
     <input type="text" id="restockSeller" placeholder="e.g. Feed store, supplier name" enterkeyhint="next" onfocus="this.select()" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('restockLot').focus();}">
     <label>Lot Number (optional)</label>
     <input type="text" id="restockLot" placeholder="e.g. Lot #, batch #" enterkeyhint="next" onfocus="this.select()" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('priceUnit').focus();}">
@@ -1946,7 +1946,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785441070;
+const APP_VERSION = 1785452807;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -11337,7 +11337,11 @@ function setAction(action) {
   });
   document.getElementById('adjustAmount').value =
     action === 'reset' ? (adjustAsset?.value || 0) : 1;
-  document.getElementById('priceBox').style.display = action === 'increment' ? '' : 'none';
+  document.getElementById('priceBox').style.display = action === 'reset' ? 'none' : '';
+  const priceTitleEl = document.getElementById('priceBoxTitle');
+  const sellerLabelEl = document.getElementById('sellerLabel');
+  if (priceTitleEl) priceTitleEl.textContent = action === 'increment' ? '💰 Restock Details' : '💰 Sale Details (optional)';
+  if (sellerLabelEl) sellerLabelEl.textContent = action === 'increment' ? 'Seller (optional)' : 'Buyer (optional)';
   // Injection section only relevant when using (decrement), not restocking
   const isMedLiquid  = adjustAsset?.category === 'Medical' && adjustAsset?.measure === 'volume';
   const isInjectable = adjustAsset && INJECTABLE_KEYWORDS.some(k => adjustAsset.name.toLowerCase().includes(k));
@@ -11670,16 +11674,17 @@ async function confirmAdjust() {
     showToast('Enter a valid amount'); return;
   }
   const userNotes = document.getElementById('adjustNotes').value.trim();
-  const costNote  = adjustAction === 'increment' ? buildCostNote() : '';
+  const costNote  = adjustAction !== 'reset' ? buildCostNote() : '';
   const notes     = costNote && userNotes ? costNote + '\n' + userNotes
                   : costNote || userNotes;
-  const seller    = adjustAction === 'increment' ? (document.getElementById('restockSeller').value.trim()) : '';
-  const lot       = adjustAction === 'increment' ? (document.getElementById('restockLot').value.trim()) : '';
+  const seller    = adjustAction !== 'reset' ? (document.getElementById('restockSeller').value.trim()) : '';
+  const lot       = adjustAction !== 'reset' ? (document.getElementById('restockLot').value.trim()) : '';
   const ts        = sd_getTimestamp();
-  // Structured numeric price for the Ledger — only on increments (restocks).
+  // Structured numeric price for the Ledger — increments become a Purchase,
+  // decrements with a price become a Sale (see processPendingActions 'adjust').
   // priceType 'each' => priceUnit is per-unit; 'lot' => priceUnit is the lot total.
   var unitPriceNum = null, totalPriceNum = null;
-  if (adjustAction === 'increment') {
+  if (adjustAction === 'increment' || adjustAction === 'decrement') {
     var priceInput = parseFloat(document.getElementById('priceUnit') && document.getElementById('priceUnit').value) || 0;
     if (priceInput > 0 && amount > 0) {
       if (priceType === 'lot') { totalPriceNum = priceInput; unitPriceNum = priceInput / amount; }
@@ -11700,9 +11705,11 @@ async function confirmAdjust() {
       if (na) adjustments.push({ asset: na, action: 'decrement', amount: 1 });
     }
   }
-  for (const adj of adjustments) {
-    var aUnit  = adj.action === 'increment' ? unitPriceNum  : null;
-    var aTotal = adj.action === 'increment' ? totalPriceNum : null;
+  for (let ai = 0; ai < adjustments.length; ai++) {
+    const adj = adjustments[ai];
+    const isPrimary = ai === 0; // injection-triggered syringe/needle decrements never carry the sale price
+    var aUnit  = (isPrimary && (adj.action === 'increment' || adj.action === 'decrement')) ? unitPriceNum  : null;
+    var aTotal = (isPrimary && (adj.action === 'increment' || adj.action === 'decrement')) ? totalPriceNum : null;
     doAdjust(adj.asset, adj.action, adj.amount, notes, seller, lot, ts, aUnit, aTotal);
   }
   // Save photo to asset locally (replacing just the primary slot) and queue
@@ -11992,18 +11999,20 @@ async function sd_syncToFarmOS() {
         // POST quantity then log — farmOS inventory adjustment
         const num = Number.isInteger(item.amount) ? String(item.amount) : String(Math.round(item.amount * 100));
         const den = Number.isInteger(item.amount) ? '1' : '100';
-        // Priced restock (increment with a price) → store as quantity--price + log--purchase
-        // so it shows in the Ledger with structured cost. Everything else stays
-        // quantity--standard + log--activity (unchanged).
+        // Priced restock (increment with a price) → store as quantity--price + log--purchase.
+        // Priced decrement (sale out of inventory) → same, but + log--sale, so it shows up
+        // in the Ledger's farmOS fetch (which only queries /api/log/sale + /api/log/purchase).
+        // Everything else stays quantity--standard + log--activity (unchanged).
         const isPricedRestock = item.action === 'increment' && item.unitPrice != null && item.unitPrice > 0;
-        const qBundle = isPricedRestock ? 'price' : 'standard';
+        const isPricedSale    = item.action === 'decrement' && item.unitPrice != null && item.unitPrice > 0;
+        const qBundle = (isPricedRestock || isPricedSale) ? 'price' : 'standard';
         const qAttrs = {
           measure:              item.measure || 'count',
           value:                { numerator: num, denominator: den },
           inventory_adjustment: item.action,
           ...(item.notes ? { label: item.notes } : {})
         };
-        if (isPricedRestock) {
+        if (isPricedRestock || isPricedSale) {
           const totalP = (item.totalPrice != null ? item.totalPrice : item.unitPrice * item.amount);
           qAttrs.unit_price  = { numerator: String(Math.round(item.unitPrice * 100)), denominator: '100' };
           qAttrs.total_price = { numerator: String(Math.round(totalP * 100)),          denominator: '100' };
@@ -12042,7 +12051,7 @@ async function sd_syncToFarmOS() {
         const qData  = await qRes.json();
         const qUUID  = qData.data.id;
         const qRevId = qData.data.attributes?.drupal_internal__revision_id;
-        const logBundle = isPricedRestock ? 'purchase' : 'activity'; // priced restock → purchase; else activity (works on all farmOS instances)
+        const logBundle = isPricedRestock ? 'purchase' : (isPricedSale ? 'sale' : 'activity'); // priced restock → purchase; priced decrement → sale; else activity (works on all farmOS instances)
         // Cross-module link: if this deduction came from a goat or bird med
         // log, include that animal in the log's asset relationship too —
         // so the farmOS record connects the item used to the animal it was
@@ -12062,7 +12071,7 @@ async function sd_syncToFarmOS() {
           data: {
             type: 'log--' + logBundle,
             attributes: {
-              name:      (isPricedRestock ? 'Purchase: ' : 'Inventory ' + item.action + ': ') + item.name,
+              name:      (isPricedRestock ? 'Purchase: ' : (isPricedSale ? 'Sale: ' : 'Inventory ' + item.action + ': ')) + item.name,
               timestamp: item.timestamp,
               status:    'done',
               notes: { value: [
@@ -16411,20 +16420,6 @@ const MODULES = [
     },
     onPullFromFarmOS: async function() { await fetchAnimalUUIDs(true); }
   },
-  { id: 'stock', label: '📦 Inventory', title: '📦 FarmDesk',
-    containerId: 'module-stockdesk',
-    onActivate: function() {
-      document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
-      const sdDash = document.getElementById('sd-screen-dashboard');
-      if (sdDash) sdDash.classList.add('active');
-      document.querySelectorAll('.sd-bottom-nav button').forEach(b => b.classList.remove('active'));
-      const sdNavBtn = document.getElementById('sd-nav-dashboard');
-      if (sdNavBtn) sdNavBtn.classList.add('active');
-      renderDashboard();
-      if (typeof updateSyncBadge === 'function') updateSyncBadge();
-    },
-    onPullFromFarmOS: async function() { await refreshAssets(true); }
-  },
   { id: 'birds', label: '🐦 Birds', title: '🐦 FarmDesk',
     containerId: 'module-birddesk',
     onActivate: function() {
@@ -16438,6 +16433,17 @@ const MODULES = [
       bd_updateSyncBadge();
     },
     onPullFromFarmOS: async function() { await bd_fetchAssets(); }
+  },
+  { id: 'bees', label: '🐝 Bees', title: '🐝 FarmDesk',
+    containerId: 'module-beedesk',
+    onActivate: function() {
+      document.querySelectorAll('#module-beedesk .screen').forEach(function(s) { s.classList.remove('active'); });
+      var el = document.getElementById('be-screen-colonies'); if (el) el.classList.add('active');
+      document.querySelectorAll('.be-bottom-nav button').forEach(function(b) { b.classList.remove('active'); });
+      var nav = document.getElementById('be-nav-colonies'); if (nav) nav.classList.add('active');
+      be_renderColonies(); be_updateSyncBadge();
+    },
+    onPullFromFarmOS: async function() { await be_fetchColonies(); }
   },
   { id: 'locations', label: '📍 Locations', title: '📍 FarmDesk',
     containerId: 'module-locations',
@@ -16453,16 +16459,19 @@ const MODULES = [
     },
     onPullFromFarmOS: async function() { await eq_fetchAssets(); }
   },
-  { id: 'bees', label: '🐝 Bees', title: '🐝 FarmDesk',
-    containerId: 'module-beedesk',
+  { id: 'stock', label: '📦 Inventory', title: '📦 FarmDesk',
+    containerId: 'module-stockdesk',
     onActivate: function() {
-      document.querySelectorAll('#module-beedesk .screen').forEach(function(s) { s.classList.remove('active'); });
-      var el = document.getElementById('be-screen-colonies'); if (el) el.classList.add('active');
-      document.querySelectorAll('.be-bottom-nav button').forEach(function(b) { b.classList.remove('active'); });
-      var nav = document.getElementById('be-nav-colonies'); if (nav) nav.classList.add('active');
-      be_renderColonies(); be_updateSyncBadge();
+      document.querySelectorAll('#module-stockdesk .screen').forEach(s => s.classList.remove('active'));
+      const sdDash = document.getElementById('sd-screen-dashboard');
+      if (sdDash) sdDash.classList.add('active');
+      document.querySelectorAll('.sd-bottom-nav button').forEach(b => b.classList.remove('active'));
+      const sdNavBtn = document.getElementById('sd-nav-dashboard');
+      if (sdNavBtn) sdNavBtn.classList.add('active');
+      renderDashboard();
+      if (typeof updateSyncBadge === 'function') updateSyncBadge();
     },
-    onPullFromFarmOS: async function() { await be_fetchColonies(); }
+    onPullFromFarmOS: async function() { await refreshAssets(true); }
   }
 ];
 
@@ -16967,13 +16976,23 @@ async function ledgerFetch() {
       });
     }
 
-    var saleRes, purchRes;
+    var saleRes, purchRes, saleErr = null, purchErr = null;
     // Clear cached price field detection so it re-checks against the live instance
     localStorage.removeItem(PRICE_FIELDS_KEY);
-    try { saleRes = await fetchWithTimeout(apiUrl('/api/log/sale?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }); } catch(e) {}
-    try { purchRes = await fetchWithTimeout(apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h }); } catch(e) {}
+    try {
+      saleRes = await fetchWithTimeout(apiUrl('/api/log/sale?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h });
+      if (!saleRes.ok) saleErr = 'HTTP ' + saleRes.status;
+    } catch(e) { saleErr = e.message; }
+    try {
+      purchRes = await fetchWithTimeout(apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=asset,quantity'), { headers: h });
+      if (!purchRes.ok) purchErr = 'HTTP ' + purchRes.status;
+    } catch(e) { purchErr = e.message; }
+    var saleCountBefore = farmoEntries.length;
     await parseLogRes(saleRes, 'sale');
+    var saleCount = farmoEntries.length - saleCountBefore;
+    var purchCountBefore = farmoEntries.length;
     await parseLogRes(purchRes, 'purchase');
+    var purchCount = farmoEntries.length - purchCountBefore;
 
     // Dedup by farmOS UUID — remove any local entry whose farmosUUID matches
     var farmoIds = new Set(farmoEntries.map(function(e) { return e.id; }));
@@ -16986,7 +17005,12 @@ async function ledgerFetch() {
     _ledgerEntries.sort(function(a, b) {
       return new Date(b.time || 0) - new Date(a.time || 0);
     });
-    if (statusEl) statusEl.textContent = 'Fetched ' + farmoEntries.length + ' records from farmOS.';
+    if (statusEl) {
+      var parts = ['Fetched ' + saleCount + ' sale, ' + purchCount + ' purchase record(s).'];
+      if (saleErr)  parts.push('⚠️ Sale fetch error: ' + saleErr);
+      if (purchErr) parts.push('⚠️ Purchase fetch error: ' + purchErr);
+      statusEl.textContent = parts.join(' ');
+    }
     ledgerRender();
   } catch(e) {
     if (statusEl) statusEl.textContent = '⚠️ Fetch failed: ' + e.message;
