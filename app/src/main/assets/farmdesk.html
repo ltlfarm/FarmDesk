@@ -337,23 +337,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
 .bd-modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:500; overflow-y:auto; padding:20px; }
 .bd-modal-box { background:#2a2a2a; border-radius:10px; padding:18px; max-width:480px; margin:0 auto; }
 .bd-modal-box h3 { margin:0 0 14px; color:#3a7; }
-/* ===== ROLE-BASED UI GATING ===== */
-/* Worker: hide manager-only config sections */
-body.role-worker #moduleToggles,
-body.role-worker #setgrp-logo,
-body.role-worker #setgrp-farmname { display: none !important; }
-/* Viewer: hide all write actions */
-body.role-viewer #gd-log-buttons,
-body.role-viewer #gd-flow-buttons,
-body.role-viewer #bd-add-btn,
-body.role-viewer .adj-btn,
-body.role-viewer .sync-push-btn,
-body.role-viewer .export-xml-btn,
-body.role-viewer #addItemPanel { display: none !important; }
-/* Worker also inherits manager-only restrictions */
-body.role-viewer #moduleToggles,
-body.role-viewer #setgrp-logo,
-body.role-viewer #setgrp-farmname { display: none !important; }
+/* NOTE: role-based UI gating was removed by design — every device has full access. */
 
 </style>
 </head>
@@ -746,17 +730,6 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       </div>
 
       <div class="set-sub">
-        <strong>User Role</strong>
-        <p style="color:#888;font-size:13px;">Set the role for this device. Use Worker or Viewer for farm hands — hides config options and restricts write access accordingly.</p>
-        <select id="standaloneRoleSelect" onchange="setStandaloneRole(this.value)" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-top:6px;">
-          <option value="farm_manager">Manager — full access</option>
-          <option value="farm_worker">Worker — can log and sync, no config changes</option>
-          <option value="farm_viewer">Viewer — read only, can import and print reports</option>
-        </select>
-        <div id="roleNote" style="font-size:13px;color:#888;margin-top:6px;">farmOS mode: role auto-detected at login, or override here.</div>
-      </div>
-
-      <div class="set-sub">
         <strong>Active User</strong>
         <p style="color:#888;font-size:13px;">Name stamped on every log entry. Change when a different person is logging.</p>
         <select id="activeUserSelect" onchange="setActiveUser(this.value)" style="width:100%;padding:12px;font-size:16px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;margin-top:4px;"></select>
@@ -1022,7 +995,7 @@ body.role-viewer #setgrp-farmname { display: none !important; }
     <div class="set-body">
       <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track feed, medical supplies, and other inventory items.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>+ button</strong> — Add a new inventory item with name, category, and unit.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📥 Restock / 📤 Use / 🔢 Count</strong> — Adjust quantity. Restock lets you record price and supplier.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📥 Restock / 📤 Use / 🔢 Count</strong> — Adjust quantity. Restock lets you record purchase price and supplier; Use lets you record sale price and buyer.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap item name</strong> — View full details and adjustment history.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Yellow border</strong> — Item is low (below your threshold). <strong>Red border</strong> — Item is at zero (empty).</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — Full log of all adjustments. Filter by In/Out/Count.</p>
@@ -1090,7 +1063,6 @@ body.role-viewer #setgrp-farmname { display: none !important; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Logo</strong> — Pick a photo to show in the header. Syncs to farmOS so all devices see it.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Farm Name</strong> — Used in exported filenames.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Standalone Mode</strong> — Use FarmDesk without a farmOS server. Hides all sync options. Export XML to save your data.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>User Role</strong> — Set Manager, Worker, or Viewer for this device. Worker hides config options. Viewer is read-only. Use this to restrict what farm hands can change on their device.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Active User</strong> — The name stamped on every log entry. Add all farm hands here and switch when logging on their behalf.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Med Formulas</strong> — Set dose-per-lb for each medication. FarmDesk calculates the correct dose automatically from the animal's weight. Each animal module has its own formula settings.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>Clear All Logs</strong> — Wipes all data. Use before switching to a different farm. Cannot be undone.</p>
@@ -1725,7 +1697,7 @@ const GOAT_LOG_TYPES = [
   { id: 'vitals',   label: 'Vitals',    icon: '🌡️', followup: false, photo: false, farmosBundle: 'log--observation' },
   { id: 'med',      label: 'Med',       icon: '💉',  followup: true,  photo: false, farmosBundle: 'log--medical'     },
   { id: 'proc',     label: 'Procedure', icon: '✂️',  followup: true,  photo: true,  farmosBundle: 'log--medical'     },
-  { id: 'hoof',     label: 'Hoof',      icon: '<img src="data:image/png;base64,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" style="height:1em;width:auto;vertical-align:-0.15em;display:inline-block;">',  followup: true,  photo: true,  farmosBundle: 'log--maintenance'  },
+  { id: 'hoof',     label: 'Hoof',      icon: '<img src="data:image/png;base64,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" style="height:1em;width:auto;vertical-align:-0.15em;display:inline-block;">',  textIcon: '🐾', followup: true,  photo: true,  farmosBundle: 'log--maintenance'  },
   { id: 'obs',      label: 'Observe',   icon: '👁️', followup: true,  photo: true,  farmosBundle: 'log--observation' },
   { id: 'birth',    label: 'Birth',     icon: '🍼',  followup: false, photo: true,  farmosBundle: 'log--birth'       },
   { id: 'activity', label: 'Activity',  icon: '📝',  followup: false, photo: false, farmosBundle: 'log--activity'    },
@@ -1856,15 +1828,14 @@ const LS = {
 };
 
 // ===== ROLE HELPERS =====
-// Returns detected role from farmOS auth, or manually set role in standalone mode.
-// Defaults to farm_manager so existing installs are unaffected.
-function getUserRole() {
-  return localStorage.getItem(LS.userRole) || "farm_manager";
-}
-function isManager() { return getUserRole() === "farm_manager"; }
-function isWorker()  { return getUserRole() === "farm_worker"; }
-function isViewer()  { return getUserRole() === "farm_viewer"; }
-function canWrite()  { return !isViewer(); }  // managers and workers can write
+// Roles are intentionally NOT used in FarmDesk — every device has full access.
+// These remain only so any older call sites keep working; they always report
+// full access. Any previously-stored role value is ignored.
+function getUserRole() { return "farm_manager"; }
+function isManager() { return true; }
+function isWorker()  { return false; }
+function isViewer()  { return false; }
+function canWrite()  { return true; }
 
 // Returns cached log_category terms from farmOS
 function getLogCategories() {
@@ -1946,7 +1917,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785452807;
+const APP_VERSION = 1785780035;
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2168,6 +2139,15 @@ let flow = [], step = 0, herdIndex = 0;
 // FLOWS and TYPE_LABELS are now derived from FARM CONFIG above
 // Edit GOAT_FLOWS and GOAT_LOG_TYPES in the config section to change these
 const FLOWS = GOAT_FLOWS;
+
+// Some log-type icons are inline HTML (e.g. Hoof is a base64 <img>). Contexts
+// that cannot render HTML — <select> options, textContent, plain strings —
+// must use this instead of lt.icon, or the raw markup is shown as text.
+function logTypeTextIcon(lt) {
+  if (!lt || !lt.icon) return '';
+  return lt.icon.charAt(0) === '<' ? (lt.textIcon || '') : lt.icon;
+}
+
 const TYPE_LABELS = GOAT_LOG_TYPES.reduce(function(acc, t) {
   acc[t.id] = t.icon + ' ' + t.label;
   return acc;
@@ -3745,7 +3725,8 @@ function renderHistory() {
   if (ftSel && ftSel.options.length <= 1) {
     GOAT_LOG_TYPES.forEach(function(lt) {
       var o = document.createElement('option');
-      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      var ic = logTypeTextIcon(lt);
+      o.value = lt.id; o.textContent = (ic ? ic + ' ' : '') + lt.label;
       ftSel.appendChild(o);
     });
     // Sale is a lifecycle event not in GOAT_LOG_TYPES — add manually
@@ -3821,31 +3802,15 @@ function setStandaloneMode(on) {
   showToast(on ? "✅ Standalone mode on" : "✅ farmOS sync mode on");
 }
 
-function setStandaloneRole(role) {
-  localStorage.setItem(LS.userRole, role);
-  applyRoleUI();
-  showToast("✅ Role set to " + role.replace("farm_",""));
-}
-
-// ===== ROLE-BASED UI GATING =====
-// Applies CSS classes to body so roles work on dynamically rendered content too.
-// manager: full access. worker: no config changes. viewer: read only.
+// ===== ROLE-BASED UI GATING (REMOVED BY DESIGN) =====
+// FarmDesk does not use roles — every device has full access. This remains as a
+// no-op so existing call sites keep working, and it actively clears any role
+// class or indicator left behind by an older install so nothing stays hidden.
 function applyRoleUI() {
-  var role = getUserRole();
   document.body.classList.remove("role-manager", "role-worker", "role-viewer");
-  document.body.classList.add("role-" + role.replace("farm_", ""));
-
-  // Show role indicator in header for non-managers
-  var roleIndicator = document.getElementById("roleIndicator");
-  if (!roleIndicator) {
-    roleIndicator = document.createElement("small");
-    roleIndicator.id = "roleIndicator";
-    roleIndicator.style.cssText = "color:#c90;font-size:11px;font-weight:bold;";
-    var syncStatus = document.getElementById("syncStatus");
-    if (syncStatus) syncStatus.parentNode.insertBefore(roleIndicator, syncStatus);
-  }
-  roleIndicator.textContent = role === "farm_worker" ? "⚒️ Worker" : role === "farm_viewer" ? "👁️ Viewer" : "";
-  roleIndicator.style.display = role === "farm_manager" ? "none" : "";
+  var stale = document.getElementById("roleIndicator");
+  if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+  try { localStorage.removeItem(LS.userRole); } catch(e) {}
 }
 
 function setActiveUser(name) {
@@ -4457,8 +4422,6 @@ function renderSettings() {
   var isStandalone = localStorage.getItem(LS.standalone) === "1";
   if (standaloneToggle) standaloneToggle.checked = isStandalone;
   if (standaloneNote) standaloneNote.style.display = isStandalone ? "block" : "none";
-  var standaloneRoleSelect = document.getElementById("standaloneRoleSelect");
-  if (standaloneRoleSelect) standaloneRoleSelect.value = getUserRole();
   var syncAllBtn = document.getElementById("syncAllBtn");
   if (syncAllBtn) syncAllBtn.style.display = isStandalone ? "none" : "";
   var farmosConnSub = document.getElementById("setgrp-farmos-conn");
@@ -5050,13 +5013,21 @@ async function buildPriceQuantityRef(unitPrice, token) {
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' },
       body: JSON.stringify({ data: { type: 'quantity--price', attributes: attrs } })
     });
-    if (!qRes.ok) return null;
+    if (!qRes.ok) {
+      let detail = 'HTTP ' + qRes.status;
+      try { const errBody = await qRes.json(); if (errBody?.errors?.[0]?.detail) detail += ': ' + errBody.errors[0].detail; } catch(e2) {}
+      showToast('⚠️ Price quantity failed: ' + detail);
+      return null;
+    }
     const qData = await qRes.json();
     const qUUID = qData?.data?.id;
     const qRevId = qData?.data?.attributes?.drupal_internal__revision_id;
-    if (!qUUID) return null;
+    if (!qUUID) { showToast('⚠️ Price quantity failed: no ID returned'); return null; }
     return { type: 'quantity--price', id: qUUID, meta: { target_revision_id: qRevId } };
-  } catch(e) { return null; }
+  } catch(e) {
+    showToast('⚠️ Price quantity failed: ' + e.message);
+    return null;
+  }
 }
 
 // ───── SHARED: batch/inventory tracking for offspring ─────
@@ -6741,7 +6712,8 @@ function renderSchedulerGoatsPanel() {
     const exclude = ['weight', 'vitals'];
     GOAT_LOG_TYPES.filter(function(lt) { return !exclude.includes(lt.id); }).forEach(function(lt) {
       var o = document.createElement('option');
-      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      var ic = logTypeTextIcon(lt);
+      o.value = lt.id; o.textContent = (ic ? ic + ' ' : '') + lt.label;
       typeSel.appendChild(o);
     });
   }
@@ -6813,7 +6785,8 @@ function renderSchedulerBirdsPanel() {
     const exclude = ['hatch', 'mortality'];
     BIRD_LOG_TYPES.filter(function(lt) { return !exclude.includes(lt.id); }).forEach(function(lt) {
       var o = document.createElement('option');
-      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      var ic = logTypeTextIcon(lt);
+      o.value = lt.id; o.textContent = (ic ? ic + ' ' : '') + lt.label;
       bTypeSel.appendChild(o);
     });
   }
@@ -7774,8 +7747,6 @@ async function getToken(cfg) {
           window._isManagerScope = (scope === "farm_manager");
           window._lastAuthToken = token;
           window._lastAuthTime = Date.now();
-          localStorage.setItem(LS.userRole, scope);
-          if (typeof applyRoleUI === 'function') applyRoleUI();
           return token;
         }
       } catch(e) { /* try next */ }
@@ -9215,6 +9186,10 @@ async function processPendingLedgerActions(token, logFn) {
             if (qData.data.attributes && qData.data.attributes.drupal_internal__revision_id != null) {
               qRef.meta = { target_revision_id: qData.data.attributes.drupal_internal__revision_id };
             }
+          } else {
+            var qDetail = 'HTTP ' + qRes.status;
+            try { var qErrBody = await qRes.json(); if (qErrBody?.errors?.[0]?.detail) qDetail += ': ' + qErrBody.errors[0].detail; } catch(qe2) {}
+            showToast('⚠️ Price quantity failed: ' + qDetail);
           }
         }
         var attrs = {
@@ -10138,19 +10113,26 @@ async function syncToFarmOS() {
   const pendingCount = pendingActions.filter(p => !p.synced).length;
   if (pendingCount > 0) {
     logEl.textContent += '\nAlso pushing ' + pendingCount + ' queued action(s)...\n';
-    try {
-      const locationActionResult = await processPendingLocationActions(token, function(msg) { logEl.textContent += msg; });
-      const locationLogActionResult = await processPendingLocationLogActions(token, function(msg) { logEl.textContent += msg; });
-      const equipmentActionResult = await eq_syncToFarmOS(function(msg) { logEl.textContent += msg; });
-      const batchActionResult = await processPendingBatchActions(token, function(msg) { logEl.textContent += msg; });
-      const goatActionResult = await processPendingGoatActions(token, function(msg) { logEl.textContent += msg; });
-      const ledgerActionResult = await processPendingLedgerActions(token, function(msg) { logEl.textContent += msg; });
-      logEl.textContent += 'Queued actions: ' + (locationActionResult.ok + batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok) + ' ok, ' +
-        (batchActionResult.skipped + goatActionResult.skipped) + ' skipped (not synced yet), ' +
-        (locationActionResult.fail + batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail) + ' failed.\n';
-    } catch(e) {
-      logEl.textContent += '⚠️ Queued action sync error: ' + e.message + '\n';
-    }
+    const zero = { ok: 0, fail: 0, skipped: 0 };
+    // Each module syncs independently — a failure in one must never stop the rest.
+    const runStep = async function(label, fn) {
+      try {
+        const r = await fn();
+        return Object.assign({ ok: 0, fail: 0, skipped: 0 }, r || {});
+      } catch(e) {
+        logEl.textContent += '⚠️ ' + label + ' sync error: ' + e.message + '\n';
+        return Object.assign({}, zero);
+      }
+    };
+    const locationActionResult    = await runStep('Locations',  function() { return processPendingLocationActions(token, function(msg) { logEl.textContent += msg; }); });
+    const locationLogActionResult = await runStep('Location logs', function() { return processPendingLocationLogActions(token, function(msg) { logEl.textContent += msg; }); });
+    const equipmentActionResult   = await runStep('Equipment',  function() { return eq_syncToFarmOS(function(msg) { logEl.textContent += msg; }); });
+    const batchActionResult       = await runStep('Batches',    function() { return processPendingBatchActions(token, function(msg) { logEl.textContent += msg; }); });
+    const goatActionResult        = await runStep('Goats',      function() { return processPendingGoatActions(token, function(msg) { logEl.textContent += msg; }); });
+    const ledgerActionResult      = await runStep('Ledger',     function() { return processPendingLedgerActions(token, function(msg) { logEl.textContent += msg; }); });
+    logEl.textContent += 'Queued actions: ' + (locationActionResult.ok + batchActionResult.ok + goatActionResult.ok + ledgerActionResult.ok) + ' ok, ' +
+      (batchActionResult.skipped + goatActionResult.skipped) + ' skipped (not synced yet), ' +
+      (locationActionResult.fail + batchActionResult.fail + goatActionResult.fail + ledgerActionResult.fail) + ' failed.\n';
   }
 
   const finalUnsyncedEl = document.getElementById("unsyncedCount");
@@ -14815,7 +14797,8 @@ function bd_openLogSheet(id) {
   if (typeSel && typeSel.options.length === 0) {
     BIRD_LOG_TYPES.forEach(function(lt) {
       var o = document.createElement('option');
-      o.value = lt.id; o.textContent = lt.icon + ' ' + lt.label;
+      var ic = logTypeTextIcon(lt);
+      o.value = lt.id; o.textContent = (ic ? ic + ' ' : '') + lt.label;
       typeSel.appendChild(o);
     });
   }
