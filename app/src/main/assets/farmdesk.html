@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.18-1020"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.18-1035"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -9129,10 +9129,10 @@ function buildFarmOSPayload(l) {
     }
   };
 
-  // Add veterinarian field for medical logs
-  if (l.type === 'med' && l.data && l.data.vet) {
-    payload.data.attributes.veterinarian = l.data.vet;
-  }
+  // NOTE: veterinarian is NOT a valid attribute on log--medical for this farmOS
+  // instance (confirmed via 422 "attribute veterinarian does not exist").
+  // Vet name is already included in the notes text via formatLog() above —
+  // do not also send it as a JSON:API attribute.
 
   // Link to animal asset if UUID is known
   if (l.type === 'birth') {
