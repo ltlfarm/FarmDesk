@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.18-1035"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.18-1150"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7915,13 +7915,17 @@ async function getCachedToken(cfg) {
   const age = Date.now() - (window._lastAuthTime || 0);
   if (window._lastAuthToken && age < maxAge) return window._lastAuthToken;
 
-  // Try refresh_token first — silent renewal without credentials
+  // Try refresh_token first — silent renewal without credentials.
+  // Must include scope explicitly — Simple OAuth's refresh grant returns
+  // invalid_scope if scope is omitted (no user identifier is available to
+  // the ScopeRepository during a refresh-token grant).
   if (window._refreshToken && cfg && cfg.url) {
     try {
       const body = new URLSearchParams({
         grant_type:    "refresh_token",
         client_id:     "farm",
-        refresh_token: window._refreshToken
+        refresh_token: window._refreshToken,
+        scope:         window._userScope || "farm_manager"
       });
       const res = await fetch(cfg.url + "/oauth/token", {
         method: "POST",
