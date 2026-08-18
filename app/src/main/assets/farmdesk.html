@@ -400,9 +400,18 @@ header { flex-direction:column; gap:0; align-items:stretch; }
       <button class="secondary" onclick="cancelEntry()" style="padding:8px 12px;font-size:14px;">✕ Home</button>
     </div>
 
-    <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Select the animal you are logging for. Tap Animals on the home screen to add new animals.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
-    <select id="goat"></select>
-    <label><input type="checkbox" id="stay"> Stay on same animal</label>
+    <label id="bulkToggleRow" style="display:none;"><input type="checkbox" id="bulkMode" onchange="toggleBulkMode()"> Bulk entry (multiple goats)</label>
+
+    <div id="singleGoatRow">
+      <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Select the animal you are logging for. Tap Animals on the home screen to add new animals.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
+      <select id="goat"></select>
+      <label><input type="checkbox" id="stay"> Stay on same animal</label>
+    </div>
+
+    <div id="bulkGoatRow" style="display:none;">
+      <label>Animals (select all that apply)</label>
+      <div id="bulkGoatList" style="max-height:220px;overflow-y:auto;border:1px solid #444;border-radius:8px;padding:8px;margin-top:4px;"></div>
+    </div>
 
     <label style="display:flex;align-items:center;gap:6px;">Time <span onclick="showHint('Tap Now to use the current time. Or change it manually to log something that happened earlier.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <div style="display:flex;gap:6px;margin-top:4px;">
@@ -1917,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = 1785780035;
+const APP_VERSION = "2026.08.18-1020"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2164,9 +2173,50 @@ function startFlow(type) {
   const saveNextBtn = document.getElementById("saveNextBtn");
   if (saveNextBtn) saveNextBtn.style.display = "";
   populateGoatSelect();
+
+  // Bulk entry toggle — med/proc only
+  bulkMode = false;
+  const bulkToggleRow = document.getElementById("bulkToggleRow");
+  const bulkModeCb = document.getElementById("bulkMode");
+  if (bulkModeCb) bulkModeCb.checked = false;
+  if (bulkToggleRow) bulkToggleRow.style.display = (type === "med" || type === "proc") ? "" : "none";
+  document.getElementById("singleGoatRow").style.display = "";
+  document.getElementById("bulkGoatRow").style.display = "none";
+
   setNow();
   show("entry");
   renderStep();
+}
+
+// ===== BULK ENTRY (med/proc — same treatment, multiple goats, one tap) =====
+let bulkMode = false;
+
+function toggleBulkMode() {
+  bulkMode = document.getElementById("bulkMode").checked;
+  document.getElementById("singleGoatRow").style.display = bulkMode ? "none" : "";
+  document.getElementById("bulkGoatRow").style.display = bulkMode ? "" : "none";
+  const saveNextBtn = document.getElementById("saveNextBtn");
+  if (saveNextBtn) saveNextBtn.style.display = bulkMode ? "none" : "";
+  if (bulkMode) populateBulkGoatList();
+  renderStep();
+}
+
+function populateBulkGoatList() {
+  const box = document.getElementById("bulkGoatList");
+  if (!box) return;
+  box.innerHTML = goats.map(g => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;margin:0;">
+      <input type="checkbox" class="bulkGoatCb" value="${g}" style="width:auto;" onchange="updateBulkCount()">
+      ${g}
+    </label>
+  `).join("");
+}
+
+function updateBulkCount() {
+  const t = flow[step];
+  const n = document.querySelectorAll(".bulkGoatCb:checked").length;
+  const titleEl = document.getElementById("entryTitle");
+  if (titleEl) titleEl.textContent = (TYPE_LABELS[t] || t) + " — Bulk (" + n + " selected)";
 }
 
 function populateGoatSelect() {
@@ -2291,7 +2341,7 @@ function renderStep() {
   const lw = weights[g] || "";
 
   var titleEl = document.getElementById("entryTitle");
-  var titleStr = (TYPE_LABELS[t] || t) + " — " + g;
+  var titleStr = (TYPE_LABELS[t] || t) + " — " + (bulkMode ? "Bulk (" + document.querySelectorAll(".bulkGoatCb:checked").length + " selected)" : g);
   var logType = GOAT_LOG_TYPES.find(function(lt) { return lt.id === t; });
   if (logType && logType.icon && logType.icon.charAt(0) === '<') {
     titleEl.innerHTML = titleStr;
@@ -2467,7 +2517,7 @@ function renderStep() {
 
     document.getElementById("f_med").onkeydown = e => {
       if (renderLock) { e.preventDefault(); return; }
-      if (e.key === "Enter") { e.preventDefault(); nextAction(); }
+      if (e.key === "Enter") { e.preventDefault(); bulkMode ? saveAndHome() : nextAction(); }
     };
   }
 
@@ -3041,7 +3091,7 @@ document.addEventListener("keydown", e => {
   if (i >= 0 && i < inputs.length - 1) {
     inputs[i + 1].focus();
   } else {
-    nextAction();
+    bulkMode ? saveAndHome() : nextAction();
   }
 });
 
@@ -3100,12 +3150,114 @@ function saveFollowup(g, t, baseData) {
 
 // ===== SAVE =====
 function saveStep() {
-  const g = document.getElementById("goat").value;
   const t = flow[step];
   const ts = getTimestamp();
-
   const cfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
-  const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: localStorage.getItem(LS.activeUser) || cfg.user || "" };
+  const loggedByVal = localStorage.getItem(LS.activeUser) || cfg.user || "";
+
+  // ===== BULK MODE — same med/proc entry, individual log per selected goat =====
+  if (bulkMode && (t === "med" || t === "proc")) {
+    const selectedGoats = Array.from(document.querySelectorAll(".bulkGoatCb:checked")).map(cb => cb.value);
+    if (!selectedGoats.length) {
+      showToast("Select at least one goat");
+      return false;
+    }
+
+    if (t === "med") {
+      const medName = document.getElementById("f_med")?.value || "";
+      const dose = parseFloat(document.getElementById("f_dose")?.value) || 0;
+      const w = parseFloat(document.getElementById("f_medweight")?.value) || 0;
+      const f = formulas[medName] || {};
+      const unit = f.unit || "ml";
+      const userNotes = document.getElementById("f_mednotes")?.value || "";
+      const route = document.getElementById("f_route")?.value || "Oral";
+      const vet = document.getElementById("f_vet")?.value?.trim() || "";
+
+      let doseNote = "";
+      if (f.fixed) {
+        doseNote = `Dose: ${dose} ${unit} (fixed)`;
+      } else if (w && f.dose) {
+        doseNote = (sessionDoseRate !== null && sessionDoseRate !== f.dose)
+          ? `Dose: ${dose} ${unit} (custom rate: ${sessionDoseRate} ${unit}/lb × ${w} lbs, standard: ${f.dose} ${unit}/lb)`
+          : `Dose: ${dose} ${unit} (${f.dose} ${unit}/lb × ${w} lbs)`;
+      } else {
+        doseNote = `Dose: ${dose} ${unit}`;
+      }
+
+      const followupEl = document.getElementById("f_followup");
+      let followupNote = "";
+      if (followupEl && followupEl.value) {
+        const fuNoteEl = document.getElementById("f_followup_note");
+        const fuNote = fuNoteEl?.value || "";
+        let fuDate = "";
+        if (followupEl.value === "custom") {
+          const dateEl = document.getElementById("f_followup_date");
+          if (dateEl && dateEl.value) fuDate = new Date(dateEl.value).toLocaleDateString();
+        } else {
+          const d = new Date();
+          d.setDate(d.getDate() + parseInt(followupEl.value));
+          fuDate = d.toLocaleDateString();
+        }
+        followupNote = `Follow-up: ${fuDate}${fuNote ? " — " + fuNote : ""}`;
+      }
+
+      const parts = [doseNote];
+      if (userNotes) parts.push(userNotes);
+      if (followupNote) parts.push(followupNote);
+      const notes = parts.join("\n");
+
+      lastMed   = medName;
+      lastRoute = route;
+      localStorage.setItem(LS.lastMed,   lastMed);
+      localStorage.setItem(LS.lastRoute, lastRoute);
+
+      selectedGoats.forEach((g, i) => {
+        const entry = { id: Date.now() + Math.random().toString(36).slice(2) + i, goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: loggedByVal };
+        entry.data = { med: medName, dose, unit, route, weight: w, notes, vet, sessionRate: sessionDoseRate };
+        logs.push(entry);
+        saveFollowup(g, "med", { med: medName, dose, unit, route, refId: entry.id, refTime: ts, refLoggedBy: entry.loggedBy });
+      });
+      _lastSavedEntry = null; // multiple goats — no single med to prompt inventory-deduct for
+    }
+
+    if (t === "proc") {
+      const procSupplies = getProcSupplies();
+      const supplyLine = procSupplies.map(s => s.qty + (s.units ? ' ' + s.units : '') + ' ' + s.name).join(', ');
+      const baseNotes = document.getElementById("f_procnotes")?.value || "";
+      const fullNotes = baseNotes + (supplyLine ? (baseNotes ? '\n' : '') + 'Supplies: ' + supplyLine : '');
+      const proc   = document.getElementById("f_proc")?.value || "";
+      const method = document.getElementById("f_procmethod")?.value || "";
+      const fileAttach = currentFileAttach ? { name: currentFileAttach.name, type: currentFileAttach.type, fileId: currentFileAttach.fileId } : null;
+      const sharedPhoto = currentPhoto; // one photo shared across all goats in this batch
+
+      selectedGoats.forEach((g, i) => {
+        const entry = { id: Date.now() + Math.random().toString(36).slice(2) + i, goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: loggedByVal };
+        entry.data = { proc, method, notes: fullNotes, supplies: procSupplies, photoId: null, fileAttach };
+        logs.push(entry);
+        // Supplies are consumed per animal — decrement once per goat in the batch
+        if (procSupplies.length > 0) {
+          procQueueSupplyDecrements(procSupplies, g, ts);
+        }
+        saveFollowup(g, "proc", { proc, method });
+      });
+
+      if (sharedPhoto) {
+        Photos.save(sharedPhoto).then(id => {
+          logs.filter(l => l.type === "proc" && l.time === ts && selectedGoats.includes(l.goat)).forEach(l => { l.data.photoId = id; });
+          localStorage.setItem(LS.logs, JSON.stringify(logs));
+        });
+      }
+      currentPhoto = null;
+      currentFileAttach = null;
+      _lastSavedEntry = null;
+    }
+
+    localStorage.setItem(LS.logs, JSON.stringify(logs));
+    return true;
+  }
+
+  const g = document.getElementById("goat").value;
+  const entry = { id: Date.now() + Math.random().toString(36).slice(2), goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: loggedByVal };
   // Read optional log category
   var catEl = document.getElementById('f_log_category');
   if (catEl && catEl.value) entry.logCategoryId = catEl.value;

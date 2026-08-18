@@ -10,8 +10,8 @@ android {
         applicationId "com.burdenenterprises.farmdesk"
         minSdk 21
         targetSdk 34
-        versionCode 1782842609
-        versionName "2026.06.30-1103"
+        versionCode 1787073604
+        versionName "2026.08.18-1020"
     }
 
     signingConfigs {
