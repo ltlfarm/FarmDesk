@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.19-2014"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.19-2359"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7686,6 +7686,15 @@ function clearLogs() {
     confirmLabel: '🗑️ Confirm Clear All',
     danger: true,
     onConfirm: function() {
+      // Force a genuinely fresh re-auth and clear the stale "X: pulled"
+      // summary — otherwise both linger and make a wipe+refresh look like
+      // nothing happened.
+      window._lastAuthToken = null;
+      window._lastAuthTime  = 0;
+      localStorage.removeItem("farmdesk_capabilities");
+      localStorage.removeItem(LS.lastSync);
+      const syncStatus = document.getElementById("syncAllStatus");
+      if (syncStatus) { syncStatus.textContent = ""; syncStatus.style.display = "none"; }
       logs = [];
       localStorage.setItem(LS.logs, JSON.stringify(logs));
       Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
@@ -7818,11 +7827,35 @@ function renderSync() {
 
 function saveFarmOSCfg() {
   const url = document.getElementById("farmosUrl")?.value.trim().replace(/\/$/, "") || "";
+  const prevCfg = JSON.parse(localStorage.getItem(LS.cfg) || "{}");
   const cfg = {
     url,
     user: document.getElementById("farmosUser")?.value.trim() || "",
     pass: document.getElementById("farmosPass")?.value || ""
   };
+  // Switching servers (e.g. Pi <-> Farmier) in the same running session must
+  // not carry auth state from one to the other — a token, refresh_token, or
+  // scope minted by server A means nothing to server B and can produce
+  // confusing errors (invalid_scope, 401) that look server-side but aren't.
+  // Wipe it all whenever the URL actually changes.
+  if (prevCfg.url && url && prevCfg.url !== url) {
+    window._lastAuthToken  = null;
+    window._lastAuthTime   = 0;
+    window._lastAuthExpiry = null;
+    window._refreshToken   = null;
+    window._userScope      = null;
+    window._useProxy       = null;
+    window._authBreakerUntil = 0;
+    window._authBreakerErr   = null;
+    localStorage.removeItem("farmdesk_capabilities");
+    // Stale "Connected to X" / "Config: pulled..." text from the old
+    // server is now meaningless — clear it so nothing looks connected
+    // until a real Test Connection against the new URL succeeds.
+    const syncStatus = document.getElementById("syncAllStatus");
+    if (syncStatus) { syncStatus.textContent = ""; syncStatus.style.display = "none"; }
+    const testResult = document.getElementById("farmosTestResult");
+    if (testResult) testResult.textContent = "";
+  }
   localStorage.setItem(LS.cfg, JSON.stringify(cfg));
   if (url) {
     addRecentUrl(url);
@@ -8100,6 +8133,8 @@ function loadUnsyncedForUrl(url) {
 
 async function testFarmOS() {
   window._authBreakerUntil = 0; // manual, explicit test — always attempt for real
+  window._lastAuthToken = null; // don't trust a cached token that may have
+  window._lastAuthTime  = 0;    // gone stale (e.g. server restarted since it was minted)
   const cfg = saveFarmOSCfg();
   const el = document.getElementById("farmosTestResult");
   el.style.color = "#888";
@@ -9023,7 +9058,16 @@ function mapFarmOSTypeToLocal(farmosType, logName) {
     if (n.startsWith("Vitals:")) return "vitals";
     return "obs";
   }
-  if (farmosType === "log--medical")     return "med";
+  if (farmosType === "log--medical") {
+    // Goat Procedures (Band, Disbud, Ear Tag, Tattoo, Wean, custom) push
+    // to the same log--medical bundle as real Med logs — farmOS has no
+    // separate procedure bundle. Med logs are named "Administer <name>"
+    // (see farmosLogName); Procedure logs are named just the procedure
+    // itself. Use that to tell them apart on pull, or every synced
+    // Procedure comes back mislabeled MED with bogus dose/route fields.
+    const n = (logName || "").trim();
+    return n.startsWith("Administer ") ? "med" : "proc";
+  }
   if (farmosType === "log--maintenance") return "hoof";
   if (farmosType === "log--birth")       return "birth";
   if (farmosType === "log--activity")    return "activity";
@@ -9084,20 +9128,31 @@ function parseFarmOSNotes(farmosType, name, notes, quantities) {
 
   // Med logs — new format "Administer MedName" or old formats
   if (farmosType === "log--medical") {
-    let medName = "";
     if (n.startsWith("Administer ")) {
-      medName = n.replace("Administer ", "").trim();
-    } else {
-      medName = n || "Medicine";
+      const medName = n.replace("Administer ", "").trim();
+      const doseMatch = nt.match(/([\d.]+)\s*ml/);
+      const routeMatch = nt.match(/via\s+(\w+)/i);
+      return {
+        med:   medName,
+        dose:  doseMatch ? parseFloat(doseMatch[1]) : 0,
+        unit:  "ml",
+        route: routeMatch ? routeMatch[1] : "Oral",
+        notes: nt
+      };
     }
-    const doseMatch = nt.match(/([\d.]+)\s*ml/);
-    const routeMatch = nt.match(/via\s+(\w+)/i);
+    // Procedure — name has no "Administer " prefix, so it was pushed as
+    // a Procedure. formatLog() wrote notes as "<proc>" or "<proc> —
+    // <method>", optionally followed by " — <extra notes>", then
+    // "\nLogged by: X". Name (n) is the exact proc value already —
+    // strip it and "Logged by:" off the notes to recover method/notes.
+    const proc = n || "Procedure";
+    let rest = nt.replace(/\n?Logged by:.*$/i, "").trim();
+    if (rest.startsWith(proc)) rest = rest.slice(proc.length).replace(/^\s*—\s*/, "");
+    const restParts = rest.split(" — ");
     return {
-      med:   medName,
-      dose:  doseMatch ? parseFloat(doseMatch[1]) : 0,
-      unit:  "ml",
-      route: routeMatch ? routeMatch[1] : "Oral",
-      notes: nt
+      proc:   proc,
+      method: restParts[0] || "",
+      notes:  restParts.slice(1).join(" — ")
     };
   }
 
