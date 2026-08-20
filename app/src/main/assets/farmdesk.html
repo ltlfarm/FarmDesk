@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.18-1150"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.19-2014"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7839,6 +7839,20 @@ function saveArcgisKey() {
 // ───── SHARED: OAuth2 authentication ─────
 // Tries proxy first then direct. Returns a valid token or throws.
 async function getToken(cfg) {
+  // Circuit breaker — every screen/action that touches farmOS calls
+  // getCachedToken(), which falls through here if no valid token is
+  // cached. If auth is broken server-side, that means EVERY screen
+  // action fires a fresh 6-attempt login cascade (3 scopes x proxy/
+  // direct), silently re-triggering farmOS's flood lockout over and
+  // over during normal app use. This breaker stops that: once every
+  // scope has failed, block further automatic attempts for a cooldown
+  // window instead of hammering the server. Test Connection (manual,
+  // explicit) clears the breaker first so it always gets a real check.
+  const BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  if (window._authBreakerUntil && Date.now() < window._authBreakerUntil) {
+    const waitSec = Math.ceil((window._authBreakerUntil - Date.now()) / 1000);
+    throw new Error((window._authBreakerErr || "Auth failed") + " (blocked " + waitSec + "s more to avoid repeated lockouts — use Test Connection in Settings to retry now)");
+  }
   let lastErr = null; // most informative error seen across attempts
   const tryAuth = async (url, scope) => {
     const body = new URLSearchParams({
@@ -7904,7 +7918,9 @@ async function getToken(cfg) {
       } catch(e) { /* try next */ }
     }
   }
-  throw new Error("Auth failed — " + (lastErr || "check credentials and URL"));
+  window._authBreakerUntil = Date.now() + BREAKER_COOLDOWN_MS;
+  window._authBreakerErr = "Auth failed — " + (lastErr || "check credentials and URL");
+  throw new Error(window._authBreakerErr);
 }
 
 // Returns cached token if within expiry window, otherwise renews silently.
@@ -8083,6 +8099,7 @@ function loadUnsyncedForUrl(url) {
 }
 
 async function testFarmOS() {
+  window._authBreakerUntil = 0; // manual, explicit test — always attempt for real
   const cfg = saveFarmOSCfg();
   const el = document.getElementById("farmosTestResult");
   el.style.color = "#888";
