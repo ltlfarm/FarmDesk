@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.20-0116"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.20-0119"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -4716,17 +4716,25 @@ function getProcSupplies(containerId) {
 }
 
 function procQueueSupplyDecrements(supplies, goatName, logTime, sourceLabel) {
+  procQueueSupplyAdjust(supplies, goatName, logTime, sourceLabel, 'decrement');
+}
+
+// Shared by fresh saves (decrement) and edit-time deltas (either direction —
+// using more supplies on edit decrements further, using fewer gives some back).
+function procQueueSupplyAdjust(supplies, goatName, logTime, sourceLabel, action) {
   if (!supplies || !supplies.length) return;
   const sdAssets  = JSON.parse(localStorage.getItem('farmdesk_stock_assets')  || '[]');
   const sdPending = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
   const sdHistory = JSON.parse(localStorage.getItem('farmdesk_stock_history') || '[]');
   const dateStr = logTime ? new Date(logTime).toLocaleDateString() : new Date().toLocaleDateString();
+  const isDecrement = action !== 'increment';
+  const verb = isDecrement ? 'Used' : 'Returned (edit adjustment)';
   supplies.forEach(s => {
     const asset = sdAssets.find(a => a.uuid === s.uuid);
     if (!asset) return;
-    const note = 'Used: ' + s.qty + (s.units ? ' ' + s.units : '') + ' ' + s.name +
+    const note = verb + ': ' + s.qty + (s.units ? ' ' + s.units : '') + ' ' + s.name +
                  (goatName ? ' — ' + goatName : '') + ' · ' + (sourceLabel || 'Proc') + ' · ' + dateStr;
-    asset.value = Math.max(0, (asset.value || 0) - s.qty);
+    asset.value = isDecrement ? Math.max(0, (asset.value || 0) - s.qty) : (asset.value || 0) + s.qty;
     const isoTime = logTime || new Date().toISOString();
     const ts = String(Math.floor(new Date(isoTime).getTime() / 1000));
     const entry = {
@@ -4736,7 +4744,7 @@ function procQueueSupplyDecrements(supplies, goatName, logTime, sourceLabel) {
       name:      asset.name,
       measure:   asset.measure || 'count',
       unitId:    asset.unitId,
-      action:    'decrement',
+      action:    isDecrement ? 'decrement' : 'increment',
       amount:    s.qty,
       notes:     note,
       seller:    '',
@@ -4745,7 +4753,7 @@ function procQueueSupplyDecrements(supplies, goatName, logTime, sourceLabel) {
       synced:    false
     };
     sdPending.push(entry);
-    sdHistory.unshift({ id: entry.id, name: asset.name, action: 'decrement', amount: s.qty,
+    sdHistory.unshift({ id: entry.id, name: asset.name, action: entry.action, amount: s.qty,
                         notes: note, seller: '', lot: '', time: isoTime, synced: false });
     if (sdHistory.length > 100) sdHistory.length = 100;
   });
@@ -4755,10 +4763,33 @@ function procQueueSupplyDecrements(supplies, goatName, logTime, sourceLabel) {
   if (typeof updateSyncBadge === 'function') updateSyncBadge();
 }
 
-function procAddEditSupplyRow(existing) {
-  // Add a supply row to the EDIT modal (ed_procSuppliesList)
+// Compares a log's supplies list before vs after an edit and queues ONLY the
+// difference — editing from 2 vials to 3 decrements 1 more; editing from 3
+// to 1 gives 2 back. Editing to the exact same list queues nothing.
+function applySupplyEditDelta(oldSupplies, newSupplies, goatName, logTime, sourceLabel) {
+  const oldMap = {};
+  (oldSupplies || []).forEach(s => { oldMap[s.uuid] = (oldMap[s.uuid] || 0) + (parseFloat(s.qty) || 0); });
+  const newMap = {};
+  (newSupplies || []).forEach(s => { newMap[s.uuid] = (newMap[s.uuid] || 0) + (parseFloat(s.qty) || 0); });
   const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
-  const container = document.getElementById('ed_procSuppliesList');
+  const toDecrement = [], toIncrement = [];
+  const allUUIDs = new Set(Object.keys(oldMap).concat(Object.keys(newMap)));
+  allUUIDs.forEach(uuid => {
+    const diff = (newMap[uuid] || 0) - (oldMap[uuid] || 0);
+    if (!diff) return;
+    const asset = sdAssets.find(a => a.uuid === uuid);
+    if (!asset) return;
+    const item = { uuid, name: asset.name, qty: Math.abs(diff), units: asset.units || '' };
+    if (diff > 0) toDecrement.push(item); else toIncrement.push(item);
+  });
+  if (toDecrement.length) procQueueSupplyAdjust(toDecrement, goatName, logTime, sourceLabel, 'decrement');
+  if (toIncrement.length) procQueueSupplyAdjust(toIncrement, goatName, logTime, sourceLabel, 'increment');
+}
+
+function procAddEditSupplyRow(existing, containerId) {
+  // Add a supply row to an edit modal (default: ed_procSuppliesList)
+  const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+  const container = document.getElementById(containerId || 'ed_procSuppliesList');
   if (!container) return;
   const opts = sdAssets.map(a =>
     `<option value="${a.uuid}" ${existing && a.uuid === existing.uuid ? 'selected' : ''}>${a.name}${a.value != null ? ' (' + a.value + (a.units ? ' ' + a.units : '') + ')' : ''}</option>`
@@ -10512,7 +10543,13 @@ async function openEdit(id) {
       <textarea id="ed_mednotes" rows="4">${l.data.notes||""}</textarea>
       <label>Veterinarian <span style="color:#888;font-size:12px;">(optional)</span></label>
       <input id="ed_vet" value="${l.data.vet||""}" placeholder="e.g. Dr. Smith, Self">
+      <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(inventory adjusts only for the difference from the original save)</span></label>
+      <div id="ed_medSuppliesList"></div>
+      <button type="button" onclick="procAddEditSupplyRow(null, 'ed_medSuppliesList')" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
     `;
+    setTimeout(() => {
+      (l.data.supplies || []).forEach(s => procAddEditSupplyRow(s, 'ed_medSuppliesList'));
+    }, 0);
   }
   if (l.type === "hoof") {
     html += `
@@ -10582,7 +10619,7 @@ async function openEdit(id) {
       <label>Notes</label>
       <textarea id="ed_procnotes" rows="4">${l.data.notes||""}</textarea>
       ${editPhotoBlockHTML()}
-      <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(editing does not re-deduct inventory)</span></label>
+      <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(inventory adjusts only for the difference from the original save)</span></label>
       <div id="ed_procSuppliesList"></div>
       <button type="button" onclick="procAddEditSupplyRow()" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
     `;
@@ -10622,12 +10659,25 @@ async function saveEdit() {
     l.data.notes   = document.getElementById("ed_vnotes").value;
   }
   if (l.type === "med") {
+    const oldMedSupplies = JSON.parse(JSON.stringify(l.data.supplies || []));
     l.data.med    = document.getElementById("ed_med").value;
     l.data.dose   = parseFloat(document.getElementById("ed_dose").value) || 0;
     l.data.weight = parseFloat(document.getElementById("ed_medweight").value) || null;
     l.data.route  = document.getElementById("ed_route").value;
     l.data.notes  = document.getElementById("ed_mednotes").value;
     l.data.vet    = (document.getElementById("ed_vet")?.value || "").trim();
+    const edMedSupplyRows = document.querySelectorAll('#ed_medSuppliesList > div');
+    const sdAssetsMed = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+    l.data.supplies = [];
+    edMedSupplyRows.forEach(row => {
+      const sel = row.querySelector('.proc-supply-select');
+      const qty = row.querySelector('.proc-supply-qty');
+      if (!sel || !sel.value) return;
+      const asset = sdAssetsMed.find(a => a.uuid === sel.value);
+      if (!asset) return;
+      l.data.supplies.push({ uuid: asset.uuid, name: asset.name, qty: parseFloat(qty?.value)||1, units: asset.units||'' });
+    });
+    applySupplyEditDelta(oldMedSupplies, l.data.supplies, l.goat, l.time, 'Med');
   }
   if (l.type === "hoof") {
     l.data.state = document.getElementById("ed_hoof").value;
@@ -10671,6 +10721,7 @@ async function saveEdit() {
     l.data.desc  = document.getElementById("ed_acdesc").value;
   }
   if (l.type === "proc") {
+    const oldProcSupplies = JSON.parse(JSON.stringify(l.data.supplies || []));
     l.data.proc    = document.getElementById("ed_proc").value;
     l.data.method  = document.getElementById("ed_procmethod").value;
     l.data.notes   = document.getElementById("ed_procnotes").value;
@@ -10693,7 +10744,10 @@ async function saveEdit() {
         // Replace existing Supplies: line or append
         l.data.notes = l.data.notes.replace(/\nSupplies: .*/g, '') + (supplyLine ? '\nSupplies: ' + supplyLine : '');
       }
+    } else {
+      l.data.supplies = [];
     }
+    applySupplyEditDelta(oldProcSupplies, l.data.supplies, l.goat, l.time, 'Proc');
   }
 
   // Commit staged photo/file for the types that support it — applies whether
