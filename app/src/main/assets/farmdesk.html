@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.20-0206"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.20-0917"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7787,6 +7787,21 @@ function clearLogs() {
       eq_items = []; eq_history = []; eq_pending = []; equipmentLocations = {}; eq_groups = [];
       _eqDetailKey = null;
       if (typeof eq_renderList === 'function') eq_renderList();
+      // Goats — this module was missing from Clear All Data entirely; every
+      // other module resets its animal/asset list here but goats never did,
+      // letting stale entries (including outdated archived status) survive
+      // indefinitely no matter how many times farmOS data was re-pulled.
+      localStorage.removeItem(LS.goats);
+      localStorage.removeItem(LS.profiles);
+      localStorage.removeItem(LS.animalUUIDs);
+      localStorage.removeItem(LS.archivedGoats);
+      localStorage.removeItem(LS.excluded);
+      goats = [...DEFAULT_ANIMALS];
+      animalProfiles = {};
+      animalUUIDs = {};
+      archivedGoatNames = [];
+      populateGoatSelect();
+      if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
       renderSettings(); renderRecent(); renderDashboard();
       showToast("✅ All logs, ledger, locations, bees, equipment, and inventory cleared");
     }
@@ -9808,7 +9823,7 @@ async function getOrCreateMedMaterial(medName, token) {
 
 // Opens the med material dialog. Returns a Promise that resolves with
 // a UUID (material created/found) or 'skip' (user skipped this med).
-function openMedMaterialDialog(medName, token) {
+function openMedMaterialDialog(medName, token, beforeTime) {
   return new Promise(function(resolve) {
     var modal = document.getElementById('medMaterialModal');
     if (!modal) { resolve('skip'); return; }
@@ -9860,19 +9875,48 @@ function openMedMaterialDialog(medName, token) {
       var catId    = hasTax ? (catEl ? catEl.value : '') : null;
       var catName  = !hasTax ? (catEl ? catEl.value.trim() : '') : '';
 
-      document.getElementById('medMatResult').textContent = 'Creating…';
-      try {
-        var uuid = await createMedMaterial(nameVal, catId, catName, qtyVal, unitVal, notesVal, token);
-        if (uuid) {
-          document.getElementById('medMatResult').textContent = '✅ Created: ' + nameVal;
-          modal.style.display = 'none';
-          resolve(uuid);
-        } else {
-          document.getElementById('medMatResult').textContent = '❌ Create failed — check connection';
+      var doCreate = async function() {
+        document.getElementById('medMatResult').textContent = 'Creating…';
+        try {
+          var uuid = await createMedMaterial(nameVal, catId, catName, qtyVal, unitVal, notesVal, token, beforeTime);
+          if (uuid) {
+            document.getElementById('medMatResult').textContent = '✅ Created: ' + nameVal;
+            modal.style.display = 'none';
+            resolve(uuid);
+          } else {
+            document.getElementById('medMatResult').textContent = '❌ Create failed — check connection';
+          }
+        } catch(e) {
+          document.getElementById('medMatResult').textContent = '❌ ' + e.message;
         }
-      } catch(e) {
-        document.getElementById('medMatResult').textContent = '❌ ' + e.message;
+      };
+
+      // Catch near-duplicate names (e.g. "CD&T" vs "CDT") before creating a
+      // second, disconnected inventory record for the same thing.
+      var similar = findSimilarStockItems(nameVal).filter(function(a) {
+        return !a.localOnly && a.uuid && String(a.uuid).indexOf('local_') !== 0;
+      });
+      if (similar.length) {
+        var resEl = document.getElementById('medMatResult');
+        var listHTML = similar.map(function(a) {
+          return '<button type="button" data-uuid="' + a.uuid + '" class="medMatUseExisting" style="display:block;width:100%;margin:4px 0;padding:8px;font-size:14px;background:#333;text-align:left;">' +
+            a.name + (a.value != null ? ' (' + a.value + (a.units ? ' ' + a.units : '') + ')' : '') + '</button>';
+        }).join('');
+        resEl.innerHTML =
+          '<div style="color:#c90;margin-bottom:6px;">⚠️ Similar item(s) already exist — use one instead?</div>' +
+          listHTML +
+          '<button type="button" id="medMatCreateAnywayBtn" style="display:block;width:100%;margin-top:6px;padding:8px;font-size:14px;background:#8b0000;">Create "' + nameVal + '" anyway</button>';
+        resEl.querySelectorAll('.medMatUseExisting').forEach(function(b) {
+          b.onclick = function() {
+            modal.style.display = 'none';
+            resolve(b.getAttribute('data-uuid'));
+          };
+        });
+        document.getElementById('medMatCreateAnywayBtn').onclick = doCreate;
+        return;
       }
+
+      await doCreate();
     };
     document.getElementById('medMatSkipBtn').onclick = function() {
       modal.style.display = 'none';
@@ -9885,7 +9929,7 @@ function openMedMaterialDialog(medName, token) {
 
 // Creates asset--material in farmOS, optionally with an initial quantity reset.
 // catId = taxonomy_term UUID (if taxonomy fetched), catName = plain text fallback.
-async function createMedMaterial(name, catId, catName, qty, unit, notes, token) {
+async function createMedMaterial(name, catId, catName, qty, unit, notes, token, beforeTime) {
   var h = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
   var payload = { data: {
     type: 'asset--material',
@@ -9934,9 +9978,12 @@ async function createMedMaterial(name, catId, catName, qty, unit, notes, token) 
         var qData = await qRes.json();
         var qUUID = qData.data.id;
         var qRevId = qData.data.attributes && qData.data.attributes.drupal_internal__revision_id;
+        var initStockTs = beforeTime
+          ? String(Math.floor(new Date(beforeTime).getTime() / 1000) - 1)
+          : String(Math.floor(Date.now() / 1000));
         var lBody = { data: { type: 'log--input', attributes: {
           name: 'Initial stock: ' + name + ' ' + qty + ' ' + unit,
-          timestamp: String(Math.floor(Date.now() / 1000)),
+          timestamp: initStockTs,
           status: 'done'
         }, relationships: {
           asset: { data: [{ type: 'asset--material', id: uuid }] },
@@ -10212,7 +10259,20 @@ async function syncToFarmOS() {
                 if (!matUUID) {
                   var cfg_med = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
                   if (cfg_med.url) {
-                    matUUID = await openMedMaterialDialog(medName, token);
+                    // Backdate the new material's Initial Stock log to before the
+                    // earliest pending decrement for this med in THIS push batch.
+                    // farmOS computes current inventory chronologically — if the
+                    // reset lands later than decrements already being pushed for
+                    // it, those decrements get treated as pre-reset history and
+                    // silently disregarded, leaving inventory stuck at the reset
+                    // value no matter how many "Administer" logs went through.
+                    var earliestMedTime = l.time;
+                    toPost.forEach(function(pl) {
+                      if (pl.type === 'med' && pl.data && pl.data.med === medName && pl.time && pl.time < earliestMedTime) {
+                        earliestMedTime = pl.time;
+                      }
+                    });
+                    matUUID = await openMedMaterialDialog(medName, token, earliestMedTime);
                   }
                 }
                 if (matUUID === 'skip') {
@@ -12075,8 +12135,45 @@ function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, tota
   localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
 }
 
+// ===== NEAR-DUPLICATE INVENTORY NAME DETECTION =====
+// Strips punctuation/spacing so "CD&T", "CDT", "CD & T", "cd-t" all normalize
+// to the same string — catches the exact kind of split-inventory mistake that
+// happens when a typed name doesn't exactly match an existing item.
+function normalizeItemName(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function findSimilarStockItems(name) {
+  const norm = normalizeItemName(name);
+  if (!norm) return [];
+  const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+  return sdAssets.filter(a => {
+    const aNorm = normalizeItemName(a.name);
+    if (!aNorm) return false;
+    return aNorm === norm || aNorm.includes(norm) || norm.includes(aNorm);
+  });
+}
+
 // ===== QUEUE ITEM CREATION =====
 function queueCreateItem() {
+  const name = document.getElementById('newItemName').value.trim();
+  if (!name) { showToast('Enter item name'); return; }
+  const similar = findSimilarStockItems(name);
+  if (similar.length) {
+    const list = similar.map(a => a.name + (a.value != null ? ' (' + a.value + (a.units ? ' ' + a.units : '') + ')' : '')).join(', ');
+    openConfirm({
+      title: '⚠️ Similar item already exists',
+      body: '<p style="color:#ccc;">"' + name + '" looks like it might be the same as: <strong>' + list + '</strong></p>' +
+            '<p style="color:#ccc;">Use the existing item instead of creating a new one — otherwise your inventory splits across two records.</p>',
+      confirmLabel: 'Create New Anyway',
+      danger: true,
+      onConfirm: doQueueCreateItem
+    });
+    return;
+  }
+  doQueueCreateItem();
+}
+
+function doQueueCreateItem() {
   const name = document.getElementById('newItemName').value.trim();
   if (!name) { showToast('Enter item name'); return; }
   const matTypeId   = document.getElementById('newItemCat').value;
