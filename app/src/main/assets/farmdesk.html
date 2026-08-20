@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.20-0047"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.20-0116"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2490,11 +2490,18 @@ function renderStep() {
       </select>
       <input id="f_followup_date" type="date" style="display:none;margin-top:6px;">
       <input id="f_followup_note" placeholder="Follow-up note (optional)" style="margin-top:6px;">
+
+      <label style="margin-top:10px;display:block;">📦 Supplies Used</label>
+      <p style="color:#888;font-size:13px;margin:2px 0 6px;">Vials, needles, syringes, etc. Auto-deducts from inventory on save.</p>
+      <div id="medSuppliesList" style="margin-top:4px;"></div>
+      <button type="button" onclick="procAddSupplyRow(null, false, 'medSuppliesList')" style="margin-top:4px;width:calc(100% - 10px);background:#333;font-size:15px;">➕ Add Supply Item</button>
     `;
 
     if (isFixed && document.getElementById("weightRow")) {
       document.getElementById("weightRow").style.display = "none";
     }
+    var _sdCheckMed = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
+    if (_sdCheckMed.length > 0) procAddSupplyRow(null, false, 'medSuppliesList');
 
     document.getElementById("f_med").onchange = () => {
       const selectedMed = document.getElementById("f_med").value;
@@ -3211,10 +3218,15 @@ function saveStep() {
       localStorage.setItem(LS.lastMed,   lastMed);
       localStorage.setItem(LS.lastRoute, lastRoute);
 
+      const medSupplies = getProcSupplies('medSuppliesList');
       selectedGoats.forEach((g, i) => {
         const entry = { id: Date.now() + Math.random().toString(36).slice(2) + i, goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: loggedByVal };
-        entry.data = { med: medName, dose, unit, route, weight: w, notes, vet, sessionRate: sessionDoseRate };
+        entry.data = { med: medName, dose, unit, route, weight: w, notes, vet, sessionRate: sessionDoseRate, supplies: medSupplies };
         logs.push(entry);
+        // Supplies are consumed per animal — decrement once per goat in the batch
+        if (medSupplies.length > 0) {
+          procQueueSupplyDecrements(medSupplies, g, ts, 'Med');
+        }
         saveFollowup(g, "med", { med: medName, dose, unit, route, refId: entry.id, refTime: ts, refLoggedBy: entry.loggedBy });
       });
       _lastSavedEntry = null; // multiple goats — no single med to prompt inventory-deduct for
@@ -3336,12 +3348,17 @@ function saveStep() {
       weight: w,
       notes:  parts.join("\n"),
       vet:    document.getElementById("f_vet")?.value?.trim() || "",
-      sessionRate: sessionDoseRate
+      sessionRate: sessionDoseRate,
+      supplies: getProcSupplies('medSuppliesList')
     };
     lastMed   = entry.data.med;
     lastRoute = entry.data.route;
     localStorage.setItem(LS.lastMed,   lastMed);
     localStorage.setItem(LS.lastRoute, lastRoute);
+    // Queue inventory decrements for supplies (vials, needles, syringes, etc.)
+    if (entry.data.supplies.length > 0) {
+      procQueueSupplyDecrements(entry.data.supplies, g, entry.time || new Date().toISOString(), 'Med');
+    }
     // Save follow-up task with reference to this log
     saveFollowup(g, "med", {
       med: entry.data.med,
@@ -4663,9 +4680,9 @@ function renderModuleToggles() {
 }
 
 // ===== PROC SUPPLIES: add/remove rows in entry form =====
-function procAddSupplyRow() {
+function procAddSupplyRow(existing, isEdit, containerId) {
   const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
-  const container = document.getElementById('procSuppliesList');
+  const container = document.getElementById(containerId || 'procSuppliesList');
   if (!container) return;
   const opts = sdAssets.map(a =>
     `<option value="${a.uuid}">${a.name}${a.value != null ? ' (' + a.value + (a.units ? ' ' + a.units : '') + ')' : ''}</option>`
@@ -4683,8 +4700,8 @@ function procAddSupplyRow() {
   container.appendChild(row);
 }
 
-function getProcSupplies() {
-  const rows = document.querySelectorAll('#procSuppliesList > div');
+function getProcSupplies(containerId) {
+  const rows = document.querySelectorAll('#' + (containerId || 'procSuppliesList') + ' > div');
   const result = [];
   const sdAssets = JSON.parse(localStorage.getItem('farmdesk_stock_assets') || '[]');
   rows.forEach(row => {
@@ -4698,7 +4715,7 @@ function getProcSupplies() {
   return result;
 }
 
-function procQueueSupplyDecrements(supplies, goatName, logTime) {
+function procQueueSupplyDecrements(supplies, goatName, logTime, sourceLabel) {
   if (!supplies || !supplies.length) return;
   const sdAssets  = JSON.parse(localStorage.getItem('farmdesk_stock_assets')  || '[]');
   const sdPending = JSON.parse(localStorage.getItem('farmdesk_stock_pending') || '[]');
@@ -4708,7 +4725,7 @@ function procQueueSupplyDecrements(supplies, goatName, logTime) {
     const asset = sdAssets.find(a => a.uuid === s.uuid);
     if (!asset) return;
     const note = 'Used: ' + s.qty + (s.units ? ' ' + s.units : '') + ' ' + s.name +
-                 (goatName ? ' — ' + goatName : '') + ' · Proc · ' + dateStr;
+                 (goatName ? ' — ' + goatName : '') + ' · ' + (sourceLabel || 'Proc') + ' · ' + dateStr;
     asset.value = Math.max(0, (asset.value || 0) - s.qty);
     const isoTime = logTime || new Date().toISOString();
     const ts = String(Math.floor(new Date(isoTime).getTime() / 1000));
@@ -10567,7 +10584,7 @@ async function openEdit(id) {
       ${editPhotoBlockHTML()}
       <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(editing does not re-deduct inventory)</span></label>
       <div id="ed_procSuppliesList"></div>
-      <button type="button" onclick="procAddSupplyRow(null, true)" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
+      <button type="button" onclick="procAddEditSupplyRow()" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
     `;
     // Populate existing supply rows after render
     setTimeout(() => {
