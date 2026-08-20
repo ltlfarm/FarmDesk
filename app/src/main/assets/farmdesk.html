@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.20-0015"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.20-0047"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8502,7 +8502,13 @@ async function fetchAnimalUUIDs(silent = false) {
       const typeId = a.relationships?.animal_type?.data?.id;
       const typeName = typeId ? typeNames[typeId] : null;
       if (typeName && !MODULE_ANIMAL_TYPES.includes(typeName)) return; // other module's animal
-      if (a.attributes.archived) {
+      // farmOS has used two different conventions for archiving across
+      // versions/instances: a boolean 'archived' attribute (v4+ standard)
+      // and a string 'status' === 'archived' (older/some instances). Check
+      // both — missing either one means archived animals silently stay in
+      // the active list forever, since nothing ever re-removes them once
+      // fetchAnimalUUIDs has already added them.
+      if (a.attributes.archived || a.attributes.status === "archived") {
         archivedNames.push(name);
         return;
       }
@@ -13422,7 +13428,7 @@ async function eq_fetchAssets() {
           // reappear after a fresh fetch. Preserved below for local-only items.
           photoId: existing ? existing.photoId : null,
           fileAttach: existing ? existing.fileAttach : null,
-          archived: !!e.attributes.archived,
+          archived: !!(e.attributes.archived || e.attributes.status === 'archived'),
           synced: true,
           farmosUUID: e.id
         });
@@ -13885,7 +13891,7 @@ async function bd_fetchAssets() {
         fetchedBreed = breedMatch ? breedMatch[1].trim() : '';
         fetchedNotes = rawNotes.replace(/^Breed: .*$/m, '').replace(/\n{2,}/g, '\n').trim();
       }
-      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: a.attributes.archived ? 'archived' : 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), ownerUUIDs: (function(){ var orel=a.relationships&&a.relationships.owner&&a.relationships.owner.data; var oarr=Array.isArray(orel)?orel:(orel?[orel]:[]); return oarr.map(function(o){return o.id;}); })(), synced: true };
+      return { uuid: a.id, name: a.attributes.name || '', tag: (a.attributes.id_tag && a.attributes.id_tag[0]) ? a.attributes.id_tag[0].id : '', species: species, breed: fetchedBreed, sex: a.attributes.sex || '', status: (a.attributes.archived || a.attributes.status === 'archived') ? 'archived' : 'active', notes: fetchedNotes, flock: grpFlock, photoUrl: photoUrl, nickname: Array.isArray(a.attributes.nickname) ? a.attributes.nickname.filter(Boolean).join(', ') : (a.attributes.nickname || ''), ownerUUIDs: (function(){ var orel=a.relationships&&a.relationships.owner&&a.relationships.owner.data; var oarr=Array.isArray(orel)?orel:(orel?[orel]:[]); return oarr.map(function(o){return o.id;}); })(), synced: true };
     });
     var resEq = await fetchWithTimeout(apiUrl('/api/asset/equipment?page[limit]=50'), { headers: h });
     var feeders = [];
@@ -16416,7 +16422,7 @@ async function be_fetchColonies() {
   }
   var data = await res.json();
   var localUnsynced = be_colonies.filter(function(c) { return !c.uuid; }); // brand-new, not yet pushed
-  var fetched = (data.data || []).filter(function(a) { return !(a.attributes && a.attributes.archived); }).map(function(a) {
+  var fetched = (data.data || []).filter(function(a) { return !(a.attributes && (a.attributes.archived || a.attributes.status === 'archived')); }).map(function(a) {
     var locRel = a.relationships && a.relationships.location && a.relationships.location.data;
     var locArr = Array.isArray(locRel) ? locRel : (locRel ? [locRel] : []);
     var ownRel = a.relationships && a.relationships.owner && a.relationships.owner.data;
