@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.19-2359"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.08.20-0015"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -7695,6 +7695,8 @@ function clearLogs() {
       localStorage.removeItem(LS.lastSync);
       const syncStatus = document.getElementById("syncAllStatus");
       if (syncStatus) { syncStatus.textContent = ""; syncStatus.style.display = "none"; }
+      const testResult = document.getElementById("farmosTestResult");
+      if (testResult) testResult.textContent = "";
       logs = [];
       localStorage.setItem(LS.logs, JSON.stringify(logs));
       Object.keys(localStorage).filter(k => k.startsWith('farmdesk_photo_')).forEach(k => localStorage.removeItem(k));
