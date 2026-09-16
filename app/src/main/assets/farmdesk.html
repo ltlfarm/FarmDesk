@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.15-2307"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.15-2335"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -16765,18 +16765,19 @@ async function be_fetchHistory(token, cfg) {
     var localType = be_mapFarmOSNameToType(name);
     if (!localType) return;
     var ts = log.attributes.timestamp;
-    if (!ts || parseInt(ts) <= 0) return;
+    if (!ts) return;
 
     var imageRel = log.relationships && log.relationships.image && log.relationships.image.data;
     var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length - 1].id : null) : (imageRel && imageRel.id);
     var photoUrl = imageId ? (imageUrlMap[imageId] || null) : null;
+    var tsNum = Number(ts);
 
     fetchedLogs.push({
       id: log.id,
       colonyKey: colony.uuid,
       colonyName: colony.name || '',
       type: localType,
-      ts: new Date(parseInt(ts) * 1000).toISOString(),
+      ts: new Date(isNaN(tsNum) ? ts : tsNum * 1000).toISOString(),
       data: {},
       notes: (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '',
       photoUrl: photoUrl,
@@ -16801,6 +16802,18 @@ async function be_fetchHistory(token, cfg) {
   });
   if (added || updated) {
     be_logs.sort(function(a, b) { return new Date(b.ts || 0) - new Date(a.ts || 0); });
+  }
+  // Safety net: collapse any entry sharing a farmOS UUID down to one copy,
+  // regardless of why the id-match above missed it.
+  var seenUUID = {};
+  var deduped = be_logs.filter(function(l) {
+    if (!l.farmosUUID) return true; // local/unsynced — always keep
+    if (seenUUID[l.farmosUUID]) return false;
+    seenUUID[l.farmosUUID] = true;
+    return true;
+  });
+  if (deduped.length !== be_logs.length) { be_logs = deduped; added = added || 1; }
+  if (added || updated) {
     localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
     be_renderHistory();
   }
