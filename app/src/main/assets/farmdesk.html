@@ -1945,7 +1945,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-0045"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-0046"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -11258,6 +11258,8 @@ async function refreshAssets(silent) {
               time:    isoTime,
               photoId: oldPhotoByLogId[logId] || null,
               photoUrl: photoUrl,
+              farmosUUID: log.id,
+              logBundle: (log.type || '').replace('log--', ''),
               synced:  true,
               source:  'farmOS'
             });
@@ -12612,11 +12614,48 @@ async function sd_syncToFarmOS() {
         }
         // Mark synced in adjHistory
         const hEntry = adjHistory.find(h => h.id === item.id);
-        if (hEntry) { hEntry.synced = true; }
+        if (hEntry) { hEntry.synced = true; hEntry.farmosUUID = logUUID; hEntry.logBundle = logBundle; }
         item.synced = true;
         ok++;
         const icon = item.action === 'increment' ? '📥' : (item.action === 'decrement' ? '📤' : '🔢');
         logEl.textContent += `✅ ${icon} ${item.name} ${item.action === 'reset' ? '=' : (item.action === 'increment' ? '+' : '−')}${item.amount}\n`;
+      } else if (item.type === 'adjust_edit') {
+        // PATCH an already-synced log in place — only time/notes/photo are
+        // editable here (amount/action aren't), so no quantity PATCH needed.
+        const peAttrs = {
+          timestamp: item.timestamp,
+          notes: { value: [item.notes || '', item.seller ? 'Supplier: ' + item.seller : '', item.lot ? 'Lot: ' + item.lot : ''].filter(Boolean).join('\n') || '', format: 'default' }
+        };
+        const peRes = await fetchWithTimeout(apiUrl('/api/log/' + item.logBundle + '/' + item.farmosUUID), {
+          method: 'PATCH', headers: h,
+          body: JSON.stringify({ data: { type: 'log--' + item.logBundle, id: item.farmosUUID, attributes: peAttrs } })
+        });
+        if (!peRes.ok) {
+          const e = await peRes.json().catch(() => ({}));
+          throw new Error('Log update: ' + (e.errors?.[0]?.detail || peRes.status));
+        }
+        if (item.photoId) {
+          try {
+            const pePhotoData = await Photos.load(item.photoId);
+            if (pePhotoData) {
+              const pePhotoBlob = await (await fetch(pePhotoData)).blob();
+              const pePhotoUpload = await fetchWithTimeout(apiUrl('/api/log/' + item.logBundle + '/' + item.farmosUUID + '/image'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="stock-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: pePhotoBlob
+              });
+              if (pePhotoUpload.ok) {
+                const peFileData = await pePhotoUpload.json().catch(() => null);
+                await keepOnlyNewestImage('log', item.logBundle, item.farmosUUID, peFileData?.data?.id, token);
+              }
+            }
+          } catch(pe) { /* non-fatal — worst case the photo stays local-only */ }
+        }
+        const peHEntry = adjHistory.find(h => h.id === item.entryId);
+        if (peHEntry) peHEntry.synced = true;
+        item.synced = true;
+        ok++;
+        logEl.textContent += `✅ ✏️ ${item.name} log updated\n`;
       } else if (item.type === 'move') {
         await sd_pushMoveLog({ itemUUID: item.itemUUID, itemName: item.itemName, locationUuid: item.locationUuid, locationName: item.locationName, locationType: item.locationType, notes: item.notes, ts: item.ts }, token);
         item.synced = true;
@@ -12778,7 +12817,6 @@ async function openEditLog(id) {
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Notes</label>
     <textarea id="editLogNotes" rows="3" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">${entry.notes || ''}</textarea>
     ${editPhotoBlockHTML()}
-    ${entry.synced ? '<p style="color:#c90;font-size:13px;margin-top:8px;">⚠️ Already synced — changes are local only.</p>' : ''}
   `;
   saveBtn.textContent      = '💾 Save';
   saveBtn.style.background = '#3a7';
@@ -12791,6 +12829,7 @@ async function openEditLog(id) {
     const newPhotoId = editCurrentPhoto ? await Photos.save(editCurrentPhoto) : null;
     if (oldPhotoId && oldPhotoId !== newPhotoId) Photos.remove(oldPhotoId);
     entry.photoId = newPhotoId;
+    const wasAlreadySynced = entry.synced && entry.farmosUUID;
     entry.synced = false; // mark for re-sync
     // Update pending queue entry if unsynced
     const pEntry = pending.find(p => p.id === entry.id);
@@ -12799,6 +12838,17 @@ async function openEditLog(id) {
       pEntry.timestamp = newTime ? String(Math.floor(new Date(newTime).getTime() / 1000)) : pEntry.timestamp;
       pEntry.photoId   = newPhotoId;
       pEntry.synced    = false;
+    } else if (wasAlreadySynced) {
+      // Already pushed once, no longer in the pending queue — queue a PATCH
+      // of the same farmOS log instead of leaving the edit local-only.
+      pending = pending.filter(p => !(p.type === 'adjust_edit' && p.entryId === entry.id));
+      pending.push({
+        id: 'adjedit_' + Date.now(), type: 'adjust_edit', entryId: entry.id,
+        farmosUUID: entry.farmosUUID, logBundle: entry.logBundle, name: entry.name,
+        notes: newNotes, seller: entry.seller || '', lot: entry.lot || '',
+        timestamp: newTime ? String(Math.floor(new Date(newTime).getTime() / 1000)) : String(Math.floor(new Date(entry.time).getTime() / 1000)),
+        photoId: newPhotoId, synced: false
+      });
     }
     localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
     localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
