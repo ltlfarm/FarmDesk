@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.15-2156"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -16544,7 +16544,7 @@ async function be_syncToFarmOS() {
   if (!cfg.url) { showToast('Set up farmOS connection in Settings first'); return; }
   var logEl = document.getElementById('be-sync-log'); if (logEl) logEl.textContent = 'Connecting...\n';
   var token;
-  try { token = await getCachedToken(cfg); } catch(e) { showToast('Connection failed'); if (logEl) logEl.textContent += 'Auth failed: ' + e.message + '\n'; return; }
+  try { token = await getCachedToken(cfg); if (logEl) logEl.textContent = '✅ Connected\n'; } catch(e) { showToast('Connection failed'); if (logEl) logEl.textContent += 'Auth failed: ' + e.message + '\n'; return; }
   var resolved = await be_resolveBundle(token);
   if (!resolved) { showToast('Could not find the Bee colony asset type in farmOS — is the Bee module enabled?'); if (logEl) logEl.textContent += '❌ No bee asset bundle found on this instance.\n'; return; }
   if (logEl) logEl.textContent += 'Using asset type: ' + be_bundle + '\n';
