@@ -1945,7 +1945,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1056"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1100"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -11125,6 +11125,21 @@ function sd_populateItemSelects() {
   }
 }
 
+// Reverses the notes format sd_syncToFarmOS writes on push ("Supplier: X" /
+// "Lot: Y" appended under the user's own notes), so a restock looks the same
+// after a fetch as it did when entered — same 🏪/📦 row, same clean notes.
+// Lines that aren't ours are left alone as plain notes.
+function sd_parseLogNotes(notesRaw) {
+  const raw = notesRaw || '';
+  const val = key => { const m = raw.match(new RegExp('^' + key + ': (.+)$', 'm')); return m ? m[1].trim() : ''; };
+  const seller = val('Supplier');
+  const lot    = val('Lot');
+  const notes  = raw.split('\n')
+    .filter(line => !/^Supplier: /.test(line) && !/^Lot: /.test(line))
+    .join('\n').trim();
+  return { seller, lot, notes };
+}
+
 async function refreshAssets(silent) {
   const cfg = JSON.parse(localStorage.getItem(SD_LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) {
@@ -11245,16 +11260,22 @@ async function refreshAssets(silent) {
                            parseFloat(q.attributes?.value?.denominator || 1);
             const ts     = log.attributes?.timestamp;
             const isoTime = ts ? new Date(isNaN(Number(ts)) ? ts : Number(ts) * 1000).toISOString() : new Date().toISOString();
-            const notes  = log.attributes?.notes?.value || '';
+            const parsedNotes = sd_parseLogNotes(log.attributes?.notes?.value || '');
+            // Priced restocks/sales store real price attributes on quantity--price
+            const fr = v => (v && v.numerator != null) ? (parseFloat(v.numerator) / parseFloat(v.denominator || 1)) : null;
+            const unitPrice  = fr(q.attributes?.unit_price);
+            const totalPrice = fr(q.attributes?.total_price);
             const logId  = 'farmos_' + log.id + '_' + qRef.id;
             fetchedHistory.push({
               id:      logId,
               name:    asset ? asset.name : invAssetId,
               action:  adj,
               amount,
-              notes,
-              seller:  '',
-              lot:     '',
+              notes:   parsedNotes.notes,
+              seller:  parsedNotes.seller,
+              lot:     parsedNotes.lot,
+              unitPrice:  unitPrice,
+              totalPrice: totalPrice,
               time:    isoTime,
               photoId: oldPhotoByLogId[logId] || null,
               photoUrl: photoUrl,
@@ -12774,6 +12795,17 @@ function sd_renderHistory() {
     const syncMark  = h.source === 'farmOS' ? '✓ farmOS' : (h.synced ? '✓' : '⏳ pending push');
     const syncColor = h.source === 'farmOS' ? '#3a7' : (h.synced ? '#3a7' : '#c90');
     const t         = new Date(h.time).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    // Price is display-only here — nothing about what's pushed or fetched changes.
+    // Show the total, plus per-unit when the amount makes that a different number.
+    let priceBit = '';
+    const uP = (h.unitPrice  != null && h.unitPrice  !== '') ? parseFloat(h.unitPrice)  : null;
+    const tP = (h.totalPrice != null && h.totalPrice !== '') ? parseFloat(h.totalPrice) : null;
+    const total = (tP != null && !isNaN(tP)) ? tP : ((uP != null && !isNaN(uP)) ? uP * h.amount : null);
+    if (total != null && !isNaN(total)) {
+      const per = (h.amount > 0) ? total / h.amount : null;
+      priceBit = '💲 $' + total.toFixed(2) + ((per != null && h.amount !== 1) ? ' ($' + per.toFixed(2) + '/ea)' : '');
+    }
+    const metaBits = [h.seller ? '🏪 '+h.seller : '', h.lot ? '📦 Lot: '+h.lot : '', priceBit].filter(Boolean);
     return `<div class="box" style="cursor:pointer;" onclick="toggleHistoryDrawer(this)">
       <div style="display:flex;align-items:flex-start;gap:10px;">
         <input type="checkbox" class="history-select" data-id="${h.id}" style="width:auto;margin:4px 0 0;flex-shrink:0;" onclick="event.stopPropagation()">
@@ -12783,7 +12815,7 @@ function sd_renderHistory() {
             <span style="color:${amtColor};font-size:16px;">${sign}${h.amount}</span>
           </div>
           ${h.notes ? `<div style="color:#888;font-size:13px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">${h.notes}</div>` : ''}
-          ${h.seller || h.lot ? `<div style="color:#666;font-size:12px;margin-top:2px;">${[h.seller ? '🏪 '+h.seller : '', h.lot ? '📦 Lot: '+h.lot : ''].filter(Boolean).join(' · ')}</div>` : ''}
+          ${metaBits.length ? `<div style="color:#666;font-size:12px;margin-top:2px;">${metaBits.join(' · ')}</div>` : ''}
           <div style="color:#666;font-size:12px;margin-top:3px;">${t} <span style="color:${syncColor};margin-left:4px;">${syncMark}</span></div>
         </div>
       </div>
