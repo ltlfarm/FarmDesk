@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "DEV"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.15-2307"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -16309,6 +16309,56 @@ function be_renderColonies() {
   }).join('');
 }
 
+// ===== BEES: colony photo capture (mirrors Equipment's asset-photo pattern) =====
+var be_currentPhoto = null;
+function be_takePhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) { window.AndroidBridge.takePhoto('be_onAndroidPhoto'); }
+  else { document.getElementById('bePhotoInput').click(); }
+}
+function be_onAndroidPhoto(dataUrl) {
+  if (!dataUrl) return;
+  var full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  var img = new Image();
+  img.onload = function() {
+    orientedCanvas(img, full, 800, function(canvas) {
+      be_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      var preview = document.getElementById('bePhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + be_currentPhoto + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('beClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  };
+  img.src = full;
+}
+function be_handlePhoto(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      orientedCanvas(img, e.target.result, 800, function(canvas) {
+        be_currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+        var preview = document.getElementById('bePhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + be_currentPhoto + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('beClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function be_clearPhoto() {
+  be_currentPhoto = null;
+  var preview = document.getElementById('bePhotoPreview');
+  if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('beClearPhotoBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  var input = document.getElementById('bePhotoInput');
+  if (input) input.value = '';
+}
+
 function be_openAddColony() {
   be_editId = null;
   document.getElementById('be-colony-modal-title').textContent = 'Add Colony';
@@ -16320,6 +16370,7 @@ function be_openAddColony() {
   document.getElementById('be-colony-priority').checked = false;
   document.getElementById('be-colony-review').checked = false;
   document.getElementById('be-colony-archive-row').style.display = 'none';
+  be_clearPhoto();
   document.getElementById('be-colony-modal').style.display = 'block';
 }
 
@@ -16336,6 +16387,16 @@ function be_editColony(id) {
   document.getElementById('be-colony-review').checked = !!(c.flags && c.flags.needsReview);
   document.getElementById('be-colony-owner-box').innerHTML = ownerCheckboxesHTML('be-colony-owner-cb', c.ownerUUIDs || []);
   document.getElementById('be-colony-archive-row').style.display = '';
+  be_clearPhoto();
+  if (c.photoId) {
+    Photos.load(c.photoId).then(function(data) {
+      if (!data) return;
+      var preview = document.getElementById('bePhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + data + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('beClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  }
   document.getElementById('be-colony-modal').style.display = 'block';
 }
 
@@ -16429,7 +16490,7 @@ function be_dropPinMove() {
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
 }
 
-function be_saveColony() {
+async function be_saveColony() {
   var name = document.getElementById('be-colony-name').value.trim();
   if (!name) { showToast('Enter a colony name'); return; }
   var notes = document.getElementById('be-colony-notes').value.trim();
@@ -16440,23 +16501,30 @@ function be_saveColony() {
     needsReview: document.getElementById('be-colony-review').checked
   };
   var ownerUUIDs = readOwnerCheckboxes('be-colony-owner-cb');
+  var photoId = null;
+  if (be_editId) {
+    var existingC = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_editId; })[0];
+    photoId = existingC ? existingC.photoId : null;
+  }
+  if (be_currentPhoto) { photoId = await Photos.save(be_currentPhoto); }
   if (be_editId) {
     var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === be_editId; })[0];
     if (c) {
       var locChanged = (c.locationKey || '') !== (locationKey || '');
-      c.name = name; c.notes = notes; c.flags = flags; c.locationKey = locationKey; c.ownerUUIDs = ownerUUIDs; c.synced = false;
+      c.name = name; c.notes = notes; c.flags = flags; c.locationKey = locationKey; c.ownerUUIDs = ownerUUIDs; c.photoId = photoId; c.synced = false;
       if (c.uuid) {
         be_pending.push({ action: 'update_colony', colonyUUID: c.uuid, colony: c, id: 'upd_' + Date.now(), synced: false });
         if (locChanged && locationKey) be_pending.push({ action: 'move_colony', colonyUUID: c.uuid, locationKey: locationKey, id: 'mv_' + Date.now(), synced: false });
       }
     }
   } else {
-    var nc = { _localId: 'local_' + Date.now(), uuid: null, name: name, notes: notes, flags: flags, locationKey: locationKey, ownerUUIDs: ownerUUIDs, status: 'active', synced: false };
+    var nc = { _localId: 'local_' + Date.now(), uuid: null, name: name, notes: notes, flags: flags, locationKey: locationKey, ownerUUIDs: ownerUUIDs, photoId: photoId, status: 'active', synced: false };
     be_colonies.push(nc);
     be_pending.push({ action: 'create_colony', colony: nc, id: nc._localId, synced: false });
   }
   localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
   localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  be_currentPhoto = null;
   be_closeColonyModal();
   be_updateSyncBadge();
   showToast('Colony saved');
@@ -16499,8 +16567,25 @@ async function be_pushCreateColony(colony, token) {
     localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
     localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
     localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+    await be_pushColonyPhoto(lc, token);
     if (lc.locationKey) { try { await be_pushMoveColony(lc.uuid, lc.locationKey, token); } catch(e) { /* move is best-effort; colony still created */ } }
   }
+}
+
+// Uploads a colony's local photo (if any) to its farmOS asset image field.
+// Same asset-level two-step upload pattern used by Stock/Equipment.
+async function be_pushColonyPhoto(colony, token) {
+  if (!colony || !colony.photoId || !colony.uuid) return;
+  try {
+    var photoData = await Photos.load(colony.photoId);
+    if (!photoData) return;
+    var photoBlob = await (await fetch(photoData)).blob();
+    await fetchWithTimeout(apiUrl('/api/asset/' + be_bundle + '/' + colony.uuid + '/image'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="colony-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+      body: photoBlob
+    });
+  } catch(pe) { /* non-fatal — worst case the old photo stays attached */ }
 }
 
 async function be_pushUpdateColony(colony, token) {
@@ -16515,6 +16600,7 @@ async function be_pushUpdateColony(colony, token) {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var lc = be_colonies.filter(function(c) { return c.uuid === colony.uuid; })[0];
   if (lc) { lc.synced = true; localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies)); }
+  await be_pushColonyPhoto(colony, token);
 }
 
 async function be_pushMoveColony(colonyUUID, locationKey, token) {
@@ -16628,7 +16714,116 @@ async function be_fetchColonies() {
   be_colonies = fetched.concat(localUnsynced);
   localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
   be_renderColonies();
+  try { await be_fetchHistory(token, cfg); } catch(e) { /* history pull is best-effort — colonies already fetched fine */ }
   showToast('✅ Colonies fetched (' + fetched.length + ')');
+}
+
+// Map a farmOS log's name (as written by be_pushEvent) back to our local event type.
+function be_mapFarmOSNameToType(name) {
+  name = name || '';
+  if (/^Inspection:/i.test(name)) return 'inspection';
+  if (/^Weight:/i.test(name)) return 'weight';
+  if (/^Feeding:/i.test(name)) return 'feeding';
+  if (/^Treatment:/i.test(name)) return 'treatment';
+  if (/^Honey harvest:/i.test(name)) return 'harvest';
+  return null;
+}
+
+// Pull colony events (inspection/weight/feeding/treatment/harvest) from farmOS —
+// same fetch-and-merge pattern as bd_fetchLogs. Called from be_fetchColonies so
+// the one Fetch button pulls both colonies and their events, like Birds does.
+async function be_fetchHistory(token, cfg) {
+  var bundles = ['observation', 'input', 'harvest'];
+  var responses = await Promise.all(bundles.map(function(b) {
+    return fetchWithTimeout(apiUrl('/api/log/' + b + '?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: be_postHeaders(token) });
+  }));
+  var imageUrlMap = {};
+  var rawLogs = [];
+  for (var i = 0; i < responses.length; i++) {
+    var res = responses[i];
+    if (!res.ok) continue;
+    var d = await res.json();
+    (d.included || []).forEach(function(inc) {
+      if (inc.type === 'file--file') imageUrlMap[inc.id] = (inc.attributes.uri && (inc.attributes.uri.url || inc.attributes.uri.value)) || null;
+    });
+    (d.data || []).forEach(function(x) { rawLogs.push(x); });
+  }
+
+  var fetchedLogs = [];
+  rawLogs.forEach(function(log) {
+    // Only logs linked to one of our colonies — these bundles are shared with
+    // Goats/Birds/Equipment on the same farmOS instance.
+    var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
+    var assetIds = Array.isArray(assetRel) ? assetRel.map(function(a) { return a.id; }) : (assetRel ? [assetRel.id] : []);
+    var colony = null;
+    for (var ai = 0; ai < assetIds.length; ai++) {
+      var found = be_colonies.filter(function(x) { return x.uuid === assetIds[ai]; })[0];
+      if (found) { colony = found; break; }
+    }
+    if (!colony) return;
+    var name = (log.attributes.name || '').trim();
+    var localType = be_mapFarmOSNameToType(name);
+    if (!localType) return;
+    var ts = log.attributes.timestamp;
+    if (!ts || parseInt(ts) <= 0) return;
+
+    var imageRel = log.relationships && log.relationships.image && log.relationships.image.data;
+    var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length - 1].id : null) : (imageRel && imageRel.id);
+    var photoUrl = imageId ? (imageUrlMap[imageId] || null) : null;
+
+    fetchedLogs.push({
+      id: log.id,
+      colonyKey: colony.uuid,
+      colonyName: colony.name || '',
+      type: localType,
+      ts: new Date(parseInt(ts) * 1000).toISOString(),
+      data: {},
+      notes: (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '',
+      photoUrl: photoUrl,
+      photoId: null,
+      synced: true,
+      farmosUUID: log.id
+    });
+  });
+
+  // Merge — farmOS is source of truth for synced logs; local unsynced entries always win.
+  var localByFarmOSId = {};
+  be_logs.forEach(function(l, i) { if (l.farmosUUID) localByFarmOSId[l.farmosUUID] = i; });
+  var added = 0, updated = 0;
+  fetchedLogs.forEach(function(l) {
+    var idx = localByFarmOSId[l.farmosUUID];
+    if (idx === undefined) { be_logs.unshift(l); added++; }
+    else if (be_logs[idx].synced) {
+      l.photoId = be_logs[idx].photoId || null; // keep any already-cached local photo
+      be_logs[idx] = l;
+      updated++;
+    }
+  });
+  if (added || updated) {
+    be_logs.sort(function(a, b) { return new Date(b.ts || 0) - new Date(a.ts || 0); });
+    localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
+    be_renderHistory();
+  }
+
+  // Download any farmOS-hosted event photo not yet cached locally
+  try {
+    var photosChanged = false;
+    await Promise.all(be_logs.map(async function(l) {
+      if (l.photoUrl && !l.photoId) {
+        try {
+          var u = l.photoUrl.indexOf('http') === 0 ? l.photoUrl : (cfg.url + l.photoUrl);
+          var r = await fetchWithTimeout(u, { headers: { 'Authorization': 'Bearer ' + token } });
+          if (r.ok) {
+            var blob = await r.blob();
+            var full = await new Promise(function(resolve) { var fr = new FileReader(); fr.onload = function() { resolve(fr.result); }; fr.readAsDataURL(blob); });
+            l.photoId = await Photos.save(full);
+            photosChanged = true;
+          }
+        } catch(e) { /* offline-safe */ }
+      }
+    }));
+    if (photosChanged) { localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs)); be_renderHistory(); }
+  } catch(e) { /* photo download is best-effort */ }
 }
 
 // ===== BEEDESK STAGE 2: colony events — inspection, weight, feeding, treatment, harvest =====
@@ -16644,6 +16839,56 @@ const BE_EVENT_TYPES = [
   { v: 'harvest',    label: '🍯 Honey Harvest' }
 ];
 
+// ===== BEES: per-event photo capture (mirrors Goats/Birds per-log photo pattern) =====
+var be_currentEventPhoto = null;
+function be_takeEventPhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) { window.AndroidBridge.takePhoto('be_onAndroidEventPhoto'); }
+  else { document.getElementById('beEventPhotoInput').click(); }
+}
+function be_onAndroidEventPhoto(dataUrl) {
+  if (!dataUrl) return;
+  var full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  var img = new Image();
+  img.onload = function() {
+    orientedCanvas(img, full, 800, function(canvas) {
+      be_currentEventPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      var preview = document.getElementById('beEventPhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + be_currentEventPhoto + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('beEventClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  };
+  img.src = full;
+}
+function be_handleEventPhoto(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      orientedCanvas(img, e.target.result, 800, function(canvas) {
+        be_currentEventPhoto = canvas.toDataURL('image/jpeg', 0.7);
+        var preview = document.getElementById('beEventPhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + be_currentEventPhoto + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('beEventClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function be_clearEventPhoto() {
+  be_currentEventPhoto = null;
+  var preview = document.getElementById('beEventPhotoPreview');
+  if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('beEventClearPhotoBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  var input = document.getElementById('beEventPhotoInput');
+  if (input) input.value = '';
+}
+
 function be_openEventModal(colonyKey) {
   var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === colonyKey; })[0];
   if (!c) return;
@@ -16655,6 +16900,7 @@ function be_openEventModal(colonyKey) {
   document.getElementById('be-event-time').value = now.toISOString().slice(0, 16);
   document.getElementById('be-event-notes').value = '';
   document.getElementById('be-event-owner-box').innerHTML = ownerCheckboxesHTML('be-event-owner-cb', getDefaultOwners());
+  be_clearEventPhoto();
   be_renderEventFields();
   document.getElementById('be-event-modal').style.display = 'block';
 }
@@ -16719,12 +16965,22 @@ function be_saveEvent() {
     id: 'belog_' + Date.now(), colonyKey: colonyKey, colonyName: c.name || '',
     type: t, ts: new Date(timeVal).toISOString(), data: data, notes: notes,
     ownerUUIDs: readOwnerCheckboxes('be-event-owner-cb'),
-    synced: false, farmosUUID: null
+    photoId: null, synced: false, farmosUUID: null
   };
   be_logs.unshift(log);
   be_pending.push({ action: 'create_event', log: log, id: log.id, synced: false });
   localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
   localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+  if (be_currentEventPhoto) {
+    var _p = be_currentEventPhoto;
+    Photos.save(_p).then(function(id) {
+      log.photoId = id; // same object reference in be_logs and be_pending — one write covers both
+      localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
+      localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+      be_renderHistory();
+    });
+  }
+  be_currentEventPhoto = null;
   be_closeEventModal(); be_updateSyncBadge(); be_renderHistory();
   showToast('Event logged');
 }
@@ -16744,7 +17000,9 @@ function be_renderHistory() {
   if (!be_logs.length) { list.innerHTML = '<div class="box" style="text-align:center;color:#888;">No events yet. Open a colony and tap Log Event.</div>'; return; }
   var icon = { inspection: '🔍', weight: '⚖️', feeding: '🍯', treatment: '💊', harvest: '🍯' };
   list.innerHTML = be_logs.slice(0, 200).map(function(l) {
+    var thumb = l.photoId ? '<img data-photoid="' + l.photoId + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;background:#333;">' : '';
     return '<div class="box" style="display:flex;justify-content:space-between;gap:8px;">' +
+      thumb +
       '<div style="flex:1;min-width:0;"><div style="font-weight:600;">' + (icon[l.type] || '') + ' ' + (l.colonyName || '') + '</div>' +
       '<div style="font-size:13px;color:#aaa;">' + be_eventSummary(l) + '</div>' +
       (l.notes ? '<div style="font-size:12px;color:#777;">' + l.notes + '</div>' : '') +
@@ -16752,6 +17010,7 @@ function be_renderHistory() {
       '<div style="font-size:12px;color:' + (l.synced ? '#3a7' : '#c90') + ';">' + (l.synced ? '✓' : '⏳') + '</div>' +
     '</div>';
   }).join('');
+  lazyLoadPhotos(list);
 }
 
 // POST a quantity--standard and return its relationship ref (or null on failure).
@@ -16811,6 +17070,24 @@ async function be_pushEvent(log, token) {
   var rd = await res.json();
   var ll = be_logs.filter(function(x) { return x.id === log.id; })[0];
   if (ll) { ll.synced = true; ll.farmosUUID = rd.data.id; localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs)); }
+  // Photo — same per-log upload pattern used by Goats/Birds
+  if (log.photoId) {
+    try {
+      var photoData = await Photos.load(log.photoId);
+      if (photoData) {
+        var photoBlob = await (await fetch(photoData)).blob();
+        var photoUpload = await fetchWithTimeout(apiUrl('/api/log/' + bundle + '/' + rd.data.id + '/image'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bee-event-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+          body: photoBlob
+        });
+        if (photoUpload.ok) {
+          var fileData = await photoUpload.json().catch(function() { return null; });
+          await keepOnlyNewestImage('log', bundle, rd.data.id, fileData && fileData.data && fileData.data.id, token);
+        }
+      }
+    } catch(pe) { /* non-fatal — worst case the photo stays local-only */ }
+  }
 }
 
 const MODULES = [
@@ -19394,6 +19671,14 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <select id="be-colony-location"></select>
     <label>Notes</label>
     <textarea id="be-colony-notes" placeholder="Queen source, install date, temperament..." style="width:100%;box-sizing:border-box;min-height:70px;"></textarea>
+    <label>Photo</label>
+    <div id="bePhotoPreview" style="margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button type="button" onclick="be_takePhoto()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('bePhotoInput').click()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" id="beClearPhotoBtn" onclick="be_clearPhoto()" class="secondary" style="display:none;margin:0;padding:12px;font-size:14px;background:#5a1a1a;">✕</button>
+    </div>
+    <input type="file" id="bePhotoInput" accept="image/*" style="display:none;" onchange="be_handlePhoto(this)">
     <label style="margin-top:8px;">Flags</label>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
       <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="be-colony-monitor" style="width:auto;margin:0;"> Monitor</label>
@@ -19455,6 +19740,14 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
     <div id="be-event-fields" style="margin-top:4px;"></div>
     <label>Date / Time</label>
     <input type="datetime-local" id="be-event-time">
+    <label>Photo</label>
+    <div id="beEventPhotoPreview" style="margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button type="button" onclick="be_takeEventPhoto()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('beEventPhotoInput').click()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" id="beEventClearPhotoBtn" onclick="be_clearEventPhoto()" class="secondary" style="display:none;margin:0;padding:12px;font-size:14px;background:#5a1a1a;">✕</button>
+    </div>
+    <input type="file" id="beEventPhotoInput" accept="image/*" style="display:none;" onchange="be_handleEventPhoto(this)">
     <label>Notes</label>
     <textarea id="be-event-notes" placeholder="Optional notes" style="width:100%;box-sizing:border-box;min-height:60px;"></textarea>
     <label>Owner(s)</label>
