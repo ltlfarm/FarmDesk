@@ -21,6 +21,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3.2.2
+        with:
+          packages: 'platform-tools'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4.4.1
@@ -68,7 +70,6 @@ jobs:
           cp sw.js pwa/sw.js
           cp icon192.png pwa/icon192.png
           cp icon512.png pwa/icon512.png
-          cp -r leaflet pwa/leaflet
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
