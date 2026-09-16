@@ -1945,7 +1945,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1047"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1056"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -12619,6 +12619,15 @@ async function sd_syncToFarmOS() {
         ok++;
         const icon = item.action === 'increment' ? '📥' : (item.action === 'decrement' ? '📤' : '🔢');
         logEl.textContent += `✅ ${icon} ${item.name} ${item.action === 'reset' ? '=' : (item.action === 'increment' ? '+' : '−')}${item.amount}\n`;
+      } else if (item.type === 'adjust_delete') {
+        const dRes = await fetchWithTimeout(apiUrl('/api/log/' + item.logBundle + '/' + item.farmosUUID), {
+          method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+        // 404 means it's already gone from farmOS — treat as success, not a failure to retry forever.
+        if (!dRes.ok && dRes.status !== 404) throw new Error('Delete: ' + dRes.status);
+        item.synced = true;
+        ok++;
+        logEl.textContent += `✅ 🗑️ ${item.name || 'log'} deleted\n`;
       } else if (item.type === 'adjust_edit') {
         // PATCH an already-synced log in place — only time/notes/photo are
         // editable here (amount/action aren't), so no quantity PATCH needed.
@@ -19755,19 +19764,47 @@ function sd_toggleSelectAll(checked) {
 function sd_deleteSelected() {
   const selected = [...document.querySelectorAll('.history-select:checked')].map(cb => cb.dataset.id);
   if (!selected.length) return;
+  const entries = selected.map(id => adjHistory.find(h => h.id === id)).filter(Boolean);
+  // One farmOS log can back more than one history row (a log with several
+  // inventory quantities), so deleting the log takes every sibling row with it.
+  // Warn before that happens rather than silently removing extra rows.
+  const uuidsToDelete = [...new Set(entries.filter(e => e.farmosUUID).map(e => e.farmosUUID))];
+  let siblingCount = 0;
+  uuidsToDelete.forEach(u => {
+    adjHistory.forEach(h => { if (h.farmosUUID === u && !selected.includes(h.id)) siblingCount++; });
+  });
+  const localOnly = entries.length - entries.filter(e => e.farmosUUID).length;
+  let body = '<p style="color:#ccc;">' + selected.length + ' item' + (selected.length > 1 ? 's' : '') + ' will be deleted.</p>';
+  if (uuidsToDelete.length) body += '<p style="color:#ccc;">' + uuidsToDelete.length + ' will also be deleted from farmOS on next sync.</p>';
+  if (localOnly)    body += '<p style="color:#888;font-size:13px;">' + localOnly + ' not yet synced — removed locally only.</p>';
+  if (siblingCount) body += '<p style="color:#c90;font-size:13px;">⚠️ ' + siblingCount + ' other history row' + (siblingCount > 1 ? 's share' : ' shares') + ' the same farmOS log and will also be removed.</p>';
+  body += '<p style="color:#c66;">This cannot be undone.</p>';
   openConfirm({
     title: 'Delete Selected?',
-    body: '<p style="color:#ccc;">' + selected.length + ' item' + (selected.length > 1 ? 's' : '') + ' will be removed from local history.</p><p style="color:#c66;">This cannot be undone.</p>',
+    body: body,
     confirmLabel: '🗑️ Confirm Delete',
     danger: true,
     onConfirm: function() {
-      adjHistory = adjHistory.filter(h => !selected.includes(h.id));
-      pending = pending.filter(p => !selected.includes(p.id));
+      uuidsToDelete.forEach(u => {
+        const src = entries.find(e => e.farmosUUID === u);
+        pending.push({
+          id: 'adjdel_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+          type: 'adjust_delete', farmosUUID: u,
+          logBundle: (src && src.logBundle) || 'activity',
+          name: (src && src.name) || '', synced: false
+        });
+      });
+      // Drop the selected rows, any sibling rows backed by a log we're deleting,
+      // and any queued push/edit that pointed at them.
+      const goneIds = adjHistory.filter(h => selected.includes(h.id) || (h.farmosUUID && uuidsToDelete.includes(h.farmosUUID))).map(h => h.id);
+      adjHistory = adjHistory.filter(h => !goneIds.includes(h.id));
+      pending = pending.filter(p => !goneIds.includes(p.id) && !(p.type === 'adjust_edit' && goneIds.includes(p.entryId)));
       localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
       const sa = document.getElementById('selectAllHistory');
       if (sa) sa.checked = false;
       sd_renderHistory(); updateSyncBadge();
+      showToast(uuidsToDelete.length ? '🗑️ Deleted — will remove from farmOS next push' : '🗑️ Deleted');
     }
   });
 }
