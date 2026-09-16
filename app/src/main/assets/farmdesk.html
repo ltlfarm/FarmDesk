@@ -1612,6 +1612,14 @@ header { flex-direction:column; gap:0; align-items:stretch; }
     <input type="datetime-local" id="eqMaint_time" style="width:100%;margin-bottom:8px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Notes</label>
     <textarea id="eqMaint_notes" rows="3" style="width:100%;margin-bottom:12px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;" placeholder="Oil change, repair, inspection..."></textarea>
+    <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Photo</label>
+    <div id="eqMaintPhotoPreview" style="margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button type="button" onclick="eq_takeMaintPhoto()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('eqMaintPhotoInput').click()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" id="eqMaintClearPhotoBtn" onclick="eq_clearMaintPhoto()" class="secondary" style="display:none;margin:0;padding:12px;font-size:14px;background:#5a1a1a;">✕</button>
+    </div>
+    <input type="file" id="eqMaintPhotoInput" accept="image/*" style="display:none;" onchange="eq_handleMaintPhoto(this)">
     <label style="color:#888;font-size:13px;display:block;margin-bottom:4px;">Owner(s)</label>
     <div id="eqMaint_owner_box" style="margin-bottom:12px;"></div>
     <button onclick="eq_saveMaintenanceEntry()" style="width:100%;margin:0 0 8px;">💾 Save</button>
@@ -1926,7 +1934,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-0010"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-0034"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -12858,6 +12866,56 @@ function eq_clearPhoto() {
   if (input) input.value = '';
 }
 
+// ===== EQUIPMENT: per-maintenance-log photo (mirrors the asset-photo functions above) =====
+var eq_currentMaintPhoto = null;
+function eq_takeMaintPhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) { window.AndroidBridge.takePhoto('eq_onAndroidMaintPhoto'); }
+  else { document.getElementById('eqMaintPhotoInput').click(); }
+}
+function eq_onAndroidMaintPhoto(dataUrl) {
+  if (!dataUrl) return;
+  var full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  var img = new Image();
+  img.onload = function() {
+    orientedCanvas(img, full, 800, function(canvas) {
+      eq_currentMaintPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      var preview = document.getElementById('eqMaintPhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + eq_currentMaintPhoto + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('eqMaintClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  };
+  img.src = full;
+}
+function eq_handleMaintPhoto(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      orientedCanvas(img, e.target.result, 800, function(canvas) {
+        eq_currentMaintPhoto = canvas.toDataURL('image/jpeg', 0.7);
+        var preview = document.getElementById('eqMaintPhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + eq_currentMaintPhoto + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('eqMaintClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function eq_clearMaintPhoto() {
+  eq_currentMaintPhoto = null;
+  var preview = document.getElementById('eqMaintPhotoPreview');
+  if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('eqMaintClearPhotoBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  var input = document.getElementById('eqMaintPhotoInput');
+  if (input) input.value = '';
+}
+
 async function eq_handleFileAttach(input) {
   var file = input.files[0];
   if (!file) return;
@@ -13079,12 +13137,14 @@ function eq_renderMaintenanceList(key) {
       '</div>' +
       (expanded ?
         '<div style="padding:0 10px 10px 10px;border-top:1px solid #444;">' +
+          (l.photoId ? '<img data-photoid="' + l.photoId + '" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;margin-top:8px;background:#2a2a2a;">' : '') +
           (l.notes ? '<div style="color:#ccc;margin-top:8px;">' + l.notes + '</div>' : '') +
           '<button onclick="event.stopPropagation();eq_openMaintenanceModal(' + jsAttrStr(l.id) + ')" class="secondary" style="width:100%;margin-top:8px;padding:8px;font-size:13px;">✏️ Edit</button>' +
         '</div>'
       : '') +
     '</div>';
   }).join('');
+  lazyLoadPhotos(list);
 }
 
 function eq_openMaintenanceModal(entryId) {
@@ -13092,6 +13152,7 @@ function eq_openMaintenanceModal(entryId) {
   var entry = entryId ? eq_history.find(function(l) { return l.id === entryId; }) : null;
   document.getElementById('eqMaintenanceModalTitle').textContent = entry ? '🔧 Edit Log' : '🔧 Add Log';
   document.getElementById('eqMaint_entryId').value = entryId || '';
+  eq_clearMaintPhoto();
   if (entry) {
     document.getElementById('eqMaint_type').value = entry.logType || 'maintenance';
     document.getElementById('eqMaint_notes').value = entry.notes || '';
@@ -13100,6 +13161,16 @@ function eq_openMaintenanceModal(entryId) {
     document.getElementById('eqMaint_readingValue').value = entry.readingValue || '';
     document.getElementById('eqMaint_readingUnit').value = entry.readingUnit || 'hours';
     document.getElementById('eqMaintDeleteBtn').style.display = '';
+    if (entry.photoId) {
+      Photos.load(entry.photoId).then(function(data) {
+        if (!data) return;
+        eq_currentMaintPhoto = data;
+        var preview = document.getElementById('eqMaintPhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + data + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('eqMaintClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    }
   } else {
     var now = new Date(); now.setSeconds(0,0);
     document.getElementById('eqMaint_time').value = bd_localISO(now).slice(0,16);
@@ -13115,7 +13186,7 @@ function eq_openMaintenanceModal(entryId) {
 }
 function eq_closeMaintenanceModal() { document.getElementById('eqMaintenanceModal').style.display = 'none'; }
 
-function eq_saveMaintenanceEntry() {
+async function eq_saveMaintenanceEntry() {
   if (!_eqDetailKey) return;
   var entryId = document.getElementById('eqMaint_entryId').value;
   var timeVal = document.getElementById('eqMaint_time').value;
@@ -13138,24 +13209,30 @@ function eq_saveMaintenanceEntry() {
       existing.readingValue = val2;
       existing.readingUnit = document.getElementById('eqMaint_readingUnit').value;
     }
+    var oldPhotoId2 = existing.photoId || null;
+    var newPhotoId2 = eq_currentMaintPhoto ? await Photos.save(eq_currentMaintPhoto) : null;
+    if (oldPhotoId2 && oldPhotoId2 !== newPhotoId2) Photos.remove(oldPhotoId2);
+    existing.photoId = newPhotoId2;
     localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
     eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: existing.id, synced: false });
     localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
     showToast('✅ Updated locally — will sync to farmOS next push');
   } else {
-    var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ownerUUIDs: maintOwners, ts: new Date(timeVal).toISOString(), synced: false };
+    var entry = { id: 'eqMaint_' + Date.now(), itemKey: _eqDetailKey, logType: logType, notes: notes, ownerUUIDs: maintOwners, ts: new Date(timeVal).toISOString(), photoId: null, synced: false };
     if (logType === 'reading') {
       var val = document.getElementById('eqMaint_readingValue').value;
       if (!val) { showToast('⚠️ Enter a reading value'); return; }
       entry.readingValue = val;
       entry.readingUnit = document.getElementById('eqMaint_readingUnit').value;
     }
+    if (eq_currentMaintPhoto) entry.photoId = await Photos.save(eq_currentMaintPhoto);
     eq_history.push(entry);
     localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
     eq_pending.push({ id: 'maint_' + Date.now(), type: 'maintenance', entryId: entry.id, synced: false });
     localStorage.setItem(EQ_LS.pending, JSON.stringify(eq_pending));
     showToast('✅ Saved locally — will sync to farmOS next push');
   }
+  eq_currentMaintPhoto = null;
   eq_closeMaintenanceModal();
   eq_renderMaintenanceList(_eqDetailKey);
 }
@@ -13492,6 +13569,25 @@ async function eq_syncToFarmOS(logFn) {
         entry.farmosUUID = mData.data.id;
         entry.synced = true;
         localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+        // Photo — same per-log upload pattern used by Bees/Goats/Birds
+        if (entry.photoId) {
+          try {
+            var mBundle = entry.logType === 'reading' ? 'observation' : 'maintenance';
+            var mPhotoData = await Photos.load(entry.photoId);
+            if (mPhotoData) {
+              var mPhotoBlob = await (await fetch(mPhotoData)).blob();
+              var mPhotoUpload = await fetchWithTimeout(apiUrl('/api/log/' + mBundle + '/' + entry.farmosUUID + '/image'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="equipment-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: mPhotoBlob
+              });
+              if (mPhotoUpload.ok) {
+                var mFileData = await mPhotoUpload.json().catch(function() { return null; });
+                await keepOnlyNewestImage('log', mBundle, entry.farmosUUID, mFileData && mFileData.data && mFileData.data.id, token);
+              }
+            }
+          } catch(mpe) { /* non-fatal — worst case the photo stays local-only */ }
+        }
       } else if (a.type === 'move') {
         var locBundle = a.locationType === 'structure' ? 'asset--structure' : a.locationType === 'water' ? 'asset--water' : 'asset--land';
         var moveRes = await fetchWithTimeout(apiUrl('/api/log/activity'), {
@@ -13612,13 +13708,24 @@ async function eq_fetchAssets() {
     try {
       var eqUuidSet = {};
       eq_items.forEach(function(it) { if (it.farmosUUID) eqUuidSet[it.farmosUUID] = it.key; });
-      var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance?page[limit]=100&sort=-timestamp&include=asset'), { headers: headers });
+      // Preserve any already-cached photoId across this fetch — eq_history gets
+      // fully replaced below, so without this a re-fetch would lose the local
+      // photo cache even though the farmOS-hosted image is unchanged.
+      var oldPhotoByFarmOSId = {};
+      eq_history.forEach(function(l) { if (l.farmosUUID && l.photoId) oldPhotoByFarmOSId[l.farmosUUID] = l.photoId; });
+      var imageUrlMap = {};
+      var mRes = await fetchWithTimeout(apiUrl('/api/log/maintenance?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: headers });
       if (mRes.ok) {
         var mData = await mRes.json();
         var fetchedHistory = [];
+        (mData.included || []).forEach(function(inc) {
+          if (inc.type === 'file--file') imageUrlMap[inc.id] = (inc.attributes.uri && (inc.attributes.uri.url || inc.attributes.uri.value)) || null;
+        });
         (mData.data || []).forEach(function(log) {
           var assetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
           var assetArr = Array.isArray(assetRel) ? assetRel : (assetRel ? [assetRel] : []);
+          var imageRel = log.relationships && log.relationships.image && log.relationships.image.data;
+          var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length - 1].id : null) : (imageRel && imageRel.id);
           assetArr.forEach(function(a) {
             var itemKey = eqUuidSet[a.id];
             if (!itemKey) return;
@@ -13627,6 +13734,8 @@ async function eq_fetchAssets() {
               id: 'farmos_' + log.id, itemKey: itemKey,
               notes: (log.attributes.notes && (log.attributes.notes.value || log.attributes.notes)) || '',
               ts: (isNaN(Number(ts)) ? ts : new Date(Number(ts) * 1000).toISOString()),
+              photoId: oldPhotoByFarmOSId[log.id] || null,
+              photoUrl: imageId ? (imageUrlMap[imageId] || null) : null,
               synced: true, farmosUUID: log.id
             });
           });
@@ -13636,12 +13745,17 @@ async function eq_fetchAssets() {
         // with "<value> <unit>: ..." (e.g. "1245.5 hours: Big Tractor"). Without
         // this, readings pushed fine but never came back on fetch/other devices.
         try {
-          var rRes = await fetchWithTimeout(apiUrl('/api/log/observation?page[limit]=100&sort=-timestamp&include=asset'), { headers: headers });
+          var rRes = await fetchWithTimeout(apiUrl('/api/log/observation?page[limit]=100&sort=-timestamp&include=asset,image'), { headers: headers });
           if (rRes.ok) {
             var rData = await rRes.json();
+            (rData.included || []).forEach(function(inc) {
+              if (inc.type === 'file--file') imageUrlMap[inc.id] = (inc.attributes.uri && (inc.attributes.uri.url || inc.attributes.uri.value)) || null;
+            });
             (rData.data || []).forEach(function(log) {
               var rAssetRel = log.relationships && log.relationships.asset && log.relationships.asset.data;
               var rAssetArr = Array.isArray(rAssetRel) ? rAssetRel : (rAssetRel ? [rAssetRel] : []);
+              var rImageRel = log.relationships && log.relationships.image && log.relationships.image.data;
+              var rImageId = Array.isArray(rImageRel) ? (rImageRel.length ? rImageRel[rImageRel.length - 1].id : null) : (rImageRel && rImageRel.id);
               rAssetArr.forEach(function(a) {
                 var itemKey = eqUuidSet[a.id];
                 if (!itemKey) return;
@@ -13656,6 +13770,8 @@ async function eq_fetchAssets() {
                   readingValue: rm[1], readingUnit: rm[2],
                   notes: (log.attributes.notes && (log.attributes.notes.value || log.attributes.notes)) || '',
                   ts: (isNaN(Number(rts)) ? rts : new Date(Number(rts) * 1000).toISOString()),
+                  photoId: oldPhotoByFarmOSId[log.id] || null,
+                  photoUrl: rImageId ? (imageUrlMap[rImageId] || null) : null,
                   synced: true, farmosUUID: log.id,
                   quantityUUID: qArr.length ? qArr[0].id : null
                 });
@@ -13667,6 +13783,26 @@ async function eq_fetchAssets() {
         var localPending = eq_history.filter(function(l) { return !l.synced; });
         eq_history = fetchedHistory.concat(localPending);
         localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+
+        // Download any farmOS-hosted log photo not yet cached locally
+        try {
+          var eqPhotosChanged = false;
+          await Promise.all(eq_history.map(async function(l) {
+            if (l.photoUrl && !l.photoId) {
+              try {
+                var u = l.photoUrl.indexOf('http') === 0 ? l.photoUrl : (cfg.url + l.photoUrl);
+                var r = await fetchWithTimeout(u, { headers: { 'Authorization': 'Bearer ' + token } });
+                if (r.ok) {
+                  var blob = await r.blob();
+                  var full = await new Promise(function(resolve) { var fr = new FileReader(); fr.onload = function() { resolve(fr.result); }; fr.readAsDataURL(blob); });
+                  l.photoId = await Photos.save(full);
+                  eqPhotosChanged = true;
+                }
+              } catch(e) { /* offline-safe */ }
+            }
+          }));
+          if (eqPhotosChanged) localStorage.setItem(EQ_LS.history, JSON.stringify(eq_history));
+        } catch(e) { /* photo download is best-effort */ }
       }
     } catch(e) { /* best-effort */ }
 
