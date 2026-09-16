@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.08.20-0917"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.15-2156"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -16490,8 +16490,15 @@ async function be_pushCreateColony(colony, token) {
   var data = await res.json();
   var lc = be_colonies.filter(function(c) { return c._localId === colony._localId; })[0];
   if (lc && data.data && data.data.id) {
+    var oldKey = lc._localId;
     lc.uuid = data.data.id; lc.synced = true;
+    // Any event logged against this colony before it synced still points at
+    // its old local ID — remap those to the new UUID so be_pushEvent can find it.
+    be_logs.forEach(function(l) { if (l.colonyKey === oldKey) l.colonyKey = lc.uuid; });
+    be_pending.forEach(function(p) { if (p.log && p.log.colonyKey === oldKey) p.log.colonyKey = lc.uuid; });
     localStorage.setItem(BE_LS.colonies, JSON.stringify(be_colonies));
+    localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
+    localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
     if (lc.locationKey) { try { await be_pushMoveColony(lc.uuid, lc.locationKey, token); } catch(e) { /* move is best-effort; colony still created */ } }
   }
 }
@@ -16547,6 +16554,19 @@ async function be_syncToFarmOS() {
     var locResult = await processPendingLocationActions(token, function(msg) { if (logEl) logEl.textContent += msg; });
     if (locResult.ok || locResult.fail) { if (logEl) logEl.textContent += 'Locations: ' + locResult.ok + ' ok, ' + locResult.fail + ' failed.\n'; }
   } catch(e) { if (logEl) logEl.textContent += '⚠️ Location sync error: ' + e.message + '\n'; }
+  // One-time repair: fix any event whose colonyKey is stale (still the colony's
+  // old local ID from before it synced, e.g. from before this fix was added).
+  be_pending.forEach(function(p) {
+    if (p.action === 'create_event' && p.log && p.log.colonyKey) {
+      var match = be_colonies.filter(function(c) { return c.uuid === p.log.colonyKey || c._localId === p.log.colonyKey; })[0];
+      if (match && match.uuid && match.uuid !== p.log.colonyKey) {
+        p.log.colonyKey = match.uuid;
+        var lg = be_logs.filter(function(l) { return l.id === p.log.id; })[0];
+        if (lg) lg.colonyKey = match.uuid;
+      }
+    }
+  });
+  localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
   var todo = be_pending.filter(function(p) { return !p.synced; });
   // Colony create/update/move/archive must run before events, so a new colony
   // has a real UUID before its events try to reference it.
