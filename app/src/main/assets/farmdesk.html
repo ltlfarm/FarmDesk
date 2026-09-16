@@ -1945,7 +1945,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-0046"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1047"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -19775,13 +19775,31 @@ function sd_deleteSelected() {
 function cloneStockLog(id) {
   var orig = adjHistory.find(function(h) { return h.id === id; });
   if (!orig) return;
+  // adjHistory entries carry the item NAME, not its uuid — resolve the asset so
+  // the queued push has the inventory_asset/measure/unit it needs.
+  var srcAsset = assets.find(function(a) { return a.name === orig.name; });
+  if (!srcAsset) { showToast('⚠️ Item not found in inventory — cannot clone'); return; }
   var clone = JSON.parse(JSON.stringify(orig));
   clone.id = 'clone_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
   clone.time = new Date().toISOString();
   clone.synced = false;
   clone.source = 'local';
+  clone.photoId = null; clone.photoUrl = null; // photo belongs to the original occasion
+  clone.farmosUUID = null; clone.logBundle = null; // a clone is always a NEW log — POST, never PATCH
   adjHistory.unshift(clone);
-  pending.push({ id: clone.id, type: 'adjustment', uuid: clone.uuid, action: clone.action, amount: clone.amount, notes: clone.notes, timestamp: String(Math.floor(new Date(clone.time).getTime()/1000)), synced: false });
+  pending.push({
+    id: clone.id, type: 'adjust',
+    uuid: srcAsset.uuid, name: srcAsset.name,
+    measure: srcAsset.measure || 'count', unitId: srcAsset.unitId,
+    action: clone.action, amount: clone.amount, notes: clone.notes,
+    seller: clone.seller || '', lot: clone.lot || '',
+    unitPrice: (clone.unitPrice != null ? clone.unitPrice : null),
+    totalPrice: (clone.totalPrice != null ? clone.totalPrice : null),
+    photoId: null,
+    timestamp: String(Math.floor(new Date(clone.time).getTime() / 1000)),
+    ownerUUIDs: clone.ownerUUIDs || [],
+    synced: false
+  });
   localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
   localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
   updateSyncBadge();
