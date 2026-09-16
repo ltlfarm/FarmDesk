@@ -1251,6 +1251,17 @@ header { flex-direction:column; gap:0; align-items:stretch; }
     <input type="number" id="priceUnit" min="0" step="0.01" placeholder="0.00" oninput="calcCost()" onfocus="this.select()" enterkeyhint="done" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmAdjust();}">
     <div id="costTotal" style="color:#3a7;font-size:18px;font-weight:bold;margin-top:8px;text-align:center;"></div>
   </div>
+  <!-- Photo box — attach photo to THIS adjustment/log entry, not the asset catalog photo -->
+  <div class="box" id="sdAdjPhotoBox">
+    <strong>📷 Photo (this log entry)</strong>
+    <div id="sdAdjPhotoPreview" style="margin-top:8px;"></div>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button type="button" onclick="sd_takeAdjPhoto()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">📷 Camera</button>
+      <button type="button" onclick="document.getElementById('sdAdjPhotoInput').click()" class="secondary" style="flex:1;margin:0;padding:12px;font-size:14px;">🖼️ Gallery</button>
+      <button type="button" id="sdAdjClearPhotoBtn" onclick="sd_clearAdjPhoto()" class="danger" style="display:none;margin:0;padding:12px;font-size:14px;">✕</button>
+    </div>
+    <input type="file" id="sdAdjPhotoInput" accept="image/*" style="display:none;" onchange="sd_handleAdjPhoto(this)">
+  </div>
   <!-- Photo box — attach photo to asset -->
   <div class="box" id="photoBox">
     <strong>📷 Asset Photo</strong>
@@ -1934,7 +1945,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-0034"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-0045"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -11178,7 +11189,7 @@ async function refreshAssets(silent) {
       // Fetch last 100 activity logs that have quantities — filter client-side
       const assetIds = new Set(assets.map(a => a.uuid));
       const logRes = await fetchWithTimeout(
-        apiUrl('/api/log/activity?page[limit]=100&sort=-timestamp&include=quantity'),
+        apiUrl('/api/log/activity?page[limit]=100&sort=-timestamp&include=quantity,image'),
         { headers: h }
       );
       // Priced restocks are stored as log--purchase — fetch those too so they
@@ -11186,7 +11197,7 @@ async function refreshAssets(silent) {
       let purchHistRes = null;
       try {
         purchHistRes = await fetchWithTimeout(
-          apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=quantity'),
+          apiUrl('/api/log/purchase?page[limit]=100&sort=-timestamp&include=quantity,image'),
           { headers: h }
         );
       } catch (e) { /* purchase fetch optional */ }
@@ -11201,15 +11212,27 @@ async function refreshAssets(silent) {
         }
         // Build quantity map from included
         const qMap = {};
+        const imageUrlMap = {};
         combinedIncluded.forEach(inc => {
           if (inc.type === 'quantity--standard' || inc.type.startsWith('quantity--')) {
             qMap[inc.id] = inc;
+          } else if (inc.type === 'file--file') {
+            imageUrlMap[inc.id] = (inc.attributes.uri && (inc.attributes.uri.url || inc.attributes.uri.value)) || null;
           }
         });
+        // Preserve any already-cached photoId across this fetch — adjHistory
+        // gets fully rebuilt below from these deterministic ids, so without
+        // this a re-fetch would lose the local photo cache even though the
+        // farmOS-hosted image is unchanged.
+        const oldPhotoByLogId = {};
+        adjHistory.forEach(h2 => { if (h2.id && h2.photoId) oldPhotoByLogId[h2.id] = h2.photoId; });
         const fetchedHistory = [];
         combinedData.forEach(log => {
           // Get quantities for this log
           const qRefs = log.relationships?.quantity?.data || [];
+          const imageRel = log.relationships?.image?.data;
+          const imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length - 1].id : null) : (imageRel && imageRel.id);
+          const photoUrl = imageId ? (imageUrlMap[imageId] || null) : null;
           qRefs.forEach(qRef => {
             const q = qMap[qRef.id];
             if (!q) return;
@@ -11233,6 +11256,8 @@ async function refreshAssets(silent) {
               seller:  '',
               lot:     '',
               time:    isoTime,
+              photoId: oldPhotoByLogId[logId] || null,
+              photoUrl: photoUrl,
               synced:  true,
               source:  'farmOS'
             });
@@ -11258,6 +11283,26 @@ async function refreshAssets(silent) {
         merged.sort((a, b) => new Date(b.time) - new Date(a.time));
         adjHistory = merged.slice(0, 200);
         localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
+
+        // Download any farmOS-hosted log photo not yet cached locally
+        try {
+          let sdPhotosChanged = false;
+          await Promise.all(adjHistory.map(async h3 => {
+            if (h3.photoUrl && !h3.photoId) {
+              try {
+                const u = h3.photoUrl.indexOf('http') === 0 ? h3.photoUrl : (cfg.url + h3.photoUrl);
+                const r = await fetchWithTimeout(u, { headers: { 'Authorization': 'Bearer ' + token } });
+                if (r.ok) {
+                  const blob = await r.blob();
+                  const full = await new Promise(resolve => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.readAsDataURL(blob); });
+                  h3.photoId = await Photos.save(full);
+                  sdPhotosChanged = true;
+                }
+              } catch(e) { /* offline-safe */ }
+            }
+          }));
+          if (sdPhotosChanged) localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
+        } catch(e) { /* photo download is best-effort */ }
       }
     } catch(e) { /* log history fetch is optional — don't break on failure */ }
 
@@ -11549,6 +11594,7 @@ async function openAdjust(uuid) {
   document.getElementById('adjustOwnerBox').innerHTML = ownerCheckboxesHTML('adjust-owner-cb', getDefaultOwners());
   document.getElementById('isInjection').checked = false;
   document.getElementById('injectionFields').style.display = 'none';
+  sd_clearAdjPhoto(); // per-log photo always starts blank — it's not the asset's catalog photo
   // Notes display
   const notesEl = document.getElementById('adjustAssetNotes');
   if (adjustAsset.notes) {
@@ -11819,6 +11865,56 @@ function clearAssetPhoto() {
   if (input) input.value = '';
 }
 
+// ===== STOCK: per-adjustment/log photo (distinct from the asset catalog photo above) =====
+var sd_currentAdjPhoto = null;
+function sd_takeAdjPhoto() {
+  if (window.AndroidBridge && window.AndroidBridge.takePhoto) { window.AndroidBridge.takePhoto('sd_onAndroidAdjPhoto'); }
+  else { document.getElementById('sdAdjPhotoInput').click(); }
+}
+function sd_onAndroidAdjPhoto(dataUrl) {
+  if (!dataUrl) return;
+  var full = dataUrl.startsWith('data:') ? dataUrl : 'data:image/jpeg;base64,' + dataUrl;
+  var img = new Image();
+  img.onload = function() {
+    orientedCanvas(img, full, 800, function(canvas) {
+      sd_currentAdjPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      var preview = document.getElementById('sdAdjPhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + sd_currentAdjPhoto + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('sdAdjClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    });
+  };
+  img.src = full;
+}
+function sd_handleAdjPhoto(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      orientedCanvas(img, e.target.result, 800, function(canvas) {
+        sd_currentAdjPhoto = canvas.toDataURL('image/jpeg', 0.7);
+        var preview = document.getElementById('sdAdjPhotoPreview');
+        if (preview) preview.innerHTML = '<img src="' + sd_currentAdjPhoto + '" style="width:100%;border-radius:6px;">';
+        var clearBtn = document.getElementById('sdAdjClearPhotoBtn');
+        if (clearBtn) clearBtn.style.display = '';
+      });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function sd_clearAdjPhoto() {
+  sd_currentAdjPhoto = null;
+  var preview = document.getElementById('sdAdjPhotoPreview');
+  if (preview) preview.innerHTML = '';
+  var clearBtn = document.getElementById('sdAdjClearPhotoBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  var input = document.getElementById('sdAdjPhotoInput');
+  if (input) input.value = '';
+}
+
 // ===== PHOTO VIEWER =====
 async function sd_openPhotoViewer(uuid) {
   const a = assets.find(x => x.uuid === uuid);
@@ -12062,12 +12158,16 @@ async function confirmAdjust() {
       if (na) adjustments.push({ asset: na, action: 'decrement', amount: 1 });
     }
   }
+  // Per-log photo — same slot the primary log's price/cost note gets, not queued
+  // on the injection-triggered syringe/needle decrements.
+  const adjPhotoId = sd_currentAdjPhoto ? await Photos.save(sd_currentAdjPhoto) : null;
   for (let ai = 0; ai < adjustments.length; ai++) {
     const adj = adjustments[ai];
     const isPrimary = ai === 0; // injection-triggered syringe/needle decrements never carry the sale price
     var aUnit  = (isPrimary && (adj.action === 'increment' || adj.action === 'decrement')) ? unitPriceNum  : null;
     var aTotal = (isPrimary && (adj.action === 'increment' || adj.action === 'decrement')) ? totalPriceNum : null;
-    doAdjust(adj.asset, adj.action, adj.amount, notes, seller, lot, ts, aUnit, aTotal);
+    var aPhotoId = isPrimary ? adjPhotoId : null;
+    doAdjust(adj.asset, adj.action, adj.amount, notes, seller, lot, ts, aUnit, aTotal, aPhotoId);
   }
   // Save photo to asset locally (replacing just the primary slot) and queue
   // photo upload if UUID is real — only if the user actually changed it.
@@ -12096,6 +12196,7 @@ async function confirmAdjust() {
       localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
     }
   }
+  sd_currentAdjPhoto = null;
   showToast('✅ Saved locally');
   renderDashboard();
   updateSyncBadge();
@@ -12105,7 +12206,7 @@ async function confirmAdjust() {
 // ===== CORE LOCAL ADJUST =====
 // ───── SHARED: doAdjust (local pending queue) ─────
 // action: 'increment' | 'decrement' | 'reset'
-function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, totalPrice) {
+function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, totalPrice, photoId) {
   // Update local cache immediately
   const cached = assets.find(x => x.uuid === asset.uuid);
   if (cached) {
@@ -12130,6 +12231,7 @@ function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, tota
     lot:       lot    || '',
     unitPrice:  (unitPrice  != null ? unitPrice  : null),
     totalPrice: (totalPrice != null ? totalPrice : null),
+    photoId:    (photoId != null ? photoId : null),
     timestamp,
     ownerUUIDs: readOwnerCheckboxes('adjust-owner-cb'),
     synced:    false
@@ -12138,7 +12240,7 @@ function doAdjust(asset, action, amount, notes, seller, lot, ts, unitPrice, tota
   localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
   // Local adjHistory — store ISO for display, unix for farmOS
   const isoTime = new Date(parseInt(timestamp) * 1000).toISOString();
-  adjHistory.unshift({ id: entry.id, name: asset.name, action, amount, notes, seller: seller||'', lot: lot||'', unitPrice: (unitPrice != null ? unitPrice : null), totalPrice: (totalPrice != null ? totalPrice : null), time: isoTime, synced: false });
+  adjHistory.unshift({ id: entry.id, name: asset.name, action, amount, notes, seller: seller||'', lot: lot||'', unitPrice: (unitPrice != null ? unitPrice : null), totalPrice: (totalPrice != null ? totalPrice : null), photoId: (photoId != null ? photoId : null), time: isoTime, synced: false });
   if (adjHistory.length > 100) adjHistory = adjHistory.slice(0, 100);
   localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
 }
@@ -12488,6 +12590,26 @@ async function sd_syncToFarmOS() {
           const e = await lRes.json().catch(() => ({}));
           throw new Error('Log: ' + (e.errors?.[0]?.detail || lRes.status));
         }
+        const lData = await lRes.json();
+        const logUUID = lData.data.id;
+        // Photo — same per-log upload pattern used by Bees/Goats/Birds/Equipment
+        if (item.photoId) {
+          try {
+            const adjPhotoData = await Photos.load(item.photoId);
+            if (adjPhotoData) {
+              const adjPhotoBlob = await (await fetch(adjPhotoData)).blob();
+              const adjPhotoUpload = await fetchWithTimeout(apiUrl('/api/log/' + logBundle + '/' + logUUID + '/image'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="stock-log-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
+                body: adjPhotoBlob
+              });
+              if (adjPhotoUpload.ok) {
+                const adjFileData = await adjPhotoUpload.json().catch(() => null);
+                await keepOnlyNewestImage('log', logBundle, logUUID, adjFileData?.data?.id, token);
+              }
+            }
+          } catch(pe) { /* non-fatal — worst case the photo stays local-only */ }
+        }
         // Mark synced in adjHistory
         const hEntry = adjHistory.find(h => h.id === item.id);
         if (hEntry) { hEntry.synced = true; }
@@ -12618,6 +12740,7 @@ function sd_renderHistory() {
         </div>
       </div>
       <div class="history-drawer" style="display:none;margin-top:10px;border-top:1px solid #333;padding-top:10px;">
+        ${h.photoId ? `<img data-photoid="${h.photoId}" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;margin-bottom:8px;background:#2a2a2a;">` : ''}
         ${h.notes ? `<div style="color:#aaa;font-size:13px;margin-bottom:8px;">${h.notes}</div>` : ''}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button onclick="event.stopPropagation();openEditLog('${h.id}')" style="margin:0;padding:10px 16px;font-size:14px;">✏️ Edit</button>
@@ -12626,6 +12749,7 @@ function sd_renderHistory() {
       </div>
     </div>`;
   }).join('');
+  lazyLoadPhotos(list);
 }
 
 function toggleHistoryDrawer(card) {
@@ -12634,7 +12758,7 @@ function toggleHistoryDrawer(card) {
   drawer.style.display = drawer.style.display === 'block' ? 'none' : 'block';
 }
 
-function openEditLog(id) {
+async function openEditLog(id) {
   const entry   = adjHistory.find(h => h.id === id);
   if (!entry) return;
   const modal   = document.getElementById('editModal');
@@ -12644,31 +12768,41 @@ function openEditLog(id) {
   const rawTime  = entry.time ? new Date(entry.time) : new Date();
   const localVal = new Date(rawTime.getTime() - rawTime.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   document.getElementById('editTitle').textContent = '✏️ Edit Log';
+  // Stage current photo as the working copy — same shared pattern GD/Birds use
+  editCurrentPhoto      = entry.photoId ? await Photos.load(entry.photoId) : null;
+  editCurrentFileAttach = null;
   fields.innerHTML = `
     <div style="color:#aaa;font-size:13px;margin-bottom:8px;">${entry.name} ${entry.action === 'increment' ? '+' : entry.action === 'decrement' ? '−' : '='}${entry.amount}</div>
     <label style="color:#aaa;font-size:14px;">Date &amp; Time</label>
     <input type="datetime-local" id="editLogTime" value="${localVal}" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
     <label style="color:#aaa;font-size:14px;margin-top:10px;display:block;">Notes</label>
     <textarea id="editLogNotes" rows="3" style="width:100%;padding:10px;margin-top:4px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">${entry.notes || ''}</textarea>
+    ${editPhotoBlockHTML()}
     ${entry.synced ? '<p style="color:#c90;font-size:13px;margin-top:8px;">⚠️ Already synced — changes are local only.</p>' : ''}
   `;
   saveBtn.textContent      = '💾 Save';
   saveBtn.style.background = '#3a7';
-  saveBtn.onclick = () => {
+  saveBtn.onclick = async () => {
     const newTime  = document.getElementById('editLogTime').value;
     const newNotes = document.getElementById('editLogNotes').value.trim();
     if (newTime) entry.time = new Date(newTime).toISOString();
     entry.notes  = newNotes;
+    const oldPhotoId = entry.photoId || null;
+    const newPhotoId = editCurrentPhoto ? await Photos.save(editCurrentPhoto) : null;
+    if (oldPhotoId && oldPhotoId !== newPhotoId) Photos.remove(oldPhotoId);
+    entry.photoId = newPhotoId;
     entry.synced = false; // mark for re-sync
     // Update pending queue entry if unsynced
     const pEntry = pending.find(p => p.id === entry.id);
     if (pEntry) {
       pEntry.notes     = newNotes;
       pEntry.timestamp = newTime ? String(Math.floor(new Date(newTime).getTime() / 1000)) : pEntry.timestamp;
+      pEntry.photoId   = newPhotoId;
       pEntry.synced    = false;
     }
     localStorage.setItem(SD_LS.history, JSON.stringify(adjHistory));
     localStorage.setItem(SD_LS.pending, JSON.stringify(pending));
+    editCurrentPhoto = null; editCurrentFileAttach = null;
     closeEdit();
     sd_renderHistory();
     updateSyncBadge();
