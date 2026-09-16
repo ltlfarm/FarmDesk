@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.15-2355"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-0010"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -16729,6 +16729,47 @@ function be_mapFarmOSNameToType(name) {
   return null;
 }
 
+// Reverses the exact notes format be_pushEvent writes, back into the same
+// structured data.* fields the event modal and be_eventSummary use — so a
+// log looks identical whether it's fresh in this app, or round-tripped
+// through farmOS (deleted-and-refetched, or a different farmOS instance
+// entirely). Anything that doesn't match our own format (e.g. a log typed
+// straight into the farmOS web UI) is left as plain notes — there's no way
+// to structure free prose, so it falls back the same as before.
+function be_parseEventNotes(type, notesRaw, lotNumber) {
+  var lines = (notesRaw || '').split('\n');
+  var i = 0, data = {}, m;
+  if (type === 'inspection') {
+    if (lines[i] !== undefined && (m = lines[i].match(/^Queen: (.+)$/))) { data.queen = m[1]; i++; }
+    if (lines[i] !== undefined && (m = lines[i].match(/^Temperament: (.+)$/))) { data.temper = m[1]; i++; }
+    if (lines[i] !== undefined && (m = lines[i].match(/^Brood: (.+)$/))) { data.brood = m[1]; i++; }
+    if (lines[i] !== undefined && (m = lines[i].match(/^Population: (.+) frames$/))) { data.pop = m[1]; i++; }
+  } else if (type === 'weight') {
+    if (lines[i] !== undefined && (m = lines[i].match(/^(.+) lbs$/))) { data.weight = m[1] === '?' ? '' : m[1]; i++; }
+  } else if (type === 'feeding') {
+    if (lines[i] !== undefined) {
+      var parts = lines[i].split(' — ');
+      if (parts.length >= 2) {
+        data.feedType = parts[0];
+        var rest = parts.slice(1).join(' — ').trim();
+        var am = rest.match(/^(\S+)\s*(.*)$/);
+        if (am) { data.amt = am[1] === '?' ? '' : am[1]; data.unit = am[2] || ''; }
+        i++;
+      }
+    }
+  } else if (type === 'treatment') {
+    if (lines[i] !== undefined) {
+      var tm = lines[i].match(/^(.+) \((.+)\)$/);
+      if (tm) { data.product = tm[1]; data.dose = tm[2]; } else { data.product = lines[i]; }
+      i++;
+    }
+  } else if (type === 'harvest') {
+    if (lines[i] !== undefined && (m = lines[i].match(/^(.+) lbs honey$/))) { data.honey = m[1] === '?' ? '' : m[1]; i++; }
+  }
+  if (lotNumber) data.lot = lotNumber;
+  return { data: data, notes: lines.slice(i).join('\n').trim() };
+}
+
 // Pull colony events (inspection/weight/feeding/treatment/harvest) from farmOS —
 // same fetch-and-merge pattern as bd_fetchLogs. Called from be_fetchColonies so
 // the one Fetch button pulls both colonies and their events, like Birds does.
@@ -16771,6 +16812,8 @@ async function be_fetchHistory(token, cfg) {
     var imageId = Array.isArray(imageRel) ? (imageRel.length ? imageRel[imageRel.length - 1].id : null) : (imageRel && imageRel.id);
     var photoUrl = imageId ? (imageUrlMap[imageId] || null) : null;
     var tsNum = Number(ts);
+    var notesRaw = (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '';
+    var parsed = be_parseEventNotes(localType, notesRaw, log.attributes.lot_number);
 
     fetchedLogs.push({
       id: log.id,
@@ -16778,8 +16821,8 @@ async function be_fetchHistory(token, cfg) {
       colonyName: colony.name || '',
       type: localType,
       ts: new Date(isNaN(tsNum) ? ts : tsNum * 1000).toISOString(),
-      data: {},
-      notes: (log.attributes.notes && log.attributes.notes.value) ? log.attributes.notes.value : '',
+      data: parsed.data,
+      notes: parsed.notes,
       photoUrl: photoUrl,
       photoId: null,
       synced: true,
