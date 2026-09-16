@@ -1926,7 +1926,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.15-2335"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.15-2355"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -16843,6 +16843,7 @@ async function be_fetchHistory(token, cfg) {
 BE_LS.logs = 'farmdesk_bee_logs';
 let be_logs = JSON.parse(localStorage.getItem(BE_LS.logs) || '[]');
 let be_eventColonyKey = null;
+let be_editingLogId = null; // set when the event modal is editing an existing log, not creating one
 
 const BE_EVENT_TYPES = [
   { v: 'inspection', label: '🔍 Inspection' },
@@ -16906,9 +16907,12 @@ function be_openEventModal(colonyKey) {
   var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === colonyKey; })[0];
   if (!c) return;
   be_eventColonyKey = colonyKey;
+  be_editingLogId = null;
   be_closeColonyModal();
+  document.getElementById('be-event-modal-verb').textContent = 'Log Event';
   document.getElementById('be-event-colony').textContent = c.name || '';
   document.getElementById('be-event-type').innerHTML = BE_EVENT_TYPES.map(function(t) { return '<option value="' + t.v + '">' + t.label + '</option>'; }).join('');
+  document.getElementById('be-event-type').disabled = false;
   var now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   document.getElementById('be-event-time').value = now.toISOString().slice(0, 16);
   document.getElementById('be-event-notes').value = '';
@@ -16918,33 +16922,73 @@ function be_openEventModal(colonyKey) {
   document.getElementById('be-event-modal').style.display = 'block';
 }
 
-function be_closeEventModal() { document.getElementById('be-event-modal').style.display = 'none'; }
+// Edit an existing event — same modal as Log Event, but the type is locked
+// (changing it would change the farmOS log bundle out from under the same
+// UUID) and every field is prefilled. Saving PATCHes the same farmOS log
+// instead of creating a new one.
+async function be_editLog(id) {
+  var log = be_logs.filter(function(x) { return x.id === id; })[0];
+  if (!log) return;
+  var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === log.colonyKey; })[0];
+  be_eventColonyKey = log.colonyKey;
+  be_editingLogId = id;
+  document.getElementById('be-event-modal-verb').textContent = 'Edit Event';
+  document.getElementById('be-event-colony').textContent = c ? (c.name || '') : (log.colonyName || '');
+  document.getElementById('be-event-type').innerHTML = BE_EVENT_TYPES.map(function(t) { return '<option value="' + t.v + '"' + (t.v === log.type ? ' selected' : '') + '>' + t.label + '</option>'; }).join('');
+  document.getElementById('be-event-type').disabled = true;
+  var rawTime = log.ts ? new Date(log.ts) : new Date();
+  var localVal = new Date(rawTime.getTime() - rawTime.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  document.getElementById('be-event-time').value = localVal;
+  document.getElementById('be-event-notes').value = log.notes || '';
+  document.getElementById('be-event-owner-box').innerHTML = ownerCheckboxesHTML('be-event-owner-cb', log.ownerUUIDs || []);
+  // Stage the existing photo as the working copy — Clear/Camera/Gallery
+  // then edit that staged copy directly, same pattern as Goats/Birds edit.
+  be_clearEventPhoto();
+  if (log.photoId) {
+    var data = await Photos.load(log.photoId);
+    if (data) {
+      be_currentEventPhoto = data;
+      var preview = document.getElementById('beEventPhotoPreview');
+      if (preview) preview.innerHTML = '<img src="' + data + '" style="width:100%;border-radius:6px;">';
+      var clearBtn = document.getElementById('beEventClearPhotoBtn');
+      if (clearBtn) clearBtn.style.display = '';
+    }
+  }
+  be_renderEventFields(log.data || {});
+  document.getElementById('be-event-modal').style.display = 'block';
+}
 
-function be_renderEventFields() {
+function be_closeEventModal() { document.getElementById('be-event-modal').style.display = 'none'; be_editingLogId = null; }
+
+// selOpt/inp helpers keep the per-type field builder below readable —
+// they just inject a prefill value into an <option>/<input> when editing.
+function be_selOpt(val, current) { return '<option' + (current === val ? ' selected' : '') + (val ? '' : ' value=""') + '>' + (val || '—') + '</option>'; }
+function be_renderEventFields(prefill) {
+  prefill = prefill || {};
   var t = document.getElementById('be-event-type').value;
   var box = document.getElementById('be-event-fields');
   var h = '';
   if (t === 'inspection') {
-    h = '<label>Queen seen</label><select id="be-ev-queen"><option value="">—</option><option>Yes</option><option>No</option><option>Eggs seen</option></select>' +
-        '<label>Temperament</label><select id="be-ev-temper"><option value="">—</option><option>Calm</option><option>Normal</option><option>Defensive</option></select>' +
-        '<label>Brood pattern</label><input id="be-ev-brood" placeholder="e.g. solid, spotty">' +
-        '<label>Population (frames of bees)</label><input id="be-ev-pop" type="number" inputmode="decimal" placeholder="e.g. 8">';
+    h = '<label>Queen seen</label><select id="be-ev-queen">' + be_selOpt('', prefill.queen) + be_selOpt('Yes', prefill.queen) + be_selOpt('No', prefill.queen) + be_selOpt('Eggs seen', prefill.queen) + '</select>' +
+        '<label>Temperament</label><select id="be-ev-temper">' + be_selOpt('', prefill.temper) + be_selOpt('Calm', prefill.temper) + be_selOpt('Normal', prefill.temper) + be_selOpt('Defensive', prefill.temper) + '</select>' +
+        '<label>Brood pattern</label><input id="be-ev-brood" placeholder="e.g. solid, spotty" value="' + (prefill.brood || '') + '">' +
+        '<label>Population (frames of bees)</label><input id="be-ev-pop" type="number" inputmode="decimal" placeholder="e.g. 8" value="' + (prefill.pop || '') + '">';
   } else if (t === 'weight') {
-    h = '<label>Weight (lbs)</label><input id="be-ev-weight" type="number" inputmode="decimal" placeholder="e.g. 85">';
+    h = '<label>Weight (lbs)</label><input id="be-ev-weight" type="number" inputmode="decimal" placeholder="e.g. 85" value="' + (prefill.weight || '') + '">';
   } else if (t === 'feeding') {
-    h = '<label>Feed type</label><select id="be-ev-feedtype"><option>1:1 syrup</option><option>2:1 syrup</option><option>Pollen patty</option><option>Fondant</option><option>Other</option></select>' +
-        '<label>Amount</label><div style="display:flex;gap:6px;"><input id="be-ev-feedamt" type="number" inputmode="decimal" placeholder="e.g. 2" style="flex:2;"><select id="be-ev-feedunit" style="flex:1;"><option>lbs</option><option>qt</option><option>gal</option></select></div>';
+    h = '<label>Feed type</label><select id="be-ev-feedtype">' + be_selOpt('1:1 syrup', prefill.feedType) + be_selOpt('2:1 syrup', prefill.feedType) + be_selOpt('Pollen patty', prefill.feedType) + be_selOpt('Fondant', prefill.feedType) + be_selOpt('Other', prefill.feedType) + '</select>' +
+        '<label>Amount</label><div style="display:flex;gap:6px;"><input id="be-ev-feedamt" type="number" inputmode="decimal" placeholder="e.g. 2" style="flex:2;" value="' + (prefill.amt || '') + '"><select id="be-ev-feedunit" style="flex:1;">' + be_selOpt('lbs', prefill.unit) + be_selOpt('qt', prefill.unit) + be_selOpt('gal', prefill.unit) + '</select></div>';
   } else if (t === 'treatment') {
-    h = '<label>Product</label><input id="be-ev-product" placeholder="e.g. Apivar, Oxalic acid, Formic Pro">' +
-        '<label>Dose</label><input id="be-ev-dose" placeholder="e.g. 2 strips">' +
-        '<label>Lot number</label><input id="be-ev-lot" placeholder="Optional">';
+    h = '<label>Product</label><input id="be-ev-product" placeholder="e.g. Apivar, Oxalic acid, Formic Pro" value="' + (prefill.product || '') + '">' +
+        '<label>Dose</label><input id="be-ev-dose" placeholder="e.g. 2 strips" value="' + (prefill.dose || '') + '">' +
+        '<label>Lot number</label><input id="be-ev-lot" placeholder="Optional" value="' + (prefill.lot || '') + '">';
   } else if (t === 'harvest') {
-    h = '<label>Honey harvested (lbs)</label><input id="be-ev-honey" type="number" inputmode="decimal" placeholder="e.g. 40">';
+    h = '<label>Honey harvested (lbs)</label><input id="be-ev-honey" type="number" inputmode="decimal" placeholder="e.g. 40" value="' + (prefill.honey || '') + '">';
   }
   box.innerHTML = h;
 }
 
-function be_saveEvent() {
+async function be_saveEvent() {
   var colonyKey = be_eventColonyKey;
   var c = be_colonies.filter(function(x) { return (x.uuid || x._localId) === colonyKey; })[0];
   if (!c) { showToast('Colony not found'); return; }
@@ -16974,10 +17018,33 @@ function be_saveEvent() {
     data.honey = document.getElementById('be-ev-honey').value;
     if (!data.honey) { showToast('Enter honey amount'); return; }
   }
+  var ownerUUIDs = readOwnerCheckboxes('be-event-owner-cb');
+
+  if (be_editingLogId) {
+    // Edit an existing log in place — same id, same farmosUUID if it had one,
+    // so the next push PATCHes the same farmOS record instead of creating a new one.
+    var log = be_logs.filter(function(x) { return x.id === be_editingLogId; })[0];
+    if (!log) { showToast('Log not found'); return; }
+    log.type = t; log.ts = new Date(timeVal).toISOString(); log.data = data; log.notes = notes; log.ownerUUIDs = ownerUUIDs;
+    var oldPhotoId = log.photoId || null;
+    var newPhotoId = be_currentEventPhoto ? await Photos.save(be_currentEventPhoto) : null;
+    if (oldPhotoId && oldPhotoId !== newPhotoId) Photos.remove(oldPhotoId);
+    log.photoId = newPhotoId;
+    log.synced = false;
+    var p = be_pending.filter(function(x) { return x.id === log.id; })[0];
+    if (p) { p.log = log; p.synced = false; } else { be_pending.push({ action: 'create_event', log: log, id: log.id, synced: false }); }
+    localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
+    localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+    be_currentEventPhoto = null;
+    be_closeEventModal(); be_updateSyncBadge(); be_renderHistory();
+    showToast('Event updated');
+    return;
+  }
+
   var log = {
     id: 'belog_' + Date.now(), colonyKey: colonyKey, colonyName: c.name || '',
     type: t, ts: new Date(timeVal).toISOString(), data: data, notes: notes,
-    ownerUUIDs: readOwnerCheckboxes('be-event-owner-cb'),
+    ownerUUIDs: ownerUUIDs,
     photoId: null, synced: false, farmosUUID: null
   };
   be_logs.unshift(log);
@@ -17014,13 +17081,16 @@ function be_renderHistory() {
   var icon = { inspection: '🔍', weight: '⚖️', feeding: '🍯', treatment: '💊', harvest: '🍯' };
   list.innerHTML = be_logs.slice(0, 200).map(function(l) {
     var thumb = l.photoId ? '<img data-photoid="' + l.photoId + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;background:#333;">' : '';
-    return '<div class="box" style="display:flex;justify-content:space-between;gap:8px;">' +
+    return '<div class="box" style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">' +
       thumb +
       '<div style="flex:1;min-width:0;"><div style="font-weight:600;">' + (icon[l.type] || '') + ' ' + (l.colonyName || '') + '</div>' +
       '<div style="font-size:13px;color:#aaa;">' + be_eventSummary(l) + '</div>' +
       (l.notes ? '<div style="font-size:12px;color:#777;">' + l.notes + '</div>' : '') +
       '<div style="font-size:11px;color:#666;">' + new Date(l.ts).toLocaleString() + '</div></div>' +
-      '<div style="font-size:12px;color:' + (l.synced ? '#3a7' : '#c90') + ';">' + (l.synced ? '✓' : '⏳') + '</div>' +
+      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">' +
+        '<div style="font-size:12px;color:' + (l.synced ? '#3a7' : '#c90') + ';">' + (l.synced ? '✓' : '⏳') + '</div>' +
+        '<button onclick="be_editLog(' + jsAttrStr(l.id) + ')" class="secondary" style="margin:0;padding:6px 10px;font-size:12px;">✏️ Edit</button>' +
+      '</div>' +
     '</div>';
   }).join('');
   lazyLoadPhotos(list);
@@ -17078,25 +17148,31 @@ async function be_pushEvent(log, token) {
   var rel = { asset: { data: [{ type: ('asset--' + be_bundle), id: colonyUUID }] } };
   var _evOwner = ownerRel(log.ownerUUIDs || []); if (_evOwner) rel.owner = _evOwner;
   if (qtyRefs.length) rel.quantity = { data: qtyRefs };
-  var res = await fetchWithTimeout(apiUrl('/api/log/' + bundle), { method: 'POST', headers: be_postHeaders(token), body: JSON.stringify({ data: { type: 'log--' + bundle, attributes: attrs, relationships: rel } }) });
+  var isUpdate = !!log.farmosUUID;
+  var bodyData = { type: 'log--' + bundle, attributes: attrs, relationships: rel };
+  var url;
+  if (isUpdate) { bodyData.id = log.farmosUUID; url = apiUrl('/api/log/' + bundle + '/' + log.farmosUUID); }
+  else { url = apiUrl('/api/log/' + bundle); }
+  var res = await fetchWithTimeout(url, { method: isUpdate ? 'PATCH' : 'POST', headers: be_postHeaders(token), body: JSON.stringify({ data: bodyData }) });
   if (!res.ok) { var err = await res.text(); throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 150)); }
-  var rd = await res.json();
+  var rd = isUpdate ? null : await res.json();
+  var logUUID = isUpdate ? log.farmosUUID : rd.data.id;
   var ll = be_logs.filter(function(x) { return x.id === log.id; })[0];
-  if (ll) { ll.synced = true; ll.farmosUUID = rd.data.id; localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs)); }
+  if (ll) { ll.synced = true; ll.farmosUUID = logUUID; localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs)); }
   // Photo — same per-log upload pattern used by Goats/Birds
   if (log.photoId) {
     try {
       var photoData = await Photos.load(log.photoId);
       if (photoData) {
         var photoBlob = await (await fetch(photoData)).blob();
-        var photoUpload = await fetchWithTimeout(apiUrl('/api/log/' + bundle + '/' + rd.data.id + '/image'), {
+        var photoUpload = await fetchWithTimeout(apiUrl('/api/log/' + bundle + '/' + logUUID + '/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'file; filename="bee-event-photo.jpg"', 'Accept': 'application/vnd.api+json', 'Authorization': 'Bearer ' + token },
           body: photoBlob
         });
         if (photoUpload.ok) {
           var fileData = await photoUpload.json().catch(function() { return null; });
-          await keepOnlyNewestImage('log', bundle, rd.data.id, fileData && fileData.data && fileData.data.id, token);
+          await keepOnlyNewestImage('log', bundle, logUUID, fileData && fileData.data && fileData.data.id, token);
         }
       }
     } catch(pe) { /* non-fatal — worst case the photo stays local-only */ }
@@ -19747,7 +19823,7 @@ async function bd_pushGroupAssign(birdUUID, flockName, token) {
 <!-- ===== BEE EVENT MODAL (add colony event) — body level ===== -->
 <div id="be-event-modal" class="bd-modal" onclick="if(event.target===this)be_closeEventModal()" style="display:none;">
   <div class="bd-modal-box" onclick="event.stopPropagation()" style="max-height:88vh;overflow-y:auto;">
-    <h3 style="margin:0 0 12px;">Log Event — <span id="be-event-colony" style="color:#eee;"></span></h3>
+    <h3 style="margin:0 0 12px;"><span id="be-event-modal-verb">Log Event</span> — <span id="be-event-colony" style="color:#eee;"></span></h3>
     <label>Event type</label>
     <select id="be-event-type" onchange="be_renderEventFields()"></select>
     <div id="be-event-fields" style="margin-top:4px;"></div>
