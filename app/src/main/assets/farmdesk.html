@@ -1928,6 +1928,16 @@ function ownerRel(explicit) {
   var arr = resolveOwners(explicit);
   return arr.length ? { data: arr.map(function(u) { return { type: 'user--user', id: u }; }) } : null;
 }
+
+// Reverse of ownerRel — pulls owner UUIDs back off a fetched farmOS record.
+// relationships.owner.data carries the ids without needing include=owner.
+// Used by every module's log fetch so an owner set in the app survives a
+// refetch instead of silently blanking.
+function ownerIdsFrom(record) {
+  var rel = record && record.relationships && record.relationships.owner && record.relationships.owner.data;
+  var arr = Array.isArray(rel) ? rel : (rel ? [rel] : []);
+  return arr.map(function(o) { return o.id; }).filter(Boolean);
+}
 // Renders multi-select owner checkboxes. `cls` is a unique class for readback.
 function ownerCheckboxesHTML(cls, selectedUUIDs) {
   var owners = allOwnersList();
@@ -1945,7 +1955,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1100"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1105"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -8933,6 +8943,7 @@ async function fetchAnimalUUIDs(silent = false) {
                 })(),
         synced: true,
         fromFarmOS: true,
+        ownerUUIDs: ownerIdsFrom(log),
         farmosBundle: log.type, // e.g. "log--medical" — exact bundle for PATCH URL
         status: attrs.status === "pending" ? "pending" : "done",
         loggedBy: (() => {
@@ -11279,6 +11290,7 @@ async function refreshAssets(silent) {
               time:    isoTime,
               photoId: oldPhotoByLogId[logId] || null,
               photoUrl: photoUrl,
+              ownerUUIDs: ownerIdsFrom(log),
               farmosUUID: log.id,
               logBundle: (log.type || '').replace('log--', ''),
               synced:  true,
@@ -13961,6 +13973,7 @@ async function eq_fetchAssets() {
               ts: (isNaN(Number(ts)) ? ts : new Date(Number(ts) * 1000).toISOString()),
               photoId: oldPhotoByFarmOSId[log.id] || null,
               photoUrl: imageId ? (imageUrlMap[imageId] || null) : null,
+              ownerUUIDs: ownerIdsFrom(log),
               synced: true, farmosUUID: log.id
             });
           });
@@ -13997,6 +14010,7 @@ async function eq_fetchAssets() {
                   ts: (isNaN(Number(rts)) ? rts : new Date(Number(rts) * 1000).toISOString()),
                   photoId: oldPhotoByFarmOSId[log.id] || null,
                   photoUrl: rImageId ? (imageUrlMap[rImageId] || null) : null,
+                  ownerUUIDs: ownerIdsFrom(log),
                   synced: true, farmosUUID: log.id,
                   quantityUUID: qArr.length ? qArr[0].id : null
                 });
@@ -14696,6 +14710,7 @@ async function bd_fetchLogs(token, cfg) {
       logName: logName,
       status: log.attributes.status === 'pending' ? 'pending' : 'done',
       photoUrl: photoUrl,
+      ownerUUIDs: ownerIdsFrom(log),
       synced: true,
       farmosUUID: log.id,
       farmosBundle: log.type
@@ -17186,6 +17201,7 @@ async function be_fetchHistory(token, cfg) {
       notes: parsed.notes,
       photoUrl: photoUrl,
       photoId: null,
+      ownerUUIDs: ownerIdsFrom(log),
       synced: true,
       farmosUUID: log.id
     });
