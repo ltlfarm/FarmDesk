@@ -1962,7 +1962,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1823"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1825"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -6355,10 +6355,9 @@ async function ensureGoatGroupUUID(groupName, token) {
 async function pushGoatGroupAssign(animalName, groupName) {
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
-  var animalUUID = animalUUIDs[animalName];
-  if (!animalUUID) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
     var token = await getCachedToken(cfg);
+    var animalUUID = await ensureAnimalAssetCreated(animalName, token);
     var groupId = groupName ? await ensureGoatGroupUUID(groupName, token) : null;
     var payload = { data: {
       type: 'log--activity',
@@ -6638,10 +6637,9 @@ async function pushAnimalProfilePhoto(name, dataUrl) {
   if (!dataUrl) return true; // local clear only — nothing to push
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
-  var uuid = animalUUIDs[name];
-  if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
     var token = await getCachedToken(cfg);
+    var uuid = await ensureAnimalAssetCreated(name, token);
     var blob = await (await fetch(dataUrl)).blob();
     var res = await fetchWithTimeout(apiUrl('/api/asset/animal/' + uuid + '/image'), {
       method: 'POST',
@@ -6669,10 +6667,9 @@ async function pushAnimalProfilePhoto(name, dataUrl) {
 async function pushAnimalProfileCore(name, fields) {
   var cfg = JSON.parse(localStorage.getItem(LS.cfg) || '{}');
   if (!cfg.url || !cfg.user || !cfg.pass) { showToast('⚠️ Connect to farmOS in Settings first'); return false; }
-  var uuid = animalUUIDs[name];
-  if (!uuid) { showToast('⚠️ Sync first — animal not yet synced'); return false; }
   try {
     var token = await getCachedToken(cfg);
+    var uuid = await ensureAnimalAssetCreated(name, token);
     var attrs = {};
     Object.assign(attrs, sexToFarmOS(fields.sex));
     if (fields.birthdate) attrs.birthdate = fields.birthdate;
@@ -6817,6 +6814,11 @@ function addAnimalFromScreen() {
   // once this animal has a farmOS UUID (from the purchase log below, or the
   // first regular log entered for it).
   if (group) queuePendingAction('profileGroup', { animalName: name, newGroup: group }, true);
+  // Purchases already create the asset as part of the purchase log push.
+  // Everything else — given, born, or otherwise never bought — needs its
+  // own push to get a farmOS UUID at all, instead of waiting on the first
+  // log entered for it (which might be a while, or never).
+  if (!isPurchase) queuePendingAction('createAnimal', { animalName: name }, true);
 
   // Clear form
   ["animalsNewName","animalsNewTag","animalsNewSpecies","animalsNewBreed","animalsNewNotes"].forEach(function(id){
@@ -9404,36 +9406,49 @@ function buildFarmOSPayload(l) {
 // Reuses the existing, already-working network functions; only the
 // *timing* changed (sync-time instead of immediate-on-save). Returns
 // {ok, skipped, fail} counts for the sync log.
-async function pushPurchaseAnimal(payload, token) {
+// Creates the farmOS asset--animal for a locally-added goat if it doesn't
+// have one yet, from whatever's in animalProfiles. Idempotent — returns the
+// existing UUID immediately if already synced. Used by every push path that
+// needs an animal to exist (purchase, group assign, profile edit, photo)
+// instead of each one bailing with "Sync first" when it's actually just the
+// first thing being pushed for that animal — e.g. one that was given or born,
+// never purchased, never logged.
+async function ensureAnimalAssetCreated(name, token) {
+  if (animalUUIDs[name]) return animalUUIDs[name];
+  var profile = animalProfiles[name] || {};
+  var goatTypeId = await getOrCreateGoatTypeUUID(token);
+  var assetPayload = { data: {
+    type: 'asset--animal',
+    attributes: Object.assign(
+      { name: name },
+      profile.sex ? sexToFarmOS(profile.sex) : {},
+      profile.birthdate ? { birthdate: profile.birthdate } : {},
+      profile.tag ? { id_tag: [{ id: profile.tag, type: 'tag' }] } : {}
+    ),
+    ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
+  }};
+  var _eaOwner = ownerRel(profile.ownerUUIDs || []);
+  if (_eaOwner) { if (!assetPayload.data.relationships) assetPayload.data.relationships = {}; assetPayload.data.relationships.owner = _eaOwner; }
   var headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/vnd.api+json', 'Accept': 'application/vnd.api+json' };
-  var uuid = animalUUIDs[payload.animalName];
-  if (!uuid) {
-    var goatTypeId = await getOrCreateGoatTypeUUID(token);
-    var assetPayload = { data: {
-      type: 'asset--animal',
-      attributes: Object.assign(
-        { name: payload.animalName },
-        payload.sex ? sexToFarmOS(payload.sex) : {},
-        payload.dob ? { birthdate: payload.dob } : {},
-        payload.tag ? { id_tag: [{ id: payload.tag, type: 'tag' }] } : {}
-      ),
-      ...(goatTypeId ? { relationships: { animal_type: { data: { type: 'taxonomy_term--animal_type', id: goatTypeId } } } } : {})
-    }};
-    var _ppOwner = ownerRel((animalProfiles[payload.animalName] || {}).ownerUUIDs || []);
-    if (_ppOwner) { if (!assetPayload.data.relationships) assetPayload.data.relationships = {}; assetPayload.data.relationships.owner = _ppOwner; }
-    var assetRes = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers: headers, body: JSON.stringify(assetPayload) });
-    if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
-    var assetData = await assetRes.json();
-    uuid = assetData.data && assetData.data.id;
-    if (uuid) { animalUUIDs[payload.animalName] = uuid; localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs)); }
-  }
+  var assetRes = await fetchWithTimeout(apiUrl('/api/asset/animal'), { method: 'POST', headers: headers, body: JSON.stringify(assetPayload) });
+  if (!assetRes.ok) throw new Error('Asset creation failed: HTTP ' + assetRes.status);
+  var assetData = await assetRes.json();
+  var uuid = assetData.data && assetData.data.id;
+  if (!uuid) throw new Error('Could not create animal asset');
+  animalUUIDs[name] = uuid;
+  localStorage.setItem(LS.animalUUIDs, JSON.stringify(animalUUIDs));
+  return uuid;
+}
+
+async function pushPurchaseAnimal(payload, token) {
+  var uuid = await ensureAnimalAssetCreated(payload.animalName, token);
   if (!uuid) throw new Error('Could not create animal asset');
   var purchaseResult = await createPurchaseLog(payload.animalName, { notes: payload.notes, unitPrice: payload.unitPrice });
   if (!purchaseResult.ok) throw new Error('Purchase log failed: ' + purchaseResult.reason);
 }
 
 async function processPendingGoatActions(token, logFn) {
-  var items = pendingActions.filter(function(a) { return !a.synced && ['sell','death','move','retype','profileGroup','profileCore','profilePhoto','purchase','birdSell'].indexOf(a.type) !== -1; });
+  var items = pendingActions.filter(function(a) { return !a.synced && ['sell','death','move','retype','profileGroup','profileCore','profilePhoto','purchase','birdSell','createAnimal'].indexOf(a.type) !== -1; });
   var ok = 0, skipped = 0, fail = 0;
   for (var i = 0; i < items.length; i++) {
     var a = items[i];
@@ -9468,6 +9483,9 @@ async function processPendingGoatActions(token, logFn) {
         if (!ok3) throw new Error('photo push failed');
       } else if (a.type === 'purchase') {
         await pushPurchaseAnimal(a.payload, token);
+      } else if (a.type === 'createAnimal') {
+        var uuidCA = await ensureAnimalAssetCreated(a.payload.animalName, token);
+        if (!uuidCA) throw new Error('create failed');
       }
       a.synced = true; a.lastError = null; ok++;
       if (logFn) logFn('✅ ' + a.type + ' (' + (a.payload.animalName || a.payload.birdId || '') + ') pushed\n');
