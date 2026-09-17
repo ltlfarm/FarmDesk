@@ -972,18 +972,19 @@ header { flex-direction:column; gap:0; align-items:stretch; }
       <span>🐐 Goat Desk</span><span class="set-arrow">▼</span>
     </div>
     <div class="set-body">
-      <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track individual animal health events. Each log is saved locally and pushed to farmOS when you sync.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track individual animal health events. Each log is saved locally and pushed to farmOS when you sync. Every log type can include a photo.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⚖️ Weight</strong> — Animal's weight in lbs.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🌡️ Vitals</strong> — Temperature, heart rate, respiratory rate.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>💉 Med</strong> — Medication, dose, route, lot number. Auto-deducts from Inventory if tracked.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>💉 Med</strong> — Medication, dose, route, lot number. Auto-deducts from Inventory if tracked. Dosing several goats at once (bulk mode) shares one photo across the batch.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>✂️ Procedure</strong> — Any procedure performed (band, disbud, ear tag, etc.).</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Hoof (cloven icon)</strong> — Hoof trimming and condition notes.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>👁️ Observe</strong> — General observation or health note.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🍼 Birth</strong> — Record a birth with dam, sire, and kid details.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📝 Activity</strong> — General farm activity.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Weight + Vitals / Weight + Vitals + Med</strong> — Multi-step flows that record all at once.</p>
-      <p style="font-size:14px;color:#ccc;margin:8px 0 4px;"><strong>History tab</strong> — Search, filter, and delete past logs. Tap a log to edit or view details.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Animals tab</strong> — Add, edit, sell, or remove animals. Tap an animal name to see its profile.</p>
+      <p style="font-size:14px;color:#ccc;margin:8px 0 4px;"><strong>Bulk mode (Med/Procedure)</strong> — Tap a Group chip (Does, Bucks, whatever groups you've set up) to check every goat in it at once, or fine-tune the checklist by hand. Chips add to the selection — tap more than one to combine groups.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — Search, filter (by animal, group, or type), edit, clone, or delete past logs. Edit updates the same farmOS log — it never creates a duplicate. Delete also removes it from farmOS on next sync.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Animals tab</strong> — Add, edit, sell, or remove animals; set a Group right when adding one. Every animal gets pushed to farmOS on next sync whether purchased, given, or born — not just purchases. Tap an animal name to see its profile.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>Sync tab</strong> — Push local logs to farmOS or pull from farmOS.</p>
     </div>
   </div>
@@ -998,9 +999,9 @@ header { flex-direction:column; gap:0; align-items:stretch; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Birds tab</strong> — View all birds. Tap a bird to see its profile, log health events, sell, or mark it deceased.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>+ button</strong> — Add a new bird to the flock.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🥚 Eggs tab</strong> — Record daily egg collection by flock and nest box. Totals show today, this week, and this month.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — All bird logs: health, eggs, feed, mortality. Filter by type.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — All bird logs: health, eggs, feed, mortality. Filter by type. Edit updates the same farmOS log — it never creates a duplicate. Clone repeats a log for another bird; Delete also removes it from farmOS on next sync.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Sync tab</strong> — Push logs to farmOS or pull birds from farmOS. Manage flocks, nest boxes, and species.</p>
-      <p style="font-size:14px;color:#ccc;margin:0;"><strong>Log types:</strong> Weight, Med, Observe, Procedure, Mortality, Hatch, Feed.</p>
+      <p style="font-size:14px;color:#ccc;margin:0;"><strong>Log types:</strong> Weight, Med, Observe, Procedure, Mortality, Hatch, Feed — each can include a photo (egg counts are the one exception).</p>
     </div>
   </div>
 
@@ -1012,10 +1013,11 @@ header { flex-direction:column; gap:0; align-items:stretch; }
     <div class="set-body">
       <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track feed, medical supplies, and other inventory items.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>+ button</strong> — Add a new inventory item with name, category, and unit.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📥 Restock / 📤 Use / 🔢 Count</strong> — Adjust quantity. Restock lets you record purchase price and supplier; Use lets you record sale price and buyer.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Categories</strong> — Manage them from the ⚙️ icon on this screen. Each category becomes a real classification in farmOS the next time you sync (not just an app-only tab), so it's visible there too.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📥 Restock / 📤 Use / 🔢 Count</strong> — Adjust quantity. Restock lets you record purchase price and supplier; Use lets you record sale price and buyer. Either can include a photo of that specific transaction.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap item name</strong> — View full details and adjustment history.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Yellow border</strong> — Item is low (below your threshold). <strong>Red border</strong> — Item is at zero (empty).</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — Full log of all adjustments. Filter by In/Out/Count.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — Full log of all adjustments, with price shown per entry. Filter by In/Out/Count. Edit, Clone, or Delete a log — edits and deletes on an already-synced log reach farmOS on next sync, not just local-only changes.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>Sync tab</strong> — Push adjustments to farmOS or pull current inventory from farmOS.</p>
     </div>
   </div>
@@ -1047,7 +1049,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>➕ Add Equipment</strong> — Record name, equipment type, manufacturer, model, serial number, ID tag, owner, group, flags, notes, a photo, and an attached file (manual, receipt, etc.).</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Group</strong> — Bundle related items (e.g. Irrigation, Power, Bee Equipment). Pick an existing group or create a new one on the spot.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap an item</strong> — Opens the detail view with its info and full Maintenance History.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🔧 Maintenance History</strong> — Add two kinds of entry: <strong>Maintenance</strong> (oil change, repair, inspection) and <strong>Reading</strong> (hours or miles). Tap an entry to edit or delete it.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>🔧 Maintenance History</strong> — Add two kinds of entry: <strong>Maintenance</strong> (oil change, repair, inspection) and <strong>Reading</strong> (hours or miles). Either can include a photo. Tap an entry to edit or delete it, or clone it to log a repeat entry quickly.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📍 Move</strong> — Assign the equipment to a location from your Locations list.</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Archive vs Delete</strong> — Archive retires an item; Delete removes it. Use the inline "Show archived" link to see archived ones.</p>
       <p style="font-size:14px;color:#ccc;margin:0;"><strong>⬆️ Push / ⬇️ Fetch</strong> — Push new and changed equipment to farmOS, or fetch the current list from farmOS.</p>
@@ -1061,11 +1063,13 @@ header { flex-direction:column; gap:0; align-items:stretch; }
     </div>
     <div class="set-body">
       <p style="font-size:14px;color:#ccc;margin:0 0 8px;">Track your bee <strong>colonies</strong>. A colony is the living unit — bees plus queen — recorded in farmOS as a "Bee colony" asset. A divided box holding two colonies is simply two colonies at the same location.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>➕ Add Colony</strong> — Give it a name, an optional location, notes, and flags (Monitor / Priority / Needs review).</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>➕ Add Colony</strong> — Give it a name, an optional location and yard, notes, a photo, and flags (Monitor / Priority / Needs review).</p>
       <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Location</strong> — Pick from your Locations. A scattered hive or trap works as its own point location (drop a pin with Walk mode); a bee yard works as an apiary area. The physical box itself can be tracked separately under Equipment.</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap a colony</strong> — Edit it, move it to a different location, or archive it (for a deadout or a combined colony).</p>
-      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>⬆️ Push / ⬇️ Fetch</strong> — Push new and changed colonies to farmOS, or fetch the current list.</p>
-      <p style="font-size:14px;color:#ccc;margin:0;">Requires the <strong>Bee</strong> module enabled in farmOS. Colony events — inspections, feeding, treatments, honey harvests, and weights — are coming in the next update.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Yard</strong> — An optional grouping across apiaries (e.g. Home Yard, North Yard), separate from precise location. Type a name and it's created in farmOS the first time you use it.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>Tap a colony</strong> — Edit it, move it to a different location, archive it (for a deadout or a combined colony), or log an event.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>📝 Log Event</strong> — Inspection, Weight, Feeding, Treatment, or Honey harvest. Each can include a photo. The bold summary line (queen status, brood, frame count, etc.) shows the same whether the log was just created here or pulled back down from farmOS.</p>
+      <p style="font-size:14px;color:#ccc;margin:0 0 4px;"><strong>History tab</strong> — All colony events. Tap ✏️ Edit to change a log in place (it updates the same farmOS record, never a duplicate), ⧉ Clone to repeat one for another colony, or 🗑️ Delete to remove it (also removed from farmOS on next sync).</p>
+      <p style="font-size:14px;color:#ccc;margin:0;"><strong>⬆️ Push / ⬇️ Fetch</strong> — Push new and changed colonies and events to farmOS, or fetch the current list — including events, back down. Requires the <strong>Bee</strong> module enabled in farmOS.</p>
     </div>
   </div>
 
@@ -1963,7 +1967,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.17-0711"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.17-0724"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
