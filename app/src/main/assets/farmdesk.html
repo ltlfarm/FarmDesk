@@ -438,6 +438,9 @@ header { flex-direction:column; gap:0; align-items:stretch; }
     <label style="display:flex;align-items:center;gap:6px;">Animal <span onclick="showHint('Filter logs to one animal, or leave as All Animals to see everything.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterGoat"><option value="">All Animals</option></select>
 
+    <label style="display:flex;align-items:center;gap:6px;">Group <span onclick="showHint('Filter logs to one group — Does, Bucks, Packers, etc. Leave as All Groups to see everything.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
+    <select id="filterGroupGoat"><option value="">All Groups</option></select>
+
     <label style="display:flex;align-items:center;gap:6px;">Type <span onclick="showHint('Filter by log type — Weight, Med, Vitals, etc. Leave blank for all types.')" style="cursor:pointer;color:#3a7;font-size:13px;">❓</span></label>
     <select id="filterType">
       <option value="">All Types</option>
@@ -502,6 +505,10 @@ header { flex-direction:column; gap:0; align-items:stretch; }
         <input id="animalsNewDob" type="date" style="flex:1;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
       </div>
       <input id="animalsNewNotes" placeholder="Notes" style="width:100%;margin-top:8px;box-sizing:border-box;">
+      <label style="display:block;margin-top:8px;color:#888;font-size:13px;">Group</label>
+      <select id="animalsNewGroup" style="width:100%;margin-bottom:4px;box-sizing:border-box;padding:12px;font-size:15px;background:#333;color:#eee;border:1px solid #555;border-radius:6px;">
+        <option value="">— No Group —</option>
+      </select>
       <label style="display:block;margin-top:8px;color:#888;font-size:13px;">Owner(s)</label>
       <div id="animalsNewOwner" style="margin-bottom:4px;"></div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
@@ -1955,7 +1962,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1105"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1823"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2382,6 +2389,7 @@ function renderStep() {
     box.innerHTML = `
       <label>Weight (lbs)</label>
       <input id="f_weight" type="tel" inputmode="numeric" value="${lw}" placeholder="e.g. 10505 → 105.05">
+      ${renderPhotoBlockHTML('weight')}
     `;
     const wEl = document.getElementById("f_weight");
     // Auto-select so typing immediately overwrites
@@ -2421,6 +2429,7 @@ function renderStep() {
 
       <label>Notes</label>
       <input id="f_vnotes" placeholder="Optional notes">
+      ${renderPhotoBlockHTML('vitals')}
     `;
     const tempEl = document.getElementById("f_temp");
     tempEl.oninput = () => {
@@ -2524,6 +2533,7 @@ function renderStep() {
       <p style="color:#888;font-size:13px;margin:2px 0 6px;">Vials, needles, syringes, etc. Auto-deducts from inventory on save.</p>
       <div id="medSuppliesList" style="margin-top:4px;"></div>
       <button type="button" onclick="procAddSupplyRow(null, false, 'medSuppliesList')" style="margin-top:4px;width:calc(100% - 10px);background:#333;font-size:15px;">➕ Add Supply Item</button>
+      ${renderPhotoBlockHTML('med')}
     `;
 
     if (isFixed && document.getElementById("weightRow")) {
@@ -2616,7 +2626,8 @@ function renderStep() {
     box.innerHTML =
       '<label>Title</label><input id="f_actitle" list="activityTitles" placeholder="What activity?">' +
       '<datalist id="activityTitles">' + prevTitles.map(function(x) { return '<option value="' + x + '">'; }).join('') + '</datalist>' +
-      '<label>Description</label><textarea id="f_acdesc" rows="4" placeholder="Details..."></textarea>';
+      '<label>Description</label><textarea id="f_acdesc" rows="4" placeholder="Details..."></textarea>' +
+      renderPhotoBlockHTML('activity');
   }
 
   if (t === "proc") {
@@ -3248,9 +3259,10 @@ function saveStep() {
       localStorage.setItem(LS.lastRoute, lastRoute);
 
       const medSupplies = getProcSupplies('medSuppliesList');
+      const sharedMedPhoto = currentPhoto; // one photo shared across all goats in this batch
       selectedGoats.forEach((g, i) => {
         const entry = { id: Date.now() + Math.random().toString(36).slice(2) + i, goat: g, type: t, time: ts, data: {}, synced: false, ownerUUIDs: readOwnerCheckboxes('f-owner-cb'), loggedBy: loggedByVal };
-        entry.data = { med: medName, dose, unit, route, weight: w, notes, vet, sessionRate: sessionDoseRate, supplies: medSupplies };
+        entry.data = { med: medName, dose, unit, route, weight: w, notes, vet, sessionRate: sessionDoseRate, supplies: medSupplies, photoId: null };
         logs.push(entry);
         // Supplies are consumed per animal — decrement once per goat in the batch
         if (medSupplies.length > 0) {
@@ -3258,6 +3270,13 @@ function saveStep() {
         }
         saveFollowup(g, "med", { med: medName, dose, unit, route, refId: entry.id, refTime: ts, refLoggedBy: entry.loggedBy });
       });
+      if (sharedMedPhoto) {
+        Photos.save(sharedMedPhoto).then(id => {
+          logs.filter(l => l.type === "med" && l.time === ts && selectedGoats.includes(l.goat)).forEach(l => { l.data.photoId = id; });
+          localStorage.setItem(LS.logs, JSON.stringify(logs));
+        });
+      }
+      currentPhoto = null;
       _lastSavedEntry = null; // multiple goats — no single med to prompt inventory-deduct for
     }
 
@@ -3309,8 +3328,11 @@ function saveStep() {
     const w = parseFloat(wEl.dataset.parsed || wEl.value);
     if (isNaN(w) || w <= 0) return false;
     entry.data.weight = w;
+    entry.data.photoId = null;
     weights[g] = w;
     localStorage.setItem(LS.weights, JSON.stringify(weights));
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
+    currentPhoto = null;
   }
 
   if (t === "vitals") {
@@ -3320,8 +3342,11 @@ function saveStep() {
       resp:    parseFloat(document.getElementById("f_resp")?.value)  || null,
       rumen:   parseFloat(document.getElementById("f_rumen")?.value) || null,
       famacha: document.getElementById("f_famacha")?.value || null,
-      notes:   document.getElementById("f_vnotes")?.value || ""
+      notes:   document.getElementById("f_vnotes")?.value || "",
+      photoId: null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
+    currentPhoto = null;
   }
 
   if (t === "med") {
@@ -3378,8 +3403,11 @@ function saveStep() {
       notes:  parts.join("\n"),
       vet:    document.getElementById("f_vet")?.value?.trim() || "",
       sessionRate: sessionDoseRate,
-      supplies: getProcSupplies('medSuppliesList')
+      supplies: getProcSupplies('medSuppliesList'),
+      photoId: null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
+    currentPhoto = null;
     lastMed   = entry.data.med;
     lastRoute = entry.data.route;
     localStorage.setItem(LS.lastMed,   lastMed);
@@ -3483,8 +3511,11 @@ function saveStep() {
   if (t === "activity") {
     entry.data = {
       title: document.getElementById("f_actitle")?.value || "",
-      desc:  document.getElementById("f_acdesc")?.value  || ""
+      desc:  document.getElementById("f_acdesc")?.value  || "",
+      photoId: null
     };
+    if (currentPhoto) { const _p = currentPhoto; Photos.save(_p).then(id => { entry.data.photoId = id; localStorage.setItem(LS.logs, JSON.stringify(logs)); }); }
+    currentPhoto = null;
   }
 
   if (t === "proc") {
@@ -3932,7 +3963,17 @@ function renderHistory() {
     saleOpt.value = 'sale'; saleOpt.textContent = '🏷️ Sale';
     ftSel.appendChild(saleOpt);
   }
+  // Populate group filter from config if not already done
+  var fgSel = document.getElementById("filterGroupGoat");
+  if (fgSel && fgSel.options.length <= 1) {
+    goatGroups.forEach(function(gr) {
+      var o = document.createElement('option');
+      o.value = gr.name; o.textContent = gr.name;
+      fgSel.appendChild(o);
+    });
+  }
   const gf = document.getElementById("filterGoat").value;
+  const grf = fgSel ? fgSel.value : '';
   const tf = ftSel ? ftSel.value : '';
   const sf = document.getElementById("sortOrder").value;
   const search = (document.getElementById("historySearch") ? document.getElementById("historySearch").value : "").toLowerCase().trim();
@@ -3947,6 +3988,7 @@ function renderHistory() {
     const name = l.goat || (l.data && l.data.animal) || '';
     if (!name) return false;
     if (gf && l.goat !== gf && name !== gf) return false;
+    if (grf && (animalProfiles[name] || {}).group !== grf) return false;
     if (tf && l.type !== tf) return false;
     if (search && !name.toLowerCase().includes(search) && !formatLog(l).toLowerCase().includes(search)) return false;
     return true;
@@ -3972,6 +4014,7 @@ function renderHistory() {
 }
 
 document.getElementById("filterGoat").onchange = renderHistory;
+document.getElementById("filterGroupGoat").onchange = renderHistory;
 document.getElementById("filterType").onchange = renderHistory;
 document.getElementById("sortOrder").onchange = renderHistory;
 
@@ -6677,6 +6720,12 @@ function renderAnimalsScreen() {
   const al = document.getElementById("animalsAnimalList");
   var _anOwnerBox = document.getElementById("animalsNewOwner");
   if (_anOwnerBox && !_anOwnerBox.innerHTML) _anOwnerBox.innerHTML = ownerCheckboxesHTML('animals-new-owner-cb', getDefaultOwners());
+  var _anGroupSel = document.getElementById("animalsNewGroup");
+  if (_anGroupSel) {
+    var _anGroupPrev = _anGroupSel.value;
+    _anGroupSel.innerHTML = '<option value="">— No Group —</option>' +
+      goatGroups.map(function(g) { return '<option' + (g.name === _anGroupPrev ? ' selected' : '') + '>' + g.name + '</option>'; }).join('');
+  }
   al.innerHTML = "";
   const goatBatches = batches.filter(function(b) { return b.module === 'goat'; });
   if (goatBatches.length) {
@@ -6742,6 +6791,7 @@ function addAnimalFromScreen() {
   var sex     = document.getElementById("animalsNewSex").value || "";
   var dob     = document.getElementById("animalsNewDob").value || "";
   var notes   = (document.getElementById("animalsNewNotes").value || "").trim();
+  var group   = document.getElementById("animalsNewGroup").value || "";
   var ownerUUIDs = readOwnerCheckboxes('animals-new-owner-cb');
   var isPurchase = document.getElementById("animalsNewIsPurchase").checked;
   var purchasePriceVal = parseFloat(document.getElementById("animalsNewPrice").value);
@@ -6755,13 +6805,18 @@ function addAnimalFromScreen() {
     birthdate: dob,
     breed:     breed,
     type:      species,
-    group:     "",
+    group:     group,
     notes:     notes,
     tag:       tag,
     ownerUUIDs: ownerUUIDs,
     photo:     null
   };
   saveProfilesSafely();
+  // Group is a separate is_group_assignment log in farmOS, not an asset
+  // attribute — same queued push edit-profile already uses. It'll go through
+  // once this animal has a farmOS UUID (from the purchase log below, or the
+  // first regular log entered for it).
+  if (group) queuePendingAction('profileGroup', { animalName: name, newGroup: group }, true);
 
   // Clear form
   ["animalsNewName","animalsNewTag","animalsNewSpecies","animalsNewBreed","animalsNewNotes"].forEach(function(id){
@@ -6769,6 +6824,7 @@ function addAnimalFromScreen() {
   });
   document.getElementById("animalsNewSex").value = "";
   document.getElementById("animalsNewDob").value = "";
+  document.getElementById("animalsNewGroup").value = "";
   document.getElementById("animalsNewIsPurchase").checked = false;
   document.getElementById("animalsNewPrice").value = "";
   document.getElementById("animalsNewPriceRow").style.display = "none";
@@ -10601,7 +10657,9 @@ async function openEdit(id) {
   `;
 
   if (l.type === "weight") {
-    html += `<label>Weight (lbs)</label><input id="ed_weight" type="number" step="0.1" value="${l.data.weight||""}">`;
+    html += `<label>Weight (lbs)</label><input id="ed_weight" type="number" step="0.1" value="${l.data.weight||""}">
+      ${editPhotoBlockHTML()}
+    `;
   }
   if (l.type === "vitals") {
     html += `
@@ -10615,6 +10673,7 @@ async function openEdit(id) {
         ${[1,2,3,4,5].map(n=>`<option${l.data.famacha==n?" selected":""}>${n}</option>`).join("")}
       </select>
       <label>Notes</label><input id="ed_vnotes" value="${l.data.notes||""}">
+      ${editPhotoBlockHTML()}
     `;
   }
   if (l.type === "med") {
@@ -10636,6 +10695,7 @@ async function openEdit(id) {
       <label style="margin-top:10px;display:block;">📦 Supplies Used <span style="color:#888;font-size:12px;">(inventory adjusts only for the difference from the original save)</span></label>
       <div id="ed_medSuppliesList"></div>
       <button type="button" onclick="procAddEditSupplyRow(null, 'ed_medSuppliesList')" style="margin-top:4px;width:100%;background:#333;font-size:15px;">➕ Add Supply Item</button>
+      ${editPhotoBlockHTML()}
     `;
     setTimeout(() => {
       (l.data.supplies || []).forEach(s => procAddEditSupplyRow(s, 'ed_medSuppliesList'));
@@ -10696,6 +10756,7 @@ async function openEdit(id) {
       </datalist>
       <label>Description</label>
       <textarea id="ed_acdesc" rows="4">${l.data.desc||""}</textarea>
+      ${editPhotoBlockHTML()}
     `;
   }
 
@@ -10848,6 +10909,12 @@ async function saveEdit() {
     if (_oldPhotoId && _oldPhotoId !== _newPhotoId) Photos.remove(_oldPhotoId);
     l.data.photoId    = _newPhotoId;
     l.data.fileAttach = editCurrentFileAttach || null;
+  } else if (["weight","vitals","med","activity"].includes(l.type)) {
+    // Same commit, minus fileAttach — these types never had a file-attach field.
+    const _oldPhotoId2 = l.data.photoId || null;
+    const _newPhotoId2 = editCurrentPhoto ? await Photos.save(editCurrentPhoto) : null;
+    if (_oldPhotoId2 && _oldPhotoId2 !== _newPhotoId2) Photos.remove(_oldPhotoId2);
+    l.data.photoId = _newPhotoId2;
   }
 
   localStorage.setItem(LS.logs, JSON.stringify(logs));
