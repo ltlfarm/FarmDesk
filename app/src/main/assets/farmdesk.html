@@ -410,6 +410,7 @@ header { flex-direction:column; gap:0; align-items:stretch; }
 
     <div id="bulkGoatRow" style="display:none;">
       <label>Animals (select all that apply)</label>
+      <div id="bulkGroupQuickSelect" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
       <div id="bulkGoatList" style="max-height:220px;overflow-y:auto;border:1px solid #444;border-radius:8px;padding:8px;margin-top:4px;"></div>
     </div>
 
@@ -1962,7 +1963,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1825"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1828"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2242,10 +2243,26 @@ function populateBulkGoatList() {
   if (!box) return;
   box.innerHTML = goats.map(g => `
     <label style="display:flex;align-items:center;gap:8px;padding:6px 0;margin:0;">
-      <input type="checkbox" class="bulkGoatCb" value="${g}" style="width:auto;" onchange="updateBulkCount()">
-      ${g}
+      <input type="checkbox" class="bulkGoatCb" value="${g}" data-group="${(animalProfiles[g]||{}).group||''}" style="width:auto;" onchange="updateBulkCount()">
+      ${g}${(animalProfiles[g]||{}).group ? ' <span style="color:#888;font-size:12px;">(' + (animalProfiles[g]||{}).group + ')</span>' : ''}
     </label>
   `).join("");
+  const qs = document.getElementById("bulkGroupQuickSelect");
+  if (qs) {
+    qs.innerHTML = goatGroups.map(gr => `<button type="button" onclick="bulkSelectGroup('${gr.name.replace(/'/g,"\\'")}')" class="secondary" style="margin:0;padding:6px 12px;font-size:13px;">${gr.name}</button>`).join("") +
+      (goatGroups.length ? `<button type="button" onclick="bulkSelectGroup('')" class="secondary" style="margin:0;padding:6px 12px;font-size:13px;">Clear All</button>` : '');
+  }
+}
+
+// Checks every goat whose profile.group matches — additive, so tapping
+// another group's chip adds to the selection instead of replacing it.
+// Tapping "Clear All" (empty groupName) unchecks everything.
+function bulkSelectGroup(groupName) {
+  document.querySelectorAll(".bulkGoatCb").forEach(cb => {
+    if (groupName === "") { cb.checked = false; }
+    else if (cb.dataset.group === groupName) { cb.checked = true; }
+  });
+  updateBulkCount();
 }
 
 function updateBulkCount() {
