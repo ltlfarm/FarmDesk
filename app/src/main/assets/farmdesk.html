@@ -1963,7 +1963,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.16-1828"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.16-1854"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -5936,7 +5936,7 @@ function addAnimalFromBatch() {
     goats.push(name);
     localStorage.setItem(LS.goats, JSON.stringify(goats));
     animalProfiles[name] = { sex: sex, birthdate: dob, breed: b.breed, type: b.species, group: '', notes: 'From batch: ' + (b.label || b.species + ' batch') + (dam ? '. Dam: ' + dam : '') + (sire ? '. Sire: ' + sire : ''), tag: tag, dam: dam, sire: sire };
-    localStorage.setItem(LS.animalProfiles, JSON.stringify(animalProfiles));
+    saveProfilesSafely();
     if (typeof renderAnimalsScreen === 'function') renderAnimalsScreen();
   } else {
     // Bird — use bd_addBirdDirect
@@ -9465,7 +9465,7 @@ async function pushPurchaseAnimal(payload, token) {
 }
 
 async function processPendingGoatActions(token, logFn) {
-  var items = pendingActions.filter(function(a) { return !a.synced && ['sell','death','move','retype','profileGroup','profileCore','profilePhoto','purchase','birdSell','createAnimal'].indexOf(a.type) !== -1; });
+  var items = pendingActions.filter(function(a) { return !a.synced && ['sell','death','move','retype','profileGroup','profileCore','profilePhoto','purchase','birdSell','createAnimal','logDelete'].indexOf(a.type) !== -1; });
   var ok = 0, skipped = 0, fail = 0;
   for (var i = 0; i < items.length; i++) {
     var a = items[i];
@@ -9503,6 +9503,12 @@ async function processPendingGoatActions(token, logFn) {
       } else if (a.type === 'createAnimal') {
         var uuidCA = await ensureAnimalAssetCreated(a.payload.animalName, token);
         if (!uuidCA) throw new Error('create failed');
+      } else if (a.type === 'logDelete') {
+        var dResG = await fetchWithTimeout(apiUrl('/api/log/' + a.payload.bundle + '/' + a.payload.farmosUUID), {
+          method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+        // 404 means it's already gone from farmOS — treat as success, not a failure to retry forever.
+        if (!dResG.ok && dResG.status !== 404) throw new Error('Delete: HTTP ' + dResG.status);
       }
       a.synced = true; a.lastError = null; ok++;
       if (logFn) logFn('✅ ' + a.type + ' (' + (a.payload.animalName || a.payload.birdId || '') + ') pushed\n');
@@ -10655,10 +10661,14 @@ function deleteLog(id) {
     body: '<div style="padding:10px 0;color:#ccc;"><strong style="color:#fff;">' + l.goat + '</strong> — ' + l.type + '<br>' +
       '<span style="color:#aaa;font-size:13px;">' + formatLog(l) + '</span><br>' +
       '<span style="color:#666;font-size:12px;">' + (l.time && !isNaN(new Date(l.time).getTime()) ? new Date(l.time).toLocaleString() : 'unknown time') + '</span></div>' +
+      (l.synced ? '<p style="color:#ccc;font-size:13px;">Will also be deleted from farmOS on next sync.</p>' : '') +
       '<p style="color:#c66;">This cannot be undone.</p>',
     confirmLabel: '🗑️ Confirm Delete',
     danger: true,
     onConfirm: function() {
+      if (l.synced && l.farmosBundle) {
+        queuePendingAction('logDelete', { farmosUUID: l.id, bundle: l.farmosBundle.replace('log--', '') });
+      }
       logs = logs.filter(x => x.id !== id);
       localStorage.setItem(LS.logs, JSON.stringify(logs));
       renderHistory(); renderRecent();
@@ -14886,6 +14896,13 @@ async function bd_syncToFarmOS() {
         else if (item.action === 'create_group')  await bd_pushCreateGroup(item.flockName, token);
         else if (item.action === 'group_assign')  await bd_pushGroupAssign(item.birdUUID, item.flockName, token);
         else if (item.action === 'move_bird')     await bd_pushMoveLog(item, token);
+        else if (item.action === 'delete_log') {
+          var bdDelRes = await fetchWithTimeout(apiUrl('/api/log/' + item.bundle + '/' + item.farmosUUID), {
+            method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+          });
+          // 404 means it's already gone from farmOS — treat as success, not a failure to retry forever.
+          if (!bdDelRes.ok && bdDelRes.status !== 404) throw new Error('Delete: HTTP ' + bdDelRes.status);
+        }
         item.synced = true; synced++;
         if (logEl) logEl.textContent += 'OK: ' + (item.log ? item.log.logName : item.action) + '\n';
       } catch(e) {
@@ -16216,7 +16233,13 @@ function bd_deleteSelected() {
 function bd_deleteLog(id) {
   var l = bd_history.filter(function(x) { return x.id === id; })[0]; if (!l) return;
   var birdLabel = l.type === 'egg' ? l.flock : (l.birdTag || l.birdName || '?');
-  bd_showConfirm('Delete this log?', "<p style='color:#ccc;'><strong>" + birdLabel + "</strong> - " + l.type + "</p><p style='color:#c66;'>This cannot be undone.</p>", function() {
+  bd_showConfirm('Delete this log?', "<p style='color:#ccc;'><strong>" + birdLabel + "</strong> - " + l.type + "</p>" +
+    (l.synced && l.farmosUUID ? "<p style='color:#ccc;font-size:13px;'>Will also be deleted from farmOS on next sync.</p>" : "") +
+    "<p style='color:#c66;'>This cannot be undone.</p>", function() {
+    if (l.synced && l.farmosUUID) {
+      bd_pending.push({ id: 'bddel_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), action: 'delete_log', farmosUUID: l.farmosUUID, bundle: (l.farmosBundle || 'log--activity').replace('log--', ''), synced: false });
+      localStorage.setItem(BD_LS.pending, JSON.stringify(bd_pending));
+    }
     bd_history = bd_history.filter(function(x) { return x.id !== id; });
     bd_pending = bd_pending.filter(function(p) { return !p.log || p.log.id !== id; });
     localStorage.setItem(BD_LS.history, JSON.stringify(bd_history));
@@ -17145,6 +17168,13 @@ async function be_syncToFarmOS() {
       else if (a.action === 'move_colony')   await be_pushMoveColony(a.colonyUUID, a.locationKey, token);
       else if (a.action === 'archive_colony') await be_pushArchiveColony(a.colonyUUID, token);
       else if (a.action === 'create_event')  await be_pushEvent(a.log, token);
+      else if (a.action === 'delete_event') {
+        var beDelRes = await fetchWithTimeout(apiUrl('/api/log/' + a.bundle + '/' + a.farmosUUID), {
+          method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' }
+        });
+        // 404 means it's already gone from farmOS — treat as success, not a failure to retry forever.
+        if (!beDelRes.ok && beDelRes.status !== 404) throw new Error('Delete: HTTP ' + beDelRes.status);
+      }
       a.synced = true; ok++;
       if (logEl) logEl.textContent += '✅ ' + a.action + '\n';
     } catch(e) { fail++; if (logEl) logEl.textContent += '❌ ' + a.action + ': ' + e.message + '\n'; }
@@ -17448,6 +17478,32 @@ function be_openEventModal(colonyKey) {
 // (changing it would change the farmOS log bundle out from under the same
 // UUID) and every field is prefilled. Saving PATCHes the same farmOS log
 // instead of creating a new one.
+function be_deleteLog(id) {
+  var log = be_logs.filter(function(x) { return x.id === id; })[0];
+  if (!log) return;
+  openConfirm({
+    title: 'Delete this event?',
+    body: '<p style="color:#ccc;"><strong>' + (log.colonyName || '') + '</strong> — ' + log.type + '</p>' +
+      '<p style="color:#aaa;font-size:13px;">' + be_eventSummary(log) + '</p>' +
+      (log.synced && log.farmosUUID ? '<p style="color:#ccc;font-size:13px;">Will also be deleted from farmOS on next sync.</p>' : '') +
+      '<p style="color:#c66;">This cannot be undone.</p>',
+    confirmLabel: '🗑️ Confirm Delete',
+    danger: true,
+    onConfirm: function() {
+      if (log.synced && log.farmosUUID) {
+        var bundle = (log.type === 'feeding' || log.type === 'treatment') ? 'input' : (log.type === 'harvest' ? 'harvest' : 'observation');
+        be_pending.push({ id: 'bedel_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), action: 'delete_event', farmosUUID: log.farmosUUID, bundle: bundle, synced: false });
+        localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+      }
+      be_logs = be_logs.filter(function(x) { return x.id !== id; });
+      be_pending = be_pending.filter(function(p) { return !p.log || p.log.id !== id; });
+      localStorage.setItem(BE_LS.logs, JSON.stringify(be_logs));
+      localStorage.setItem(BE_LS.pending, JSON.stringify(be_pending));
+      be_updateSyncBadge(); be_renderHistory();
+    }
+  });
+}
+
 async function be_editLog(id) {
   var log = be_logs.filter(function(x) { return x.id === id; })[0];
   if (!log) return;
@@ -17612,6 +17668,7 @@ function be_renderHistory() {
       '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">' +
         '<div style="font-size:12px;color:' + (l.synced ? '#3a7' : '#c90') + ';">' + (l.synced ? '✓' : '⏳') + '</div>' +
         '<button onclick="be_editLog(' + jsAttrStr(l.id) + ')" class="secondary" style="margin:0;padding:6px 10px;font-size:12px;">✏️ Edit</button>' +
+        '<button onclick="be_deleteLog(' + jsAttrStr(l.id) + ')" class="secondary" style="margin:0;padding:6px 10px;font-size:12px;background:#5a1a1a;">🗑️ Delete</button>' +
       '</div>' +
     '</div>';
   }).join('');
