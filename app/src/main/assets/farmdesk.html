@@ -703,6 +703,8 @@ header { flex-direction:column; gap:0; align-items:stretch; }
         <strong>🧩 Modules</strong>
         <p style="color:#888;font-size:13px;">Turn modules on or off to fit your farm. Each module works on its own — at least one must stay on.</p>
         <div id="moduleToggles"></div>
+        <button class="secondary wide" onclick="cm_openBuilder()" style="margin-top:10px;">➕ Create Your Own Module</button>
+        <p style="color:#888;font-size:13px;margin-top:4px;">Raise something that isn't built in — rabbits, alpacas, guinea pigs, whatever it is? Build a module for it, no coding required.</p>
       </div>
 
       <div class="set-sub">
@@ -1119,6 +1121,48 @@ header { flex-direction:column; gap:0; align-items:stretch; }
 
 </div>
 
+<!-- ===== CREATE MODULE (custom animal types) ===== -->
+<div id="screen-createModule" class="screen">
+  <div class="box">
+    <button class="secondary" onclick="settingsHome()">← Home</button>
+    <h3 style="margin:10px 0 4px;">🧩 Create Your Own Module</h3>
+    <p style="color:#888;font-size:13px;margin:0;">For an animal that isn't built in. Give it a name, pick which kinds of logs it needs, and it gets its own tab — synced to farmOS just like the built-in modules.</p>
+  </div>
+
+  <div class="box">
+    <strong>🔍 Already in farmOS?</strong>
+    <p style="color:#888;font-size:13px;">Check for animal types already recorded in farmOS that don't have a module yet — no need to type the name by hand if it's already there.</p>
+    <button class="secondary wide" onclick="cm_scanFarmOS()">🔍 Scan farmOS</button>
+    <div id="cm-scan-results"></div>
+  </div>
+
+  <div class="box" id="cm-builder-box">
+    <label>Name *</label>
+    <input id="cm-name" placeholder="e.g. Rabbits, Alpacas, Guinea Pigs">
+    <label>Icon (emoji)</label>
+    <input id="cm-icon" placeholder="🐇" maxlength="4">
+    <label>farmOS animal type <span style="color:#888;font-size:12px;">(created automatically the first time you sync, if it doesn't already exist)</span></label>
+    <input id="cm-animaltype" placeholder="Defaults to the name above">
+
+    <label style="margin-top:14px;">Log types</label>
+    <p style="color:#888;font-size:13px;margin:2px 0 6px;">Turn off anything that doesn't apply — Hoof doesn't mean much for rabbits. Rename any of them to fit — Birth could be Litter, Kindling, whatever you call it.</p>
+    <div id="cm-logtypes"></div>
+    <button class="secondary" onclick="cm_addCustomLogType()" style="margin-top:8px;">➕ Add a log type of your own</button>
+    <div id="cm-custom-logtypes"></div>
+
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button onclick="cm_saveModule()" style="flex:1;margin:0;">💾 Create Module</button>
+      <button class="secondary" onclick="cm_cancelEdit()" id="cm-cancel-btn" style="display:none;margin:0;padding:12px 16px;">Cancel Edit</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <strong>Your Modules</strong>
+    <p style="color:#888;font-size:13px;">Tap Edit to change one, or Delete to remove it (its data stays in farmOS — only the module tab goes away).</p>
+    <div id="cm-existing-list"></div>
+  </div>
+</div>
+
 <!-- ===== FARMOS SYNC ===== -->
 <div id="screen-sync" class="screen">
   <div class="box">
@@ -1180,7 +1224,20 @@ header { flex-direction:column; gap:0; align-items:stretch; }
 </div><!-- end app-screens -->
 
 <!-- ===== STOCKDESK MODULE ===== -->
+<!-- ===== CUSTOM MODULES — shared placeholder container (Checkpoint 1) ===== -->
+<div id="module-custom" style="display:none;">
+  <div id="screen-custom-placeholder" class="screen active">
+    <div class="box">
+      <h3 id="cm-active-title" style="margin:0 0 8px;"></h3>
+      <p style="color:#888;font-size:14px;">Full tracking screens for this module are on the way in a future update.</p>
+      <p style="color:#ccc;font-size:14px;"><strong>Log types:</strong> <span id="cm-active-types"></span></p>
+      <button class="secondary wide" onclick="show('settings')" style="margin-top:12px;">⚙️ Edit this module in Settings</button>
+    </div>
+  </div>
+</div>
+
 <div id="module-stockdesk" style="display:none;">
+
 <!-- spinner: uses the single global #loading overlay above the module containers -->
 
 <!-- ===== DASHBOARD ===== -->
@@ -1967,7 +2024,7 @@ function readOwnerCheckboxes(cls) {
   return arr;
 }
 
-const APP_VERSION = "2026.09.17-0724"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
+const APP_VERSION = "2026.09.17-0749"; // STAMPED BY DEPLOY COMMAND — do not edit by hand
 
 // ===== MIGRATION: move old keys to farmdesk_ prefix (one-time, safe to run every startup) =====
 (function migrateLocalStorage() {
@@ -2166,7 +2223,7 @@ function showGoatScreenInternal(id) {
 }
 
 function show(id) {
-  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger'];
+  const appScreenIds = ['settings','sync','standalone','help','dashboard','scheduler','ledger','createModule'];
   if (appScreenIds.includes(id)) {
     showAppScreenInternal(id);
     pushNav('app', id);
@@ -4764,6 +4821,7 @@ function renderModuleToggles() {
           <button ${downDisabled} onclick="moveModule('${m.id}',1)" style="margin:0;padding:2px 8px;font-size:12px;background:#444;line-height:1;">▼</button>
         </div>
         <span style="flex:1;font-size:15px;">${m.label}</span>
+        ${m.isCustom ? `<button onclick="cm_deleteModule('${m.id}')" style="margin:0;padding:6px 10px;font-size:13px;background:#5a1a1a;">🗑️</button>` : ''}
         <button onclick="setModuleEnabled('${m.id}', ${!isOn})"
           style="margin:0;padding:6px 16px;font-size:13px;font-weight:bold;border-radius:20px;background:${isOn ? '#3a7' : '#555'};color:${isOn ? '#fff' : '#aaa'};">
           ${isOn ? 'ON' : 'OFF'}
@@ -17920,6 +17978,246 @@ async function be_pushEvent(log, token) {
   }
 }
 
+// ===== CUSTOM MODULE BUILDER — user-defined modules for animals that aren't =====
+// ===== built in (rabbits, alpacas, guinea pigs, etc). Stored as config, not =====
+// ===== code — this is the foundation only (Checkpoint 1): the builder screen  =====
+// ===== and registry wiring. A generic tracking engine that actually runs off  =====
+// ===== this config lands in a later update.                                  =====
+const CM_KEY = 'farmdesk_custom_modules';
+
+// The 8 log shapes every built-in animal module is made of — same set Goats
+// uses. A custom module picks which apply and can relabel any of them.
+const CM_BASE_LOG_TYPES = [
+  { id: 'weight',   defaultLabel: 'Weight',    icon: '⚖️' },
+  { id: 'vitals',   defaultLabel: 'Vitals',    icon: '🌡️' },
+  { id: 'med',      defaultLabel: 'Med',       icon: '💉' },
+  { id: 'proc',     defaultLabel: 'Procedure', icon: '✂️' },
+  { id: 'hoof',     defaultLabel: 'Hoof',      icon: '🐾' },
+  { id: 'obs',      defaultLabel: 'Observe',   icon: '👁️' },
+  { id: 'birth',    defaultLabel: 'Birth',     icon: '🍼' },
+  { id: 'activity', defaultLabel: 'Activity',  icon: '📝' }
+];
+// Field shapes a custom (not-built-in) log type can be built from — kept to a
+// short, reliable set rather than a fully open field designer.
+const CM_FIELD_SHAPES = [
+  { id: 'number_notes',        label: 'Number + Notes' },
+  { id: 'notes_only',          label: 'Notes only' },
+  { id: 'product_dose_notes',  label: 'Product + Dose + Notes' }
+];
+
+function loadCustomModules() { return JSON.parse(localStorage.getItem(CM_KEY) || '[]'); }
+function saveCustomModules(arr) { localStorage.setItem(CM_KEY, JSON.stringify(arr)); }
+
+let cm_editingId = null;      // null = creating new
+let cm_pendingCustomTypes = []; // this module's user-defined log types, while editing
+
+function cm_slugify(name) {
+  return 'custom_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+}
+
+function cm_renderLogTypeChecklist(cfg) {
+  var box = document.getElementById('cm-logtypes');
+  if (!box) return;
+  box.innerHTML = CM_BASE_LOG_TYPES.map(function(t) {
+    var existing = cfg && cfg.logTypes ? cfg.logTypes.filter(function(x) { return x.key === t.id; })[0] : null;
+    var enabled = existing ? existing.enabled : true;
+    var label = existing ? existing.label : t.defaultLabel;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;">' +
+      '<input type="checkbox" id="cm-lt-' + t.id + '-on" ' + (enabled ? 'checked' : '') + ' style="width:auto;margin:0;">' +
+      '<span style="width:28px;text-align:center;">' + t.icon + '</span>' +
+      '<input id="cm-lt-' + t.id + '-label" value="' + label.replace(/"/g, '&quot;') + '" style="flex:1;margin:0;padding:8px;">' +
+    '</div>';
+  }).join('');
+}
+
+function cm_addCustomLogType() {
+  cm_pendingCustomTypes.push({ id: 'ct_' + Date.now(), label: '', shape: 'notes_only' });
+  cm_renderCustomLogTypes();
+}
+function cm_removeCustomLogType(id) {
+  cm_pendingCustomTypes = cm_pendingCustomTypes.filter(function(t) { return t.id !== id; });
+  cm_renderCustomLogTypes();
+}
+function cm_renderCustomLogTypes() {
+  var box = document.getElementById('cm-custom-logtypes');
+  if (!box) return;
+  box.innerHTML = cm_pendingCustomTypes.map(function(t) {
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;">' +
+      '<input placeholder="e.g. Shearing" value="' + (t.label || '').replace(/"/g, '&quot;') + '" onchange="cm_updateCustomType(' + jsAttrStr(t.id) + ', \'label\', this.value)" style="flex:1;margin:0;padding:8px;">' +
+      '<select onchange="cm_updateCustomType(' + jsAttrStr(t.id) + ', \'shape\', this.value)" style="flex:1;margin:0;padding:8px;">' +
+        CM_FIELD_SHAPES.map(function(s) { return '<option value="' + s.id + '"' + (s.id === t.shape ? ' selected' : '') + '>' + s.label + '</option>'; }).join('') +
+      '</select>' +
+      '<button class="secondary" onclick="cm_removeCustomLogType(' + jsAttrStr(t.id) + ')" style="margin:0;padding:8px 12px;background:#5a1a1a;">✕</button>' +
+    '</div>';
+  }).join('');
+}
+function cm_updateCustomType(id, field, value) {
+  var t = cm_pendingCustomTypes.filter(function(x) { return x.id === id; })[0];
+  if (t) t[field] = value;
+}
+
+// Every animal_type term name already claimed by a built-in or custom
+// module — same lowercase-name matching Goats/Birds already use for their
+// own fetch filtering, so this stays accurate as modules are added.
+function cm_claimedAnimalTypes() {
+  var builtIn = ['goat'].concat(typeof BD_ANIMAL_TYPES !== 'undefined' ? BD_ANIMAL_TYPES : []);
+  var custom = loadCustomModules().map(function(m) { return (m.animalTypeTerm || '').toLowerCase(); });
+  return builtIn.concat(custom);
+}
+
+async function cm_scanFarmOS() {
+  var cfg = JSON.parse(localStorage.getItem('farmdesk_cfg') || '{}');
+  var resultBox = document.getElementById('cm-scan-results');
+  if (!cfg.url) { showToast('Connect to farmOS in Settings first'); return; }
+  if (resultBox) resultBox.innerHTML = '<p style="color:#888;font-size:13px;">Scanning…</p>';
+  try {
+    var token = await getCachedToken(cfg);
+    var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.api+json' };
+    var counts = {}; // lowercased term name -> { name (original case), count }
+    var url = apiUrl('/api/asset/animal?include=animal_type&page[limit]=100');
+    while (url) {
+      var res = await fetchWithTimeout(url, { headers: headers });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var data = await res.json();
+      var typeNames = {};
+      (data.included || []).forEach(function(t) { if (t.type === 'taxonomy_term--animal_type') typeNames[t.id] = t.attributes.name || ''; });
+      (data.data || []).forEach(function(a) {
+        var rel = a.relationships && a.relationships.animal_type && a.relationships.animal_type.data;
+        if (!rel) return; // untyped — nothing to suggest a module for
+        var name = typeNames[rel.id];
+        if (!name) return;
+        var key = name.toLowerCase();
+        if (!counts[key]) counts[key] = { name: name, count: 0 };
+        counts[key].count++;
+      });
+      url = (data.links && data.links.next && data.links.next.href) || null;
+    }
+    var claimed = cm_claimedAnimalTypes();
+    var unmatched = Object.values(counts).filter(function(c) { return claimed.indexOf(c.name.toLowerCase()) === -1; });
+    if (!resultBox) return;
+    if (!unmatched.length) { resultBox.innerHTML = '<p style="color:#888;font-size:13px;">Nothing unclaimed — every animal type in farmOS already has a module.</p>'; return; }
+    resultBox.innerHTML = unmatched.map(function(c) {
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #383838;">' +
+        '<span style="flex:1;">' + c.name + ' <span style="color:#888;font-size:12px;">(' + c.count + ' animal' + (c.count === 1 ? '' : 's') + ' in farmOS)</span></span>' +
+        '<button onclick="cm_prefillFromScan(' + jsAttrStr(c.name) + ')" style="margin:0;padding:8px 12px;font-size:13px;">Create Module</button>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    if (resultBox) resultBox.innerHTML = '<p style="color:#c66;font-size:13px;">Scan failed: ' + e.message + '</p>';
+  }
+}
+
+function cm_prefillFromScan(typeName) {
+  cm_openBuilder();
+  document.getElementById('cm-name').value = typeName;
+  document.getElementById('cm-animaltype').value = typeName;
+  document.getElementById('cm-builder-box').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cm_openBuilder() {
+  cm_editingId = null;
+  cm_pendingCustomTypes = [];
+  document.getElementById('cm-name').value = '';
+  document.getElementById('cm-icon').value = '';
+  document.getElementById('cm-animaltype').value = '';
+  document.getElementById('cm-cancel-btn').style.display = 'none';
+  cm_renderLogTypeChecklist(null);
+  cm_renderCustomLogTypes();
+  cm_renderExistingList();
+  show('createModule');
+}
+
+function cm_editModule(id) {
+  var cfg = loadCustomModules().filter(function(m) { return m.id === id; })[0];
+  if (!cfg) return;
+  cm_editingId = id;
+  cm_pendingCustomTypes = JSON.parse(JSON.stringify(cfg.customLogTypes || []));
+  document.getElementById('cm-name').value = cfg.name;
+  document.getElementById('cm-icon').value = cfg.icon;
+  document.getElementById('cm-animaltype').value = cfg.animalTypeTerm;
+  document.getElementById('cm-cancel-btn').style.display = '';
+  cm_renderLogTypeChecklist(cfg);
+  cm_renderCustomLogTypes();
+  document.getElementById('cm-builder-box').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cm_cancelEdit() { cm_openBuilder(); }
+
+function cm_deleteModule(id) {
+  var cfg = loadCustomModules().filter(function(m) { return m.id === id; })[0];
+  if (!cfg) return;
+  openConfirm({
+    title: 'Delete "' + cfg.name + '"?',
+    body: '<p style="color:#ccc;">Its tab will be removed from the app.</p><p style="color:#ccc;font-size:13px;">Anything already synced stays in farmOS — this only removes the module here.</p>',
+    confirmLabel: '🗑️ Delete Module',
+    danger: true,
+    onConfirm: function() {
+      var updated = loadCustomModules().filter(function(m) { return m.id !== id; });
+      saveCustomModules(updated);
+      showToast('Module deleted — reopen the app to update the header bar');
+      cm_renderExistingList();
+      if (typeof renderModuleToggles === 'function') renderModuleToggles();
+    }
+  });
+}
+
+function cm_renderExistingList() {
+  var box = document.getElementById('cm-existing-list');
+  if (!box) return;
+  var mods = loadCustomModules();
+  if (!mods.length) { box.innerHTML = '<p style="color:#888;font-size:13px;">None yet.</p>'; return; }
+  box.innerHTML = mods.map(function(m) {
+    var enabledCount = (m.logTypes || []).filter(function(t) { return t.enabled; }).length + (m.customLogTypes || []).length;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid #383838;">' +
+      '<span style="font-size:20px;">' + m.icon + '</span>' +
+      '<div style="flex:1;"><div>' + m.name + '</div><div style="color:#888;font-size:12px;">' + enabledCount + ' log type' + (enabledCount === 1 ? '' : 's') + ' · farmOS type: ' + m.animalTypeTerm + '</div></div>' +
+      '<button class="secondary" onclick="cm_editModule(' + jsAttrStr(m.id) + ')" style="margin:0;padding:8px 12px;font-size:13px;">✏️ Edit</button>' +
+      '<button class="secondary" onclick="cm_deleteModule(' + jsAttrStr(m.id) + ')" style="margin:0;padding:8px 12px;font-size:13px;background:#5a1a1a;">🗑️</button>' +
+    '</div>';
+  }).join('');
+}
+
+function cm_saveModule() {
+  var name = document.getElementById('cm-name').value.trim();
+  if (!name) { showToast('Enter a name'); return; }
+  var icon = document.getElementById('cm-icon').value.trim() || '🐾';
+  var animalTypeTerm = document.getElementById('cm-animaltype').value.trim() || name;
+
+  var logTypes = CM_BASE_LOG_TYPES.map(function(t) {
+    var onEl = document.getElementById('cm-lt-' + t.id + '-on');
+    var labelEl = document.getElementById('cm-lt-' + t.id + '-label');
+    return { key: t.id, enabled: onEl ? onEl.checked : true, label: (labelEl ? labelEl.value.trim() : '') || t.defaultLabel };
+  });
+  var customLogTypes = cm_pendingCustomTypes.filter(function(t) { return t.label.trim(); });
+  if (!logTypes.some(function(t) { return t.enabled; }) && !customLogTypes.length) {
+    showToast('Turn on at least one log type'); return;
+  }
+
+  var mods = loadCustomModules();
+  if (cm_editingId) {
+    var existing = mods.filter(function(m) { return m.id === cm_editingId; })[0];
+    if (existing) {
+      existing.name = name; existing.icon = icon; existing.animalTypeTerm = animalTypeTerm;
+      existing.logTypes = logTypes; existing.customLogTypes = customLogTypes;
+      // animalTypeUUID intentionally left alone — if the term name changed,
+      // the next sync resolves/creates the new one and updates it then.
+      if (existing.animalTypeTermAtCreation !== animalTypeTerm) existing.animalTypeUUID = null;
+    }
+  } else {
+    var id = cm_slugify(name);
+    if (mods.some(function(m) { return m.id === id; }) || MODULES.some(function(m) { return m.id === id; })) {
+      showToast('A module with that name already exists'); return;
+    }
+    mods.push({
+      id: id, name: name, icon: icon, animalTypeTerm: animalTypeTerm, animalTypeUUID: null,
+      logTypes: logTypes, customLogTypes: customLogTypes, createdAt: new Date().toISOString()
+    });
+  }
+  saveCustomModules(mods);
+  showToast((cm_editingId ? 'Updated' : 'Created') + ' — reopen the app to see it in the header bar');
+  cm_openBuilder();
+}
+
 const MODULES = [
   { id: 'goats', label: '🐐 Goats', title: '🐐 FarmDesk',
     containerId: 'module-goatdesk',
@@ -17988,6 +18286,40 @@ const MODULES = [
     onPullFromFarmOS: async function() { await refreshAssets(true); }
   }
 ];
+
+// ===== Merge custom (user-created) modules into the registry =====
+// Checkpoint 1: a shared placeholder screen only — pulling just resolves and
+// caches the farmOS animal_type term so it's ready once real tracking screens
+// land. Real per-module screens are a later update.
+function cm_activate(cfg) {
+  document.querySelectorAll('#module-custom .screen').forEach(function(s) { s.classList.remove('active'); });
+  var el = document.getElementById('screen-custom-placeholder'); if (el) el.classList.add('active');
+  var titleEl = document.getElementById('cm-active-title'); if (titleEl) titleEl.textContent = cfg.icon + ' ' + cfg.name;
+  var allTypes = (cfg.logTypes || []).filter(function(t) { return t.enabled; }).map(function(t) { return t.label; })
+    .concat((cfg.customLogTypes || []).map(function(t) { return t.label; }));
+  var typesEl = document.getElementById('cm-active-types'); if (typesEl) typesEl.textContent = allTypes.join(', ') || 'None selected';
+}
+async function cm_pullPlaceholder(cfg) {
+  var cfgLocal = JSON.parse(localStorage.getItem('farmdesk_cfg') || '{}');
+  if (!cfgLocal.url) return;
+  try {
+    var token = await getCachedToken(cfgLocal);
+    var uuid = await ensureAnimalTypeUUID(cfg.animalTypeTerm, token);
+    if (uuid) {
+      var mods = loadCustomModules();
+      var m = mods.filter(function(x) { return x.id === cfg.id; })[0];
+      if (m) { m.animalTypeUUID = uuid; saveCustomModules(mods); }
+    }
+  } catch(e) { /* best-effort — a later sync will retry */ }
+}
+loadCustomModules().forEach(function(cfg) {
+  MODULES.push({
+    id: cfg.id, label: cfg.icon + ' ' + cfg.name, title: cfg.icon + ' FarmDesk',
+    containerId: 'module-custom', isCustom: true,
+    onActivate: function() { cm_activate(cfg); },
+    onPullFromFarmOS: async function() { await cm_pullPlaceholder(cfg); }
+  });
+});
 
 const MODULE_KEY  = 'farmdesk_activeModule';
 const MODULES_CFG = 'farmdesk_modules_enabled'; // { stock: false, ... } — absent means enabled
